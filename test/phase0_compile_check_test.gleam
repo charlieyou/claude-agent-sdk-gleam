@@ -6,8 +6,8 @@
 import claude_agent_sdk
 import gleeunit
 
-// These imports will fail until FFI modules are implemented:
-// import claude_agent_sdk/internal/ffi
+// This import will fail until FFI module is implemented:
+import claude_agent_sdk/internal/ffi
 
 pub fn main() -> Nil {
   gleeunit.main()
