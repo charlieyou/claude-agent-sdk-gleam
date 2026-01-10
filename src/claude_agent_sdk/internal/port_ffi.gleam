@@ -83,6 +83,6 @@ fn decode_port_message(raw: Dynamic) -> Result(PortMessage, String) {
     Ok(#("eof", _)) -> Ok(Eof)
     Ok(#("timeout", _)) -> Ok(Timeout)
     Ok(#(_, _)) -> Error("Unknown FFI message tag")
-    Error(_) -> Error("Unknown FFI message format")
+    Error(_) -> Error("Invalid FFI message: expected 2-tuple with string tag")
   }
 }
