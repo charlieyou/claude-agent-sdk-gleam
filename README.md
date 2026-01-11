@@ -123,3 +123,226 @@ CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
    - `ANTHROPIC_API_KEY` environment variable
 
 Spec from https://gist.github.com/SamSaffron/603648958a8c18ceae34939a8951d417
+
+## Advanced Usage
+
+### Cancellation Recipe
+
+Because `next()` blocks waiting for messages, you cannot cancel a query from the same process. The solution is to spawn a dedicated process to own the stream and communicate via OTP subjects.
+
+**Dependencies:** This pattern requires `gleam_otp`:
+```bash
+gleam add gleam_otp
+```
+
+**Implementation:**
+
+```gleam
+import gleam/erlang/process.{type Subject}
+import gleam/otp/task
+import claude_agent_sdk_gleam.{
+  type QueryOptions, type QueryStream, type StreamError, type StreamItem,
+  EndOfStream, close, next, query,
+}
+
+/// Message type for cancellation signal
+pub type Cancel {
+  Cancel
+}
+
+/// Error wrapper for query startup failures
+pub type StreamResult {
+  QueryStartError(claude_agent_sdk_gleam.QueryError)
+}
+
+/// Run a query with cancellation support.
+/// Stream items are sent to result_subject.
+/// Send Cancel to cancel_subject to abort the query.
+pub fn query_with_cancellation(
+  prompt: String,
+  options: QueryOptions,
+  result_subject: Subject(Result(StreamItem, StreamResult)),
+  cancel_subject: Subject(Cancel),
+) -> task.Task(Nil) {
+  task.async(fn() {
+    // This spawned process owns the stream
+    case query(prompt, options) {
+      Error(e) -> {
+        process.send(result_subject, Error(QueryStartError(e)))
+      }
+      Ok(stream) -> {
+        consume_with_cancellation(stream, result_subject, cancel_subject)
+      }
+    }
+  })
+}
+
+fn consume_with_cancellation(
+  stream: QueryStream,
+  result_subject: Subject(Result(StreamItem, StreamResult)),
+  cancel_subject: Subject(Cancel),
+) -> Nil {
+  // Check for cancellation before each blocking read
+  case process.receive(cancel_subject, 0) {
+    Ok(Cancel) -> {
+      // Cancellation requested - close and exit
+      close(stream)
+      process.send(result_subject, Ok(EndOfStream))
+    }
+    Error(Nil) -> {
+      // No cancellation - proceed with blocking read
+      case next(stream) {
+        #(Ok(EndOfStream), _) -> {
+          process.send(result_subject, Ok(EndOfStream))
+        }
+        #(Ok(item), new_stream) -> {
+          process.send(result_subject, Ok(item))
+          consume_with_cancellation(new_stream, result_subject, cancel_subject)
+        }
+        #(Error(e), _) -> {
+          process.send(result_subject, Error(QueryStartError(e)))
+        }
+      }
+    }
+  }
+}
+```
+
+**Usage:**
+
+```gleam
+import gleam/erlang/process
+import gleam/otp/task
+
+pub fn main() {
+  let result_subject = process.new_subject()
+  let cancel_subject = process.new_subject()
+
+  // Start the cancellable query
+  let _task = query_with_cancellation(
+    "What is 2 + 2?",
+    default_options(),
+    result_subject,
+    cancel_subject,
+  )
+
+  // To cancel at any time:
+  // process.send(cancel_subject, Cancel)
+
+  // Receive results with a timeout
+  case process.receive(result_subject, 30_000) {
+    Ok(Ok(item)) -> handle_item(item)
+    Ok(Error(e)) -> handle_error(e)
+    Error(Nil) -> handle_timeout()
+  }
+}
+```
+
+**Key points:**
+1. The spawned task process owns the stream (created via `task.async`)
+2. Parent communicates via subjects—no shared mutable state
+3. Cancellation is checked between blocking `next()` calls (cooperative)
+4. `close()` is always called when cancelling to release port resources
+5. This pattern keeps the SDK non-actor while enabling cancellation
+
+### Basic Streaming Loop
+
+For simple consumption without cancellation:
+
+```gleam
+import claude_agent_sdk_gleam.{
+  type QueryStream, type StreamItem, EndOfStream, MessageEnvelope,
+  close, next, query, default_options,
+}
+import gleam/io
+
+pub fn stream_query(prompt: String) {
+  case query(prompt, default_options()) {
+    Error(e) -> io.println("Query failed: " <> string.inspect(e))
+    Ok(stream) -> consume_stream(stream)
+  }
+}
+
+fn consume_stream(stream: QueryStream) -> Nil {
+  case next(stream) {
+    #(Ok(EndOfStream), _) -> {
+      io.println("Stream complete")
+    }
+    #(Ok(MessageEnvelope(msg)), new_stream) -> {
+      io.println("Received: " <> msg.content)
+      consume_stream(new_stream)
+    }
+    #(Ok(_other), new_stream) -> {
+      // Skip non-message items
+      consume_stream(new_stream)
+    }
+    #(Error(e), stream) -> {
+      io.println("Error: " <> string.inspect(e))
+      close(stream)
+    }
+  }
+}
+```
+
+### Error Handling Patterns
+
+Handle recoverable vs terminal errors:
+
+```gleam
+import claude_agent_sdk_gleam.{
+  type StreamError, JsonParseError, PortError, UnexpectedMessage,
+}
+
+fn handle_stream_error(error: StreamError) -> ErrorAction {
+  case error {
+    // JSON parse errors may be recoverable (skip malformed message)
+    JsonParseError(_) -> Continue
+
+    // Port errors are terminal - the connection is broken
+    PortError(_) -> Stop
+
+    // Unexpected messages can be logged and skipped
+    UnexpectedMessage(_) -> Continue
+  }
+}
+
+type ErrorAction {
+  Continue
+  Stop
+}
+```
+
+### CI/Automation: Strict Warning Mode
+
+For pipelines where warnings should fail the build:
+
+```gleam
+import claude_agent_sdk_gleam.{
+  type StreamItem, ResultEnvelope, with_stream, query, default_options,
+}
+
+pub fn ci_query(prompt: String) -> Result(String, String) {
+  case query(prompt, default_options()) {
+    Error(e) -> Error("Query failed: " <> string.inspect(e))
+    Ok(stream) -> {
+      with_stream(stream, fn(s) {
+        check_for_warnings(s, "")
+      })
+    }
+  }
+}
+
+fn check_for_warnings(stream, acc) {
+  case next(stream) {
+    #(Ok(EndOfStream), _) -> Ok(acc)
+    #(Ok(ResultEnvelope(result)), new_stream) -> {
+      // Fail on any warnings in CI mode
+      case result.warnings {
+        [] -> check_for_warnings(new_stream, acc <> result.result)
+        warnings -> Error("Warnings detected: " <> string.inspect(warnings))
+      }
+    }
+    #(Ok(_), new_stream) -> check_for_warnings(new_stream, acc)
+    #(Error(e), _) -> Error("Stream error: " <> string.inspect(e))
+  }
+}
