@@ -561,7 +561,7 @@ pub fn decode_content_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) {
         _ -> Ok(UnknownBlock(raw))
       }
     }
-    // Missing type field - treat as unknown block
+    // Cannot decode type field - treat as unknown block
     Error(_) -> Ok(UnknownBlock(raw))
   }
 }
