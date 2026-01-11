@@ -245,7 +245,7 @@ export ANTHROPIC_API_KEY=your-key
 CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e
 
 # Run E2E via gleam test (runs unit + integration + E2E)
-CLAUDE_INTEGRATION_TEST=1 gleam test
+gleam test -- --e2e
 
 # Run specific scenario
 CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e -- --scenario E2E-02

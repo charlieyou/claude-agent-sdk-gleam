@@ -1,11 +1,14 @@
 import e2e/run_e2e
 import gleam/io
 import gleeunit/should
-import support/env_helpers.{get_env}
+import gleam/list
+
+@external(erlang, "claude_agent_sdk_ffi", "get_plain_arguments")
+fn get_plain_arguments() -> List(String)
 
 pub fn e2e_runner_test() {
-  case get_env("CLAUDE_INTEGRATION_TEST") {
-    Ok("1") -> {
+  case list.contains(get_plain_arguments(), "--e2e") {
+    True -> {
       case run_e2e.run([]) {
         Ok(summary) -> run_e2e.failed(summary) |> should.equal(0)
         Error(message) -> {
@@ -14,8 +17,8 @@ pub fn e2e_runner_test() {
         }
       }
     }
-    _ -> {
-      io.println("[SKIP] E2E runner disabled (set CLAUDE_INTEGRATION_TEST=1)")
+    False -> {
+      io.println("[SKIP] E2E runner disabled (pass --e2e to gleam test)")
     }
   }
 }

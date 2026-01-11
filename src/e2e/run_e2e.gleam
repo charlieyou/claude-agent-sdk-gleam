@@ -132,7 +132,6 @@ fn run_with_config(config: Config) -> Result(Summary, String) {
       Ok(Summary(0, 0, 0))
     }
     False -> {
-      use _ <- result.try(require_integration_env())
       use cli_path <- result.try(resolve_cli_path())
       use #(cli_version_raw, cli_version_parsed) <-
         result.try(resolve_cli_version(cli_path))
@@ -225,17 +224,6 @@ fn run_with_config(config: Config) -> Result(Summary, String) {
 
       Ok(summary)
     }
-  }
-}
-
-fn require_integration_env() -> Result(Nil, String) {
-  case get_env("CLAUDE_INTEGRATION_TEST") {
-    Some("1") -> Ok(Nil)
-    _ ->
-      Error(
-        "E2E tests require CLAUDE_INTEGRATION_TEST=1\n"
-        <> "Set this environment variable to enable E2E scenarios.",
-      )
   }
 }
 
