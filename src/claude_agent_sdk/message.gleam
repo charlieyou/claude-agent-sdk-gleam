@@ -241,9 +241,11 @@ pub type McpServerStatus {
 /// Permission denial record.
 pub type PermissionDenial {
   PermissionDenial(
-    /// Tool that was denied
-    tool: String,
-    /// Reason for denial
-    reason: Option(String),
+    /// Name of the tool that was denied
+    tool_name: String,
+    /// Tool use ID of the denied request
+    tool_use_id: String,
+    /// Input that was passed to the tool
+    tool_input: Dynamic,
   )
 }

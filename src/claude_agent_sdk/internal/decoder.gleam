@@ -261,13 +261,10 @@ pub fn decode_permission_denial(
   raw: Dynamic,
 ) -> Result(PermissionDenial, DecodeError) {
   let decoder = {
-    use tool <- decode.field("tool", decode.string)
-    use reason <- decode.optional_field(
-      "reason",
-      None,
-      decode.string |> decode.map(Some),
-    )
-    decode.success(PermissionDenial(tool:, reason:))
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_use_id <- decode.field("tool_use_id", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    decode.success(PermissionDenial(tool_name:, tool_use_id:, tool_input:))
   }
   case decode.run(raw, decoder) {
     Ok(denial) -> Ok(denial)
