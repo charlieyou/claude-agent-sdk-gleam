@@ -1,5 +1,6 @@
-//// CLI argument building from QueryOptions.
-//// Internal module - converts QueryOptions to List(String) for CLI invocation.
+//// CLI argument building and version detection types.
+//// Internal module - converts QueryOptions to List(String) for CLI invocation,
+//// and provides pure version parsing functions for unit testing.
 
 import claude_agent_sdk/options.{
   type PermissionMode, type QueryOptions, AcceptEdits, BypassPermissions, Plan,
@@ -8,7 +9,155 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
+
+// ============================================================================
+// Version Detection Types
+// ============================================================================
+
+/// Parsed CLI version with semantic version components.
+/// The raw field stores the canonical "major.minor.patch" string (no prerelease suffix).
+pub type CliVersion {
+  CliVersion(major: Int, minor: Int, patch: Int, raw: String)
+}
+
+/// Version that could not be parsed from CLI output.
+/// Standalone type allowing caller to decide: fail-fast (default) or permissive.
+pub type UnknownVersion {
+  UnknownVersion(raw: String)
+}
+
+/// Minimum CLI version required by SDK (1.0.0)
+pub const minimum_cli_version = CliVersion(1, 0, 0, "1.0.0")
+
+// ============================================================================
+// Version Parsing Functions
+// ============================================================================
+
+/// Parse version string from CLI output.
+/// Extracts first semver pattern (major.minor.patch) from various formats:
+/// - "claude v1.2.3\n" -> Ok(CliVersion(1,2,3,"1.2.3"))
+/// - "1.2.3" -> Ok(CliVersion(1,2,3,"1.2.3"))
+/// - "v1.2.3" -> Ok(CliVersion(1,2,3,"1.2.3"))
+/// - "Claude Code CLI 1.2.3-beta.1" -> Ok(CliVersion(1,2,3,"1.2.3"))
+/// - "  1.2.3  \n" -> Ok (whitespace tolerant)
+/// - "garbage" -> Error(Nil)
+/// - "" -> Error(Nil)
+pub fn parse_version_string(output: String) -> Result(CliVersion, Nil) {
+  // Trim whitespace and convert to graphemes for scanning
+  let trimmed = string.trim(output)
+  find_version_in_string(trimmed)
+}
+
+/// Scan string for first occurrence of digit sequence that could be a version.
+fn find_version_in_string(s: String) -> Result(CliVersion, Nil) {
+  let graphemes = string.to_graphemes(s)
+  scan_for_digit_start(graphemes)
+}
+
+/// Scan graphemes looking for a digit that might start a version number.
+fn scan_for_digit_start(graphemes: List(String)) -> Result(CliVersion, Nil) {
+  case graphemes {
+    [] -> Error(Nil)
+    [g, ..rest] ->
+      case is_digit(g) {
+        True -> {
+          // Try to parse version starting here
+          case try_parse_version_at(graphemes) {
+            Ok(version) -> Ok(version)
+            Error(_) -> scan_for_digit_start(rest)
+          }
+        }
+        False -> scan_for_digit_start(rest)
+      }
+  }
+}
+
+/// Try to parse "major.minor.patch" starting at current position.
+fn try_parse_version_at(graphemes: List(String)) -> Result(CliVersion, Nil) {
+  // Parse major
+  use #(major_str, rest1) <- result.try(take_digits(graphemes, ""))
+  use major <- result.try(int.parse(major_str))
+
+  // Expect dot
+  use rest2 <- result.try(expect_dot(rest1))
+
+  // Parse minor
+  use #(minor_str, rest3) <- result.try(take_digits(rest2, ""))
+  use minor <- result.try(int.parse(minor_str))
+
+  // Expect dot
+  use rest4 <- result.try(expect_dot(rest3))
+
+  // Parse patch
+  use #(patch_str, _rest5) <- result.try(take_digits(rest4, ""))
+  use patch <- result.try(int.parse(patch_str))
+
+  let raw = major_str <> "." <> minor_str <> "." <> patch_str
+  Ok(CliVersion(major, minor, patch, raw))
+}
+
+/// Take consecutive digits from the start of the list.
+fn take_digits(
+  graphemes: List(String),
+  acc: String,
+) -> Result(#(String, List(String)), Nil) {
+  case graphemes {
+    [] ->
+      case acc {
+        "" -> Error(Nil)
+        _ -> Ok(#(acc, []))
+      }
+    [g, ..rest] ->
+      case is_digit(g) {
+        True -> take_digits(rest, acc <> g)
+        False ->
+          case acc {
+            "" -> Error(Nil)
+            _ -> Ok(#(acc, graphemes))
+          }
+      }
+  }
+}
+
+/// Expect a dot at the start of the list.
+fn expect_dot(graphemes: List(String)) -> Result(List(String), Nil) {
+  case graphemes {
+    [".", ..rest] -> Ok(rest)
+    _ -> Error(Nil)
+  }
+}
+
+/// Check if a single-character string is a digit 0-9.
+fn is_digit(s: String) -> Bool {
+  case s {
+    "0" | "1" | "2" | "3" | "4" | "5" | "6" | "7" | "8" | "9" -> True
+    _ -> False
+  }
+}
+
+/// Single source of truth for version comparison.
+/// Returns True if `version >= minimum` using semantic versioning.
+pub fn version_meets_minimum(version: CliVersion, minimum: CliVersion) -> Bool {
+  let CliVersion(maj, min, patch, _) = version
+  let CliVersion(min_maj, min_min, min_patch, _) = minimum
+  maj > min_maj
+  || { maj == min_maj && min > min_min }
+  || { maj == min_maj && min == min_min && patch >= min_patch }
+}
+
+/// Format a human-readable error message for version mismatch.
+pub fn format_version_error(
+  detected: CliVersion,
+  required: CliVersion,
+) -> String {
+  "CLI version "
+  <> detected.raw
+  <> " is below minimum required "
+  <> required.raw
+  <> ". Run: npm update -g @anthropic-ai/claude-code"
+}
 
 /// Build CLI arguments from QueryOptions and prompt.
 /// Fixed arguments are always included: --print --output-format stream-json --verbose
