@@ -13,7 +13,7 @@ import claude_agent_sdk/error.{
   type ErrorDiagnostic, type StreamError, type Warning, CleanExitNoResult,
   IncompleteLastLine, NonZeroExitAfterResult, UnexpectedMessageAfterResult,
   Warning, diagnose_exit_code,
-} as error_module
+}
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/internal/port_ffi.{type Port, Data, ExitStatus, Timeout}
@@ -698,7 +698,7 @@ fn receive_from_source(
       #(
         Error(NextProcessError(
           -1,
-          error_module.ErrorDiagnostic(
+          error.ErrorDiagnostic(
             ..diagnostic,
             exit_code_hint: "Source error: " <> msg,
           ),
@@ -769,7 +769,7 @@ fn handle_exit_and_yield(
             Ok(s) -> Some(s)
             Error(_) -> Some("<invalid utf-8>")
           }
-          error_module.ErrorDiagnostic(
+          error.ErrorDiagnostic(
             ..base_diagnostic,
             last_non_json_line: last_line,
           )
@@ -911,13 +911,12 @@ pub type FoldAction(a) {
 /// Convert NextError to StreamError for collect/fold APIs.
 fn next_error_to_stream_error(err: NextError) -> StreamError {
   case err {
-    NextProcessError(code, diagnostic) ->
-      error_module.ProcessError(code, diagnostic)
-    NextBufferOverflow -> error_module.BufferOverflow
+    NextProcessError(code, diagnostic) -> error.ProcessError(code, diagnostic)
+    NextBufferOverflow -> error.BufferOverflow
     NextTooManyDecodeErrors(count, last) ->
-      error_module.TooManyDecodeErrors(count, last)
-    NextJsonDecodeError(line, msg) -> error_module.JsonDecodeError(line, msg)
-    NextUnexpectedMessageError(raw) -> error_module.UnexpectedMessageError(raw)
+      error.TooManyDecodeErrors(count, last)
+    NextJsonDecodeError(line, msg) -> error.JsonDecodeError(line, msg)
+    NextUnexpectedMessageError(raw) -> error.UnexpectedMessageError(raw)
   }
 }
 
@@ -937,9 +936,9 @@ fn next_error_to_stream_error(err: NextError) -> StreamError {
 ///
 /// **STABLE API**: Breaking changes require major version bump.
 pub fn with_stream(
-  result: Result(QueryStream, error_module.QueryError),
+  result: Result(QueryStream, error.QueryError),
   f: fn(QueryStream) -> a,
-) -> Result(a, error_module.QueryError) {
+) -> Result(a, error.QueryError) {
   case result {
     Error(e) -> Error(e)
     Ok(stream) -> {
@@ -1000,7 +999,7 @@ fn collect_items_loop(
       )
     Error(err) -> {
       let stream_error = next_error_to_stream_error(err)
-      case error_module.is_terminal(stream_error) {
+      case error.is_terminal(stream_error) {
         True ->
           CollectResult(
             items: list.reverse(items),
@@ -1062,7 +1061,7 @@ fn collect_messages_loop(
       )
     Error(err) -> {
       let stream_error = next_error_to_stream_error(err)
-      case error_module.is_terminal(stream_error) {
+      case error.is_terminal(stream_error) {
         True ->
           CollectResult(
             items: list.reverse(messages),
@@ -1121,7 +1120,7 @@ fn fold_stream_loop(
     }
     Error(err) -> {
       let stream_error = next_error_to_stream_error(err)
-      case error_module.is_terminal(stream_error) {
+      case error.is_terminal(stream_error) {
         True -> {
           // Stream already closed by next() on terminal error
           #(acc, Some(stream_error))
