@@ -531,7 +531,7 @@ fn tool_use_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
     Ok(block) -> decode.success(block)
     Error(errors) ->
       decode.failure(
-        ToolUseBlock(id: "", name: "", input: raw),
+        ToolUseBlock(id: "", name: "", input: dynamic.nil()),
         "ToolUseBlock missing required field: " <> format_decode_errors(errors),
       )
   }
