@@ -66,3 +66,9 @@ fn ffi_delete(table: Table, key: Dynamic) -> Dynamic
 /// Each call returns a new unique reference that can be used as a key.
 @external(erlang, "erlang", "make_ref")
 pub fn make_ref() -> Dynamic
+
+/// Rescue a function call, catching panics and other exceptions.
+/// Returns Ok(result) on success, Error(message) on panic/throw/exit.
+/// Used to test that panics still trigger cleanup (e.g., with_stream closes port on panic).
+@external(erlang, "claude_agent_sdk_ffi", "rescue")
+pub fn rescue(thunk: fn() -> a) -> Result(a, String)

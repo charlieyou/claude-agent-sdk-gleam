@@ -17,6 +17,7 @@ import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/internal/port_ffi.{type Port, Data, ExitStatus, Timeout}
 import claude_agent_sdk/message.{type MessageEnvelope, Result}
+import claude_agent_sdk/runner.{type Handle, type Runner}
 import gleam/bit_array
 import gleam/int
 import gleam/list
@@ -68,6 +69,19 @@ pub type StreamState {
 }
 
 // ============================================================================
+// StreamSource: Abstraction over port or runner-based stream
+// ============================================================================
+
+/// Internal abstraction for the underlying stream source.
+/// Either a direct BEAM port (production) or a Runner+Handle (testing).
+type StreamSource {
+  /// Direct BEAM port handle (production use)
+  PortSource(Port)
+  /// Runner with handle for mock-based testing
+  RunnerSource(runner: Runner, handle: Handle)
+}
+
+// ============================================================================
 // QueryStreamInternal: Internal state record
 // ============================================================================
 
@@ -75,8 +89,8 @@ pub type StreamState {
 /// Not exported - only accessible via QueryStream opaque type.
 type QueryStreamInternal {
   QueryStreamInternal(
-    /// Direct BEAM port handle
-    port: Port,
+    /// Stream source: either Port or Runner+Handle
+    source: StreamSource,
     /// Line reassembly buffer for partial reads
     buffer: BitArray,
     /// Current state in the stream lifecycle
@@ -109,14 +123,28 @@ pub opaque type QueryStream {
 }
 
 // ============================================================================
-// Constructor (internal use only)
+// Constructors
 // ============================================================================
 
 /// Create a new QueryStream from a port.
 /// Internal only - called by query() after successful spawn.
 pub fn new(port: Port) -> QueryStream {
   QueryStream(QueryStreamInternal(
-    port: port,
+    source: PortSource(port),
+    buffer: <<>>,
+    state: Streaming,
+    consecutive_decode_errors: 0,
+    drain_count: 0,
+    closed: False,
+    result_seen: False,
+  ))
+}
+
+/// Create a new QueryStream from a Runner and Handle.
+/// Used for testing with test_runner() to avoid spawning real subprocesses.
+pub fn new_from_runner(runner: Runner, handle: Handle) -> QueryStream {
+  QueryStream(QueryStreamInternal(
+    source: RunnerSource(runner:, handle:),
     buffer: <<>>,
     state: Streaming,
     consecutive_decode_errors: 0,
@@ -160,14 +188,8 @@ pub fn is_closed(stream: QueryStream) -> Bool {
 /// Returns an updated QueryStream with closed=True. Always use the returned
 /// stream for subsequent operations to maintain correct state.
 pub fn close(stream: QueryStream) -> QueryStream {
-  let QueryStream(internal) = stream
-  case internal.closed {
-    True -> stream
-    False -> {
-      port_ffi.ffi_close_port(internal.port)
-      QueryStream(QueryStreamInternal(..internal, closed: True, state: Closed))
-    }
-  }
+  // Delegate to mark_closed which handles both state update and actual cleanup
+  mark_closed(stream)
 }
 
 // ============================================================================
@@ -389,14 +411,21 @@ pub fn mark_pending_end_of_stream(stream: QueryStream) -> QueryStream {
   QueryStream(QueryStreamInternal(..internal, state: PendingEndOfStream))
 }
 
-/// Transition to Closed state (terminal).
+/// Transition to Closed state (terminal) and perform cleanup.
 /// Idempotent: returns unchanged stream if already closed.
+/// This function both updates state AND performs actual resource cleanup.
 pub fn mark_closed(stream: QueryStream) -> QueryStream {
   let QueryStream(internal) = stream
   case internal.closed {
     True -> stream
-    False ->
+    False -> {
+      // Perform actual cleanup based on source type
+      case internal.source {
+        PortSource(port) -> port_ffi.ffi_close_port(port)
+        RunnerSource(runner:, handle:) -> runner.close(runner, handle)
+      }
       QueryStream(QueryStreamInternal(..internal, state: Closed, closed: True))
+    }
   }
 }
 
@@ -523,9 +552,9 @@ fn next_receive(
       }
     }
     NeedMoreData -> {
-      // Need to receive more data from port
+      // Need to receive more data from source
       let updated = set_buffer(stream, new_buffer)
-      receive_from_port(updated)
+      receive_from_source(updated)
     }
     // These shouldn't occur from read_line, but handle gracefully
     PortClosed | ExitReceived(_) -> {
@@ -535,28 +564,48 @@ fn next_receive(
   }
 }
 
-/// Receive data from the port based on current state's timeout behavior.
-fn receive_from_port(
+/// Receive data from the source based on current state's timeout behavior.
+fn receive_from_source(
   stream: QueryStream,
 ) -> #(Result(StreamItem, NextError), QueryStream) {
   let QueryStream(internal) = stream
 
-  // Determine timeout based on state
-  let port_result = case internal.state {
-    // Streaming: block indefinitely
-    Streaming -> port_ffi.receive_blocking(internal.port)
-    // ResultReceived: use drain timeout (100ms)
-    ResultReceived ->
-      port_ffi.receive_timeout(
-        internal.port,
-        constants.post_result_drain_timeout_ms,
-      )
-    // PendingEndOfStream/Closed: shouldn't get here, but use minimal timeout
-    PendingEndOfStream | Closed -> port_ffi.receive_timeout(internal.port, 0)
+  // Read from source (port or runner)
+  let read_result = case internal.source {
+    PortSource(port) -> {
+      // Determine timeout based on state
+      let port_result = case internal.state {
+        // Streaming: block indefinitely
+        Streaming -> port_ffi.receive_blocking(port)
+        // ResultReceived: use drain timeout (100ms)
+        ResultReceived ->
+          port_ffi.receive_timeout(port, constants.post_result_drain_timeout_ms)
+        // PendingEndOfStream/Closed: shouldn't get here, but use minimal timeout
+        PendingEndOfStream | Closed -> port_ffi.receive_timeout(port, 0)
+      }
+      // Convert port result to unified format
+      case port_result {
+        Ok(Data(bytes)) -> SourceData(bytes)
+        Ok(ExitStatus(code)) -> SourceExitStatus(code)
+        Ok(Timeout) -> SourceTimeout
+        Ok(port_ffi.Eof) -> SourceEof
+        Error(msg) -> SourceError(msg)
+      }
+    }
+    RunnerSource(runner:, handle:) -> {
+      // Runner doesn't support timeout, but mock can simulate it
+      case runner.read_next(runner, handle) {
+        runner.Data(bytes) -> SourceData(bytes)
+        runner.ExitStatus(code) -> SourceExitStatus(code)
+        runner.Eof -> SourceEof
+        runner.ReadError(msg) -> SourceError(msg)
+      }
+    }
   }
 
-  case port_result {
-    Ok(Data(bytes)) -> {
+  // Process the read result
+  case read_result {
+    SourceData(bytes) -> {
       // Append to buffer and try to read a line
       case append_to_buffer(internal.buffer, bytes) {
         Ok(new_buffer) -> {
@@ -574,11 +623,11 @@ fn receive_from_port(
         }
       }
     }
-    Ok(ExitStatus(code)) -> {
+    SourceExitStatus(code) -> {
       // Handle exit status via state machine
       handle_exit_and_yield(stream, code)
     }
-    Ok(Timeout) -> {
+    SourceTimeout -> {
       // Timeout during drain - treat as end of stream
       case internal.state {
         ResultReceived -> {
@@ -595,13 +644,13 @@ fn receive_from_port(
         }
       }
     }
-    Ok(port_ffi.Eof) -> {
+    SourceEof -> {
       // EOF without exit status - unusual but handle gracefully
       let closed = mark_closed(stream)
       #(Ok(EndOfStream), closed)
     }
-    Error(msg) -> {
-      // Port error - treat as process error with unknown code
+    SourceError(msg) -> {
+      // Source error - treat as process error with unknown code
       let diagnostic = diagnose_exit_code(-1, True)
       let closed = mark_closed(stream)
       #(
@@ -609,13 +658,22 @@ fn receive_from_port(
           -1,
           error.ErrorDiagnostic(
             ..diagnostic,
-            exit_code_hint: "Port error: " <> msg,
+            exit_code_hint: "Source error: " <> msg,
           ),
         )),
         closed,
       )
     }
   }
+}
+
+/// Internal type for unified read results from any source.
+type SourceReadResult {
+  SourceData(BitArray)
+  SourceExitStatus(Int)
+  SourceTimeout
+  SourceEof
+  SourceError(String)
 }
 
 /// Handle exit status and yield appropriate result.
@@ -814,10 +872,15 @@ pub fn with_stream(
   case result {
     Error(e) -> Error(e)
     Ok(stream) -> {
-      let value = f(stream)
-      // Always close, regardless of how f returns
+      // Use rescue to catch panics and ensure cleanup
+      let callback_result = port_ffi.rescue(fn() { f(stream) })
+      // Always close, regardless of how f returns (including panic)
       let _ = close(stream)
-      Ok(value)
+      // Re-raise if callback panicked
+      case callback_result {
+        Ok(value) -> Ok(value)
+        Error(panic_msg) -> panic as panic_msg
+      }
     }
   }
 }

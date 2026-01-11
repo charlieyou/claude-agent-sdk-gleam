@@ -159,3 +159,13 @@ fn decode_port_message(raw: Dynamic) -> Result(PortMessage, String) {
       )
   }
 }
+
+// ============================================================================
+// Panic Recovery (for resource safety)
+// ============================================================================
+
+/// Rescue a function call, catching panics and other exceptions.
+/// Returns Ok(result) on success, Error(message) on panic/throw/exit.
+/// Used to ensure cleanup (e.g., with_stream closes port) even when callbacks panic.
+@external(erlang, "claude_agent_sdk_ffi", "rescue")
+pub fn rescue(thunk: fn() -> a) -> Result(a, String)

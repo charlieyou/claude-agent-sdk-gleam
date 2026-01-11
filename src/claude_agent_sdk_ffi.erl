@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, find_cli_path/1]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, find_cli_path/1, rescue/1]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -99,4 +99,24 @@ find_cli_path(Name) ->
     case os:find_executable(NameStr) of
         false -> {error, <<"not_found">>};
         Path -> {ok, list_to_binary(Path)}
+    end.
+
+%% Rescue function to catch panics for testing.
+%% Calls the thunk and returns {ok, Result} on success or {error, Reason} on panic/throw/exit.
+%% Used to test that panics still trigger cleanup (e.g., with_stream closes port on panic).
+rescue(Thunk) ->
+    try
+        Result = Thunk(),
+        {ok, Result}
+    catch
+        error:#{gleam_error := panic, message := Message} ->
+            {error, Message};
+        error:#{gleam_error := panic} ->
+            {error, <<"panic">>};
+        error:Reason ->
+            {error, list_to_binary(io_lib:format("~p", [Reason]))};
+        throw:Reason ->
+            {error, list_to_binary(io_lib:format("throw: ~p", [Reason]))};
+        exit:Reason ->
+            {error, list_to_binary(io_lib:format("exit: ~p", [Reason]))}
     end.
