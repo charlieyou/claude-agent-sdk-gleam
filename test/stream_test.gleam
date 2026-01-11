@@ -804,6 +804,38 @@ pub fn next_exit_after_result_nonzero_yields_warning_test() {
   }
 }
 
+// Test: Result then exit_status=0 -> normal EndOfStream (from plan line 4698)
+// exit_status=0 after Result is ignored silently - no warning needed
+pub fn next_result_then_exit_zero_yields_normal_end_test() {
+  // Output a result then exit with code 0
+  let result_json =
+    "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}"
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "echo '" <> result_json <> "' && exit 0"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // Get the result message
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Ok(Message(_)) -> Nil
+    _ -> should.fail()
+  }
+  s1 |> get_result_seen |> should.be_true
+
+  // Next call should yield EndOfStream directly (exit 0 after Result is ignored)
+  let #(result2, s2) = next(s1)
+  case result2 {
+    Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+
+  s2 |> is_closed |> should.be_true
+}
+
 pub fn next_exit_before_result_nonzero_yields_process_error_test() {
   // Exit with non-zero code without a result
   let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 1"], "/tmp")
