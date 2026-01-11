@@ -40,10 +40,12 @@ receive_port_msg_timeout(Port, TimeoutMs) ->
     end.
 
 %% Closes the port and drains any remaining messages.
+%% Drains first to capture any final messages (like exit_status) before close.
 %% Uses bounded drain: max 100 messages, 50ms timeout per message.
 close_port(Port) ->
+    drain_port_messages(Port, 100),
     erlang:port_close(Port),
-    drain_port_messages(Port, 100).
+    ok.
 
 %% Internal: drains port messages from mailbox with bounded iterations.
 drain_port_messages(_Port, 0) ->

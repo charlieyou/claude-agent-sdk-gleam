@@ -2,6 +2,7 @@
 /// This module provides the Gleam interface to claude_agent_sdk_ffi.erl
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/string
 
 /// Port reference - opaque wrapper around Erlang port term
 /// Represented as Dynamic internally; type safety comes from the opaque API
@@ -73,16 +74,28 @@ fn decode_port_message(raw: Dynamic) -> Result(PortMessage, String) {
     Ok(#("data", payload)) ->
       case decode.run(payload, decode.bit_array) {
         Ok(bytes) -> Ok(Data(bytes))
-        Error(_) -> Error("Invalid data payload: expected BitArray")
+        Error(errors) ->
+          Error(
+            "Invalid data payload: expected BitArray. Details: "
+            <> string.inspect(errors),
+          )
       }
     Ok(#("exit_status", payload)) ->
       case decode.run(payload, decode.int) {
         Ok(code) -> Ok(ExitStatus(code))
-        Error(_) -> Error("Invalid exit_status: expected Int")
+        Error(errors) ->
+          Error(
+            "Invalid exit_status: expected Int. Details: "
+            <> string.inspect(errors),
+          )
       }
     Ok(#("eof", _)) -> Ok(Eof)
     Ok(#("timeout", _)) -> Ok(Timeout)
     Ok(#(_, _)) -> Error("Unknown FFI message tag")
-    Error(_) -> Error("Invalid FFI message: expected 2-tuple with string tag")
+    Error(errors) ->
+      Error(
+        "Invalid FFI message: expected 2-tuple with string tag. Details: "
+        <> string.inspect(errors),
+      )
   }
 }
