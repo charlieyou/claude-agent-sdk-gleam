@@ -18,6 +18,8 @@ pub type PreflightResult {
   NdjsonImpure
   /// Preflight check timed out
   PreflightTimeout
+  /// CLI executable not found in PATH
+  CliMissing
 }
 
 /// Timeout in milliseconds for preflight checks
@@ -181,7 +183,7 @@ pub fn check_cli_help_flags(cli_path: String) -> Result(Nil, String) {
 /// (useful for testing older CLI versions).
 pub fn preflight_ndjson_check() -> PreflightResult {
   case find_executable("claude") {
-    Error(_) -> PreflightTimeout
+    Error(_) -> CliMissing
     Ok(cli_path) -> {
       // Run a simple print command with streaming JSON
       let args = ["--print", "--output-format", "stream-json", "test"]
@@ -209,6 +211,8 @@ fn validate_ndjson_output(output: String) -> PreflightResult {
     |> list.filter(fn(line) { string.trim(line) != "" })
 
   case lines {
+    // Empty output is OK: if exit code was non-zero, run_command_with_timeout
+    // already returned Error. Otherwise CLI legitimately produced no output.
     [] -> NdjsonPure
     _ -> {
       let all_valid =
