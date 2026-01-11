@@ -4,6 +4,8 @@
 
 These fixtures are captured from **real Claude CLI output** (version 2.1.3).
 
+**Note**: `result_error.json` is intentionally synthetic because error scenarios are difficult to capture naturally from the CLI. It matches the real CLI schema structure.
+
 ## Capture Information
 
 - **CLI version**: 2.1.3 (Claude Code)
@@ -22,8 +24,8 @@ These fixtures are captured from **real Claude CLI output** (version 2.1.3).
 | `assistant_message.json` | Assistant message with tool_use content block |
 | `user_message.json` | User message with tool_result content block |
 | `result_success.json` | Successful result message with usage/cost data |
-| `result_error.json` | Error result message (synthetic - matches CLI schema) |
-| `cli_help_excerpt.txt` | Full `claude --help` output for flag validation |
+| `result_error.json` | Error result message (synthetic - see note above) |
+| `cli_help.txt` | Full `claude --help` output for flag validation |
 
 ## Compatibility Test Fixtures
 
@@ -47,7 +49,7 @@ Per plan section "Schema Source and Forward Compatibility":
 
 ## Required CLI Flags
 
-The following flags are required for SDK operation (verified in `cli_help_excerpt.txt`):
+The following flags are required for SDK operation (verified in `cli_help.txt`):
 
 - `--print` / `-p`: Non-interactive output mode
 - `--output-format`: Supports `stream-json` for structured output
