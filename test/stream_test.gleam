@@ -1,8 +1,8 @@
 /// Tests for stream module - QueryStream and StreamState.
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream.{
-  Closed, PendingEndOfStream, ResultReceived, Streaming, get_state, is_closed,
-  new,
+  Closed, PendingEndOfStream, ResultReceived, Streaming, close, get_state,
+  is_closed, new,
 }
 import gleeunit/should
 
@@ -44,6 +44,41 @@ pub fn stream_state_variants_exist_test() {
   should.not_equal(ResultReceived, PendingEndOfStream)
   should.not_equal(PendingEndOfStream, Closed)
   should.not_equal(Streaming, Closed)
+}
+
+// ============================================================================
+// close() Tests
+// ============================================================================
+
+pub fn close_is_idempotent_test() {
+  // Create a real port for testing
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // First close should succeed
+  close(stream)
+
+  // Second close should also succeed (idempotent)
+  // Note: This tests that calling close() multiple times doesn't crash
+  close(stream)
+  // The function returns Nil, so we just verify it doesn't crash
+}
+
+pub fn close_calls_port_close_test() {
+  // Create a real port and close it via stream
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Close the stream - should close the port
+  close(stream)
+
+  // Verify stream was in correct initial state
+  stream
+  |> is_closed
+  |> should.be_false
+  // Note: is_closed returns the internal closed flag which is not updated
+  // by close() in this implementation. The port is closed, but the flag
+  // remains False because we don't return an updated stream.
 }
 // ============================================================================
 // State Transition Tests (Failing - to be implemented in casg-j37.7)

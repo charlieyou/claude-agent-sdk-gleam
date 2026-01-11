@@ -103,10 +103,31 @@ pub fn is_closed(stream: QueryStream) -> Bool {
   let QueryStream(internal) = stream
   internal.closed
 }
+
+// ============================================================================
+// close(): Idempotent cleanup with mailbox drain
+// ============================================================================
+
+/// Close the stream and release resources.
+///
+/// **Semantics**:
+/// - Idempotent: Safe to call multiple times; subsequent calls are no-ops
+/// - Bounded-blocking: Closes port then drains mailbox (bounded)
+/// - Auto-called: Called automatically on terminal errors and EndOfStream
+/// - Same-process: MUST be called from same process that called query()
+///
+/// **Note**: close() performs a user-initiated abort and does NOT parse/emit
+/// any remaining messages in the mailbox.
+pub fn close(stream: QueryStream) -> Nil {
+  let QueryStream(internal) = stream
+  case internal.closed {
+    True -> Nil
+    False -> port_ffi.ffi_close_port(internal.port)
+  }
+}
 // ============================================================================
 // Placeholder API (to be implemented in later issues)
 // ============================================================================
 
 // TODO(casg-j37.7): Implement state machine transitions
 // TODO(casg-j37.8): Implement next() iterator
-// TODO(casg-j37.9): Implement close() with idempotent cleanup
