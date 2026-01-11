@@ -11,7 +11,7 @@
 /// It must only be used from the process that created it.
 import claude_agent_sdk/error.{
   type ErrorDiagnostic, type StreamError, type Warning, CleanExitNoResult,
-  NonZeroExitAfterResult, Warning, diagnose_exit_code,
+  IncompleteLastLine, NonZeroExitAfterResult, Warning, diagnose_exit_code,
 }
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/decoder
@@ -619,11 +619,17 @@ fn receive_from_port(
 }
 
 /// Handle exit status and yield appropriate result.
+///
+/// Incomplete buffer handling (from plan):
+/// - exit=0, incomplete buffer: WarningEvent(IncompleteLastLine), then EndOfStream
+/// - exit!=0, incomplete buffer: ProcessError with last_non_json_line populated
 fn handle_exit_and_yield(
   stream: QueryStream,
   exit_code: Int,
 ) -> #(Result(StreamItem, NextError), QueryStream) {
   let QueryStream(internal) = stream
+  let buffer_size = bit_array.byte_size(internal.buffer)
+  let has_incomplete_line = buffer_size > 0
   let #(transition, updated_stream) = handle_exit_status(stream, exit_code)
 
   case transition {
@@ -632,14 +638,44 @@ fn handle_exit_and_yield(
       #(Ok(EndOfStream), closed)
     }
     YieldWarningThenEnd(warning) -> {
-      // Yield warning, stream stays in PendingEndOfStream
-      // Next call will yield EndOfStream
-      #(Ok(WarningEvent(warning)), updated_stream)
+      // Check if we have an incomplete line in buffer that overrides the warning
+      case has_incomplete_line, warning.code {
+        // exit=0, no result, incomplete buffer -> IncompleteLastLine instead of CleanExitNoResult
+        True, CleanExitNoResult -> {
+          let incomplete_line = case bit_array.to_string(internal.buffer) {
+            Ok(s) -> s
+            Error(_) -> "<invalid utf-8>"
+          }
+          let incomplete_warning =
+            Warning(
+              code: IncompleteLastLine(incomplete_line),
+              message: "CLI exited cleanly but buffer contained incomplete line (no trailing newline)",
+              context: None,
+            )
+          #(Ok(WarningEvent(incomplete_warning)), updated_stream)
+        }
+        // Other warnings pass through unchanged
+        _, _ -> #(Ok(WarningEvent(warning)), updated_stream)
+      }
     }
     YieldProcessError(code) -> {
-      // Determine if stdout was empty (buffer is empty and no messages seen)
-      let stdout_was_empty = bit_array.byte_size(internal.buffer) == 0
-      let diagnostic = diagnose_exit_code(code, stdout_was_empty)
+      // Determine if stdout was empty (buffer is empty)
+      let stdout_was_empty = buffer_size == 0
+      let base_diagnostic = diagnose_exit_code(code, stdout_was_empty)
+      // If buffer has incomplete line, include it in diagnostic
+      let diagnostic = case has_incomplete_line {
+        True -> {
+          let last_line = case bit_array.to_string(internal.buffer) {
+            Ok(s) -> Some(s)
+            Error(_) -> Some("<invalid utf-8>")
+          }
+          error.ErrorDiagnostic(
+            ..base_diagnostic,
+            last_non_json_line: last_line,
+          )
+        }
+        False -> base_diagnostic
+      }
       let closed = mark_closed(updated_stream)
       #(Error(NextProcessError(code, diagnostic)), closed)
     }

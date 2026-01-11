@@ -145,6 +145,8 @@ pub type WarningCode {
   NonZeroExitAfterResult(Int)
   /// Data received after Result message
   UnexpectedMessageAfterResult
+  /// Incomplete line in buffer when exit_status=0 received (line discarded)
+  IncompleteLastLine(String)
   /// Reserved for future use
   DeprecatedOption
 }

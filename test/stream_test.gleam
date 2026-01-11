@@ -1,5 +1,7 @@
 /// Tests for stream module - QueryStream and StreamState.
-import claude_agent_sdk/error.{CleanExitNoResult, NonZeroExitAfterResult}
+import claude_agent_sdk/error.{
+  CleanExitNoResult, IncompleteLastLine, NonZeroExitAfterResult,
+}
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream.{
@@ -1426,6 +1428,205 @@ pub fn test_runner_spawn_error_test() {
     Error(msg) -> msg |> should.equal("Simulated spawn failure")
     Ok(_) -> should.fail()
   }
+}
+
+// ============================================================================
+// Empty-stdout and Incomplete-line Warning Tests (casg-tc3.11)
+// ============================================================================
+
+/// Test: exit_status=0 with no data -> WarningEvent(CleanExitNoResult), EndOfStream
+/// This verifies the behavior when CLI exits cleanly but never sent any output.
+pub fn exit_zero_empty_stdout_yields_clean_exit_no_result_warning_test() {
+  // Use shell that exits immediately with no output
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 0"], "/tmp")
+  let stream_instance = new(port)
+
+  // First call should yield WarningEvent(CleanExitNoResult)
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Ok(WarningEvent(warning)) -> {
+      warning.code |> should.equal(CleanExitNoResult)
+    }
+    _ -> should.fail()
+  }
+
+  // Second call should yield EndOfStream
+  let #(result2, _s2) = next(s1)
+  case result2 {
+    Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+}
+
+/// Test: exit_status=0 with incomplete buffer -> WarningEvent(IncompleteLastLine), EndOfStream
+/// This verifies the behavior when CLI exits cleanly but buffer has incomplete line (no newline).
+pub fn exit_zero_incomplete_buffer_yields_incomplete_last_line_warning_test() {
+  // Use printf without trailing newline
+  let port =
+    port_ffi.ffi_open_port("/bin/sh", ["-c", "printf 'partial data'"], "/tmp")
+  let stream_instance = new(port)
+
+  // First call should yield WarningEvent(IncompleteLastLine)
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Ok(WarningEvent(warning)) -> {
+      case warning.code {
+        IncompleteLastLine(incomplete_content) -> {
+          // Should contain the incomplete data
+          { string.contains(incomplete_content, "partial") } |> should.be_true
+        }
+        _ -> should.fail()
+      }
+    }
+    _ -> should.fail()
+  }
+
+  // Second call should yield EndOfStream
+  let #(result2, _s2) = next(s1)
+  case result2 {
+    Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+}
+
+/// Test: exit_status!=0 with empty stdout -> ProcessError with stdout_was_empty=True
+/// This verifies ProcessError diagnostics correctly indicate empty stdout.
+pub fn exit_nonzero_empty_stdout_yields_process_error_with_stdout_was_empty_test() {
+  // Exit with non-zero code and no output
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 42"], "/tmp")
+  let stream_instance = new(port)
+
+  // Should yield ProcessError with stdout_was_empty=True
+  let #(result, updated) = next(stream_instance)
+  case result {
+    Error(NextProcessError(code, diagnostic)) -> {
+      code |> should.equal(42)
+      diagnostic.stdout_was_empty |> should.be_true
+      // last_non_json_line should be None since buffer is empty
+      diagnostic.last_non_json_line |> should.equal(None)
+    }
+    _ -> should.fail()
+  }
+
+  // Stream should be closed
+  updated |> is_closed |> should.be_true
+}
+
+/// Test: exit_status!=0 with incomplete buffer -> ProcessError with last_non_json_line populated
+/// This verifies ProcessError diagnostics include the incomplete line content.
+pub fn exit_nonzero_incomplete_buffer_yields_process_error_with_last_non_json_line_test() {
+  // Output partial data without newline, then exit with non-zero code
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "printf 'error context data' && exit 1"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // Should yield ProcessError with last_non_json_line populated
+  let #(result, updated) = next(stream_instance)
+  case result {
+    Error(NextProcessError(code, diagnostic)) -> {
+      code |> should.equal(1)
+      // stdout_was_empty should be False since buffer has data
+      diagnostic.stdout_was_empty |> should.be_false
+      // last_non_json_line should contain the incomplete line
+      case diagnostic.last_non_json_line {
+        Some(line) -> {
+          { string.contains(line, "error context") } |> should.be_true
+        }
+        None -> should.fail()
+      }
+    }
+    _ -> should.fail()
+  }
+
+  // Stream should be closed
+  updated |> is_closed |> should.be_true
+}
+
+/// Test: Complete line followed by incomplete line, then exit 0
+/// Verifies that complete lines are processed normally, then incomplete line warning is emitted.
+pub fn complete_line_then_incomplete_line_exit_zero_test() {
+  // Output a complete JSON line, then incomplete data, then exit 0
+  let json_line = "{\"type\":\"system\"}"
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "echo '" <> json_line <> "' && printf 'trailing data'"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // First call should yield the Message
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Ok(Message(_)) -> Nil
+    _ -> should.fail()
+  }
+
+  // Second call should yield WarningEvent(IncompleteLastLine)
+  let #(result2, s2) = next(s1)
+  case result2 {
+    Ok(WarningEvent(warning)) -> {
+      case warning.code {
+        IncompleteLastLine(content) -> {
+          { string.contains(content, "trailing") } |> should.be_true
+        }
+        _ -> should.fail()
+      }
+    }
+    _ -> should.fail()
+  }
+
+  // Third call should yield EndOfStream
+  let #(result3, _s3) = next(s2)
+  case result3 {
+    Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+}
+
+/// Test: Complete line followed by incomplete line, then exit non-zero
+/// Verifies that complete lines are processed, then ProcessError includes incomplete line in diagnostics.
+pub fn complete_line_then_incomplete_line_exit_nonzero_test() {
+  // Output a complete JSON line, then incomplete data, then exit non-zero
+  let json_line = "{\"type\":\"system\"}"
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "echo '" <> json_line <> "' && printf 'error hint' && exit 5"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // First call should yield the Message
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Ok(Message(_)) -> Nil
+    _ -> should.fail()
+  }
+
+  // Second call should yield ProcessError with last_non_json_line
+  let #(result2, s2) = next(s1)
+  case result2 {
+    Error(NextProcessError(code, diagnostic)) -> {
+      code |> should.equal(5)
+      // Buffer had incomplete line, so stdout was not empty
+      diagnostic.stdout_was_empty |> should.be_false
+      case diagnostic.last_non_json_line {
+        Some(line) -> {
+          { string.contains(line, "error hint") } |> should.be_true
+        }
+        None -> should.fail()
+      }
+    }
+    _ -> should.fail()
+  }
+
+  // Stream should be closed
+  s2 |> is_closed |> should.be_true
 }
 
 // ============================================================================
