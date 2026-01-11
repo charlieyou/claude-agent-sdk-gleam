@@ -228,6 +228,53 @@ CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
    - `claude login` (interactive)
    - `ANTHROPIC_API_KEY` environment variable
 
+### E2E Tests
+
+End-to-end tests validate the full SDK against a real Claude CLI. See [`scripts/e2e/README.md`](scripts/e2e/README.md) for detailed documentation.
+
+#### Running Locally
+
+```bash
+# Install Claude CLI (if not already installed)
+npm install -g @anthropic-ai/claude-code
+
+# Authenticate
+export ANTHROPIC_API_KEY=your-key  # or run: claude login
+
+# Run E2E suite
+CLAUDE_INTEGRATION_TEST=1 python scripts/e2e/run_e2e.py
+
+# Run specific scenario
+CLAUDE_INTEGRATION_TEST=1 python scripts/e2e/run_e2e.py --scenario E2E-02
+
+# List scenarios
+python scripts/e2e/run_e2e.py --list
+```
+
+#### Running in CI
+
+E2E tests are **opt-in** in CI to avoid running on every PR. They run when:
+
+| Trigger | How to Use |
+|---------|-----------|
+| **Label** | Add `run-e2e` label to a PR |
+| **Manual** | Use "Run workflow" button in Actions tab |
+| **Schedule** | Automatic weekly run (Sundays 02:00 UTC) |
+
+**CI requirements:**
+- `ANTHROPIC_API_KEY` secret must be configured in repository settings
+- If the secret is missing, E2E tests skip with a warning
+
+#### E2E Artifacts
+
+Each E2E run produces artifacts in `artifacts/e2e/<run_id>/`:
+- `events.jsonl` - Structured event log
+- `summary.txt` - Human-readable results
+- `metadata.json` - Run metadata (versions, timing)
+- `stdout.txt`, `stderr.txt` - Redacted CLI output
+
+In CI, artifacts are uploaded and retained for 7 days.
+
 Spec from https://gist.github.com/SamSaffron/603648958a8c18ceae34939a8951d417
 
 ## Advanced Usage

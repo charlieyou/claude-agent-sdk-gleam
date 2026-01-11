@@ -6,6 +6,10 @@ on:
       - master
       - main
   pull_request:
+  workflow_dispatch:
+  schedule:
+    # Weekly on Sundays at 02:00 UTC
+    - cron: '0 2 * * 0'
 
 jobs:
   test:
@@ -21,3 +25,50 @@ jobs:
       - run: gleam deps download
       - run: gleam test
       - run: gleam format --check src test
+
+  e2e:
+    runs-on: ubuntu-latest
+    # Only run when explicitly requested: label, manual dispatch, or weekly schedule
+    if: |
+      github.event_name == 'workflow_dispatch' ||
+      github.event_name == 'schedule' ||
+      contains(github.event.pull_request.labels.*.name, 'run-e2e')
+    steps:
+      - uses: actions/checkout@v4
+      - uses: erlef/setup-beam@v1
+        with:
+          otp-version: "28"
+          gleam-version: "1.14.0"
+          rebar3-version: "3"
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Check E2E prerequisites
+        id: prereq
+        run: |
+          if [ -z "$ANTHROPIC_API_KEY" ]; then
+            echo "skip=true" >> "$GITHUB_OUTPUT"
+            echo "::warning::ANTHROPIC_API_KEY not set - skipping E2E tests"
+          else
+            echo "skip=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Install Claude CLI
+        if: steps.prereq.outputs.skip != 'true'
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Run E2E tests
+        if: steps.prereq.outputs.skip != 'true'
+        run: |
+          export CLAUDE_INTEGRATION_TEST=1
+          python scripts/e2e/run_e2e.py
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - name: Upload E2E artifacts
+        if: always() && steps.prereq.outputs.skip != 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: e2e-artifacts
+          path: artifacts/e2e/
+          retention-days: 7
+
