@@ -322,6 +322,7 @@ fn consume_with_cancellation(
 import gleam/erlang/process
 import gleam/io
 import gleam/otp/task
+import gleam/string
 import claude_agent_sdk.{default_options}
 
 pub fn main() {
@@ -341,8 +342,8 @@ pub fn main() {
 
   // Receive results with a timeout
   case process.receive(result_subject, 30_000) {
-    Ok(Ok(item)) -> io.println("Received: " <> item.text)
-    Ok(Error(e)) -> io.println("Error: " <> e.message)
+    Ok(Ok(item)) -> io.println("Received: " <> string.inspect(item))
+    Ok(Error(e)) -> io.println("Error: " <> string.inspect(e))
     Error(Nil) -> io.println("Timeout waiting for response")
   }
 }
