@@ -5,14 +5,13 @@ import claude_agent_sdk/error.{
   UnsupportedCliVersionError, VersionDetectionError,
 }
 import claude_agent_sdk/internal/cli.{CliVersion, UnknownVersion}
-import claude_agent_sdk/internal/stream.{CollectResult}
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
 import support/integration_helpers.{
-  NdjsonImpure, NdjsonPure, PreflightTimeout, check_cli_help_flags,
+  CliMissing, NdjsonImpure, NdjsonPure, PreflightTimeout, check_cli_help_flags,
   detect_cli_version_with_timeout, find_executable, integration_enabled,
   is_authenticated, preflight_ndjson_check,
 }
@@ -166,12 +165,9 @@ pub fn integration__real_cli_query_test() {
             }
             Ok(stream) -> {
               // Collect messages from stream (30s implicit timeout via CLI)
-              let CollectResult(
-                items: messages,
-                warnings: _warnings,
-                non_terminal_errors: _non_terminal,
-                terminal_error: terminal_err,
-              ) = claude_agent_sdk.collect_messages(stream)
+              let result = claude_agent_sdk.collect_messages(stream)
+              let messages = result.items
+              let terminal_err = result.terminal_error
 
               // Verify we got at least one message
               case messages {
@@ -274,6 +270,10 @@ pub fn integration__ndjson_purity_test() {
         }
         PreflightTimeout -> {
           io.println(skip_msg_timeout)
+          should.be_true(True)
+        }
+        CliMissing -> {
+          io.println(skip_msg_cli_missing)
           should.be_true(True)
         }
       }
