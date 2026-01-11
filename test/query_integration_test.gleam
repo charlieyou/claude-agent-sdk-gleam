@@ -1,5 +1,15 @@
+import claude_agent_sdk
+import claude_agent_sdk/error.{
+  BufferOverflow, CliNotFoundError, JsonDecodeError, ProcessError, SpawnError,
+  TooManyDecodeErrors, UnexpectedMessageError, UnknownVersionError,
+  UnsupportedCliVersionError, VersionDetectionError,
+}
 import claude_agent_sdk/internal/cli.{CliVersion, UnknownVersion}
+import claude_agent_sdk/internal/stream.{CollectResult}
+import gleam/int
 import gleam/io
+import gleam/list
+import gleam/option.{None, Some}
 import gleeunit/should
 import support/integration_helpers.{
   check_cli_help_flags, detect_cli_version_with_timeout, find_executable,
@@ -130,4 +140,117 @@ pub fn integration__skip_message_auth_unavailable_test() {
     expected_message,
     "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login",
   )
+}
+
+// ============================================================================
+// Real CLI Query Integration Test
+// ============================================================================
+
+/// Integration test: real CLI query (opt-in via CLAUDE_INTEGRATION_TEST=1)
+/// Makes an actual query to Claude CLI and verifies the stream produces messages.
+pub fn integration__real_cli_query_test() {
+  case integration_enabled("integration__real_cli_query_test") {
+    True -> {
+      case is_authenticated() {
+        True -> {
+          // Build options with max_turns=1 for fast test
+          let options =
+            claude_agent_sdk.default_options()
+            |> claude_agent_sdk.with_max_turns(1)
+
+          // Start query with simple prompt
+          case claude_agent_sdk.query("Say hello in one word.", options) {
+            Error(err) -> {
+              io.println("[FAIL] Query failed: " <> query_error_to_string(err))
+              should.be_true(False)
+            }
+            Ok(stream) -> {
+              // Collect messages from stream (30s implicit timeout via CLI)
+              let CollectResult(
+                items: messages,
+                warnings: _warnings,
+                non_terminal_errors: _non_terminal,
+                terminal_error: terminal_err,
+              ) = claude_agent_sdk.collect_messages(stream)
+
+              // Verify we got at least one message
+              case messages {
+                [_, ..] -> {
+                  io.println(
+                    "[PASS] Received "
+                    <> int.to_string(list.length(messages))
+                    <> " message(s)",
+                  )
+                  should.be_true(True)
+                }
+                [] -> {
+                  case terminal_err {
+                    None -> {
+                      io.println(
+                        "[FAIL] No messages received, no terminal error",
+                      )
+                      should.be_true(False)
+                    }
+                    Some(err) -> {
+                      io.println(
+                        "[FAIL] No messages, terminal error: "
+                        <> stream_error_to_string(err),
+                      )
+                      should.be_true(False)
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        False -> {
+          io.println(
+            "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login",
+          )
+          should.be_true(True)
+        }
+      }
+    }
+    False -> should.be_true(True)
+  }
+}
+
+/// Convert QueryError to string for diagnostics.
+fn query_error_to_string(err: claude_agent_sdk.QueryError) -> String {
+  case err {
+    CliNotFoundError(msg) -> "CliNotFoundError: " <> msg
+    VersionDetectionError(msg) -> "VersionDetectionError: " <> msg
+    UnsupportedCliVersionError(
+      detected_version:,
+      minimum_required:,
+      suggestion:,
+    ) ->
+      "UnsupportedCliVersionError: detected="
+      <> detected_version
+      <> ", minimum="
+      <> minimum_required
+      <> ", suggestion="
+      <> suggestion
+    UnknownVersionError(raw_output:, suggestion:) ->
+      "UnknownVersionError: raw=" <> raw_output <> ", suggestion=" <> suggestion
+    SpawnError(msg) -> "SpawnError: " <> msg
+  }
+}
+
+/// Convert StreamError to string for diagnostics.
+fn stream_error_to_string(err: claude_agent_sdk.StreamError) -> String {
+  case err {
+    ProcessError(code, _diagnostic) ->
+      "ProcessError(exit_code=" <> int.to_string(code) <> ")"
+    BufferOverflow -> "BufferOverflow"
+    TooManyDecodeErrors(count, last_error) ->
+      "TooManyDecodeErrors(count="
+      <> int.to_string(count)
+      <> ", last="
+      <> last_error
+      <> ")"
+    JsonDecodeError(line, err) -> "JsonDecodeError: " <> line <> ": " <> err
+    UnexpectedMessageError(raw) -> "UnexpectedMessageError: " <> raw
+  }
 }
