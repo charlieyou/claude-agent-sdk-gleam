@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, find_cli_path/1]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -89,4 +89,14 @@ drain_port_messages(Port, Remaining) ->
             drain_port_messages(Port, Remaining - 1)
     after 50 ->
         ok
+    end.
+
+%% Finds an executable in PATH using os:find_executable/1.
+%% Returns {ok, AbsolutePath} if found, {error, <<"not_found">>} otherwise.
+%% Name is expected to be a Gleam binary (e.g., <<"claude">>).
+find_cli_path(Name) ->
+    NameStr = binary_to_list(Name),
+    case os:find_executable(NameStr) of
+        false -> {error, <<"not_found">>};
+        Path -> {ok, list_to_binary(Path)}
     end.

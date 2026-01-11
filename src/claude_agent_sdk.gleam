@@ -28,7 +28,12 @@
 //// StreamError, and other variant types.
 
 import gleam/dynamic
-import gleam/option
+import gleam/option.{None, Some}
+import gleam/string
+
+import claude_agent_sdk/internal/cli
+import claude_agent_sdk/internal/port_ffi
+import claude_agent_sdk/internal/stream as internal_stream
 
 // =============================================================================
 // Query Options (from options.gleam)
@@ -206,7 +211,6 @@ pub const is_terminal = error.is_terminal
 // Stream Helpers (from claude_agent_sdk/stream.gleam)
 // =============================================================================
 
-import claude_agent_sdk/internal/stream as internal_stream
 import claude_agent_sdk/stream
 
 pub type QueryStream =
@@ -252,4 +256,171 @@ pub const fold_stream = internal_stream.fold_stream
 
 pub fn version() -> String {
   "0.1.0"
+}
+
+// =============================================================================
+// Query Entry Point
+// =============================================================================
+
+/// The CLI executable name to search for in PATH.
+const cli_name = "claude"
+
+/// Start a query to Claude CLI and return a stream for iteration.
+///
+/// ## Implementation Flow
+/// 1. Find CLI in PATH (returns CliNotFoundError if not found)
+/// 2. Check version (unless skip_version_check=True)
+///    - Detects CLI version via `claude --version`
+///    - Verifies version meets minimum requirement (1.0.0)
+///    - Handles permissive_version_check for unknown versions
+/// 3. Build CLI arguments from options
+/// 4. Spawn CLI process
+/// 5. Return Ok(QueryStream) for iteration
+///
+/// ## cwd Handling
+/// | cwd value | Behavior |
+/// |-----------|----------|
+/// | None | Inherit current working directory |
+/// | Some("") | Inherit current working directory |
+/// | Some(path) | Change to specified directory |
+///
+/// ## Example
+/// ```gleam
+/// import claude_agent_sdk
+///
+/// let options = claude_agent_sdk.default_options()
+///   |> claude_agent_sdk.with_max_turns(3)
+///
+/// case claude_agent_sdk.query("Hello, Claude!", options) {
+///   Ok(stream) -> {
+///     // Iterate with next() or use collect_messages()
+///     claude_agent_sdk.close(stream)
+///   }
+///   Error(err) -> {
+///     // Handle QueryError
+///   }
+/// }
+/// ```
+pub fn query(
+  prompt: String,
+  options: QueryOptions,
+) -> Result(QueryStream, QueryError) {
+  // Step 1: Find CLI in PATH
+  case port_ffi.find_cli_path(cli_name) {
+    Error(_) ->
+      Error(error.CliNotFoundError(
+        "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
+      ))
+    Ok(cli_path) -> query_with_cli_path(prompt, options, cli_path)
+  }
+}
+
+/// Internal: Continue query flow with known CLI path.
+fn query_with_cli_path(
+  prompt: String,
+  options: QueryOptions,
+  cli_path: String,
+) -> Result(QueryStream, QueryError) {
+  // Step 2: Version check (unless skipped)
+  case options.skip_version_check {
+    True -> spawn_query(prompt, options, cli_path)
+    False -> {
+      case cli.detect_cli_version(cli_path) {
+        Error(cli.VersionCheckTimeout) ->
+          Error(error.VersionDetectionError("Timeout waiting for CLI response"))
+        Error(cli.SpawnFailed(reason)) ->
+          Error(error.VersionDetectionError("Failed to spawn CLI: " <> reason))
+        Error(cli.ParseFailed(raw)) ->
+          // Handle parse failure based on permissive mode
+          case options.permissive_version_check {
+            True ->
+              // Permissive: allow unknown versions with warning (proceed)
+              spawn_query(prompt, options, cli_path)
+            False ->
+              Error(error.UnknownVersionError(
+                raw,
+                "Run 'claude --version' to check CLI output format",
+              ))
+          }
+        Ok(version) ->
+          check_version_and_spawn(prompt, options, cli_path, version)
+      }
+    }
+  }
+}
+
+/// Internal: Check version meets minimum and spawn if OK.
+fn check_version_and_spawn(
+  prompt: String,
+  options: QueryOptions,
+  cli_path: String,
+  version: cli.CliVersion,
+) -> Result(QueryStream, QueryError) {
+  case version {
+    cli.UnknownVersion(raw) ->
+      // Unknown version format
+      case options.permissive_version_check {
+        True ->
+          // Permissive: allow with warning (proceed)
+          spawn_query(prompt, options, cli_path)
+        False ->
+          Error(error.UnknownVersionError(
+            raw,
+            "Run 'claude --version' to check CLI output format",
+          ))
+      }
+    cli.CliVersion(_, _, _, _) as known_version ->
+      case cli.version_meets_minimum(known_version, cli.minimum_cli_version) {
+        True -> spawn_query(prompt, options, cli_path)
+        False -> {
+          let detected_str = format_version(known_version)
+          let required_str = format_version(cli.minimum_cli_version)
+          Error(error.UnsupportedCliVersionError(
+            detected_version: detected_str,
+            minimum_required: required_str,
+            suggestion: "Run: npm update -g @anthropic-ai/claude-code",
+          ))
+        }
+      }
+  }
+}
+
+/// Internal: Format CliVersion to string.
+fn format_version(version: cli.CliVersion) -> String {
+  case version {
+    cli.CliVersion(_, _, _, raw) -> raw
+    cli.UnknownVersion(raw) -> raw
+  }
+}
+
+/// Internal: Build args, spawn port, return QueryStream.
+fn spawn_query(
+  prompt: String,
+  options: QueryOptions,
+  cli_path: String,
+) -> Result(QueryStream, QueryError) {
+  // Build CLI arguments
+  let args = cli.build_cli_args(options, prompt)
+
+  // Determine cwd - empty string means inherit
+  let cwd = case options.cwd {
+    None -> ""
+    Some(path) ->
+      case string.is_empty(path) {
+        True -> ""
+        False -> path
+      }
+  }
+
+  // Spawn port (production path uses port_ffi directly)
+  // Note: test_mode path would use test_runner here, but TestRunner is
+  // currently an opaque placeholder. When implemented, this would be:
+  // case options.test_mode {
+  //   True -> test_runner_spawn(options.test_runner, args, cwd)
+  //   False -> ... production spawn ...
+  // }
+  case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
+    Error(reason) -> Error(error.SpawnError(reason))
+    Ok(port) -> Ok(internal_stream.new(port))
+  }
 }

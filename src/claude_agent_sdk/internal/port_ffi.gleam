@@ -94,6 +94,32 @@ pub fn receive_timeout(
   |> decode_port_message
 }
 
+// ============================================================================
+// CLI Path Discovery
+// ============================================================================
+
+/// FFI binding for finding CLI in PATH
+@external(erlang, "claude_agent_sdk_ffi", "find_cli_path")
+fn ffi_find_cli_path_raw(name: String) -> Dynamic
+
+/// Find an executable by name in PATH.
+/// Returns Ok(absolute_path) if found, Error("not_found") otherwise.
+pub fn find_cli_path(name: String) -> Result(String, String) {
+  let result = ffi_find_cli_path_raw(name)
+  // Decode the tuple: element 0 is tag atom (ok/error), element 1 is payload
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    use payload <- decode.field(1, decode.string)
+    decode.success(#(tag, payload))
+  }
+  case decode.run(result, result_decoder) {
+    Ok(#("ok", path)) -> Ok(path)
+    Ok(#("error", reason)) -> Error(reason)
+    Ok(_) -> Error("invalid FFI response tag")
+    Error(_) -> Error("invalid FFI response format")
+  }
+}
+
 /// Canonical decoder for port messages returned by Erlang FFI.
 /// FFI returns 2-tuples with string tags: {"data", Bytes}, {"exit_status", Code},
 /// {"eof", nil}, {"timeout", nil}
