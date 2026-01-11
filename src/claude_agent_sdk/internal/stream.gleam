@@ -19,8 +19,9 @@ import claude_agent_sdk/internal/port_ffi.{type Port}
 ///
 /// Transitions:
 /// - Streaming -> ResultReceived (on Result message)
-/// - Streaming -> PendingEndOfStream (on exit_status after Result)
-/// - ResultReceived -> PendingEndOfStream (on drain complete)
+/// - Streaming -> PendingEndOfStream (on clean exit without Result)
+/// - Streaming -> Closed (on non-zero exit without Result)
+/// - ResultReceived -> PendingEndOfStream (on exit status after Result)
 /// - PendingEndOfStream -> Closed (after yielding EndOfStream)
 pub type StreamState {
   /// Normal iteration: yielding messages as they arrive
