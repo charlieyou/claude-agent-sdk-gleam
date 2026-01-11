@@ -624,8 +624,21 @@ def main():
     print(f"CLI:     {cli_version_raw}")
     print()
 
-    # Initialize logger
+    # Validate scenarios before initializing logger (avoid cleanup issues on early return)
+    if args.scenarios:
+        scenario_ids = []
+        for s in args.scenarios:
+            if s.upper() in SCENARIOS:
+                scenario_ids.append(s.upper())
+            else:
+                print(f"Unknown scenario: {s}", file=sys.stderr)
+                return 1
+    else:
+        scenario_ids = list(SCENARIOS.keys())
+
+    # Initialize logger and results before try block
     logger = EventLogger(run_id=run_id, output_dir=output_dir)
+    results = []
 
     try:
         # Collect metadata
@@ -651,20 +664,7 @@ def main():
             cli_version_parsed=cli_version_parsed,
         )
 
-        # Determine scenarios to run
-        if args.scenarios:
-            scenario_ids = []
-            for s in args.scenarios:
-                if s.upper() in SCENARIOS:
-                    scenario_ids.append(s.upper())
-                else:
-                    print(f"Unknown scenario: {s}", file=sys.stderr)
-                    return 1
-        else:
-            scenario_ids = list(SCENARIOS.keys())
-
         # Run scenarios
-        results = []
         for scenario_id in scenario_ids:
             print(f"Running {scenario_id}...", end=" ", flush=True)
             try:
