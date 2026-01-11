@@ -538,6 +538,47 @@ fn check_for_warnings(stream, acc) {
 }
 ```
 
+## Feature Comparison with Python SDK
+
+This table compares functionality between this Gleam SDK and the official [Python SDK](https://github.com/anthropics/claude-agent-sdk-python).
+
+| Feature | Gleam | Python | Notes |
+|---------|:-----:|:------:|-------|
+| **Core Query API** | ✅ | ✅ | Both support streaming queries |
+| **Unidirectional Streaming** | ✅ | ✅ | Send prompt, receive message stream |
+| **Bidirectional Client** | ❌ | ✅ | Python has `ClaudeSDKClient` for interactive sessions |
+| **Session Resume** | ✅ | ✅ | Resume by session ID |
+| **Session Continue** | ✅ | ✅ | Continue most recent session |
+| **Session Fork** | ❌ | ✅ | Fork to new session from existing |
+| **File Checkpointing** | ❌ | ✅ | Track and rewind file changes |
+| **Permission Modes** | ✅ | ✅ | default, acceptEdits, plan, bypassPermissions |
+| **Dynamic Permission Mode** | ❌ | ✅ | Change permission mode mid-session |
+| **Tool Filtering** | ✅ | ✅ | `allowed_tools`, `disallowed_tools` |
+| **Runtime Permission Callback** | ❌ | ✅ | Python has `can_use_tool` callback |
+| **Hook System** | ❌ | ✅ | PreToolUse, PostToolUse, Stop, etc. |
+| **MCP Config File** | ✅ | ✅ | External MCP server configuration |
+| **In-Process MCP Tools** | ❌ | ✅ | Python has `@tool` decorator |
+| **Model Selection** | ✅ | ✅ | Set model in options |
+| **Dynamic Model Switching** | ❌ | ✅ | Change model mid-session |
+| **System Prompt** | ✅ | ✅ | Replace or append |
+| **Max Turns** | ✅ | ✅ | Limit agent turns |
+| **Max Budget** | ✅ | ✅ | Cost limit in USD |
+| **Extended Thinking** | ❌ | ✅ | `max_thinking_tokens` |
+| **Structured Output** | ❌ | ✅ | JSON schema output format |
+| **Interrupt Execution** | ❌ | ✅ | Stop execution mid-stream |
+| **Custom Agents** | ❌ | ✅ | Define sub-agents |
+| **Bash Sandboxing** | ❌ | ✅ | Sandbox configuration |
+| **Test Mode** | ✅ | ✅ | Mock runner / transport for testing |
+| **Warning Collection** | ✅ | ✅ | Non-fatal issue reporting |
+| **Error Diagnostics** | ✅ | ✅ | Detailed error context |
+
+### Architecture Differences
+
+- **Gleam**: Synchronous blocking reads via Erlang ports. Single-process ownership model.
+- **Python**: Async/await with bidirectional control protocol. Supports interactive sessions.
+
+The Gleam SDK focuses on reliable unidirectional streaming suitable for automation and batch processing. For interactive applications requiring mid-session control, consider the Python SDK.
+
 ## Troubleshooting
 
 ### Empty stdout errors in CI/containers
