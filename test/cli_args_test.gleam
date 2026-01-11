@@ -67,8 +67,9 @@ pub fn basic_args_test() {
   assert_contains(args, "--verbose")
 
   // Verify prompt separator and prompt are at the end
+  // Note: Prompt is unquoted; shell quoting is handled by the process spawner
   let args_str = string.join(args, " ")
-  string.contains(args_str, "-- \"Hello Claude\"") |> should.be_true
+  string.contains(args_str, "-- Hello Claude") |> should.be_true
 }
 
 // =============================================================================
