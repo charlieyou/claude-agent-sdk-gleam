@@ -4,8 +4,9 @@
 import gleeunit/should
 
 import claude_agent_sdk/internal/cli.{
-  CliVersion, UnknownVersion, format_version_error, minimum_cli_version,
-  parse_version_string, version_meets_minimum,
+  CliVersion, SpawnFailed, UnknownVersion, detect_cli_version,
+  format_version_error, minimum_cli_version, parse_version_string,
+  version_meets_minimum,
 }
 
 // ============================================================================
@@ -196,4 +197,24 @@ pub fn format_version_error_basic_test() {
 pub fn unknown_version_stores_raw_output_test() {
   let UnknownVersion(raw) = UnknownVersion("some weird output")
   raw |> should.equal("some weird output")
+}
+
+// ============================================================================
+// detect_cli_version spawn failure tests
+// ============================================================================
+
+pub fn detect_cli_version_nonexistent_path_returns_spawn_failed_test() {
+  // Calling detect_cli_version with a nonexistent path should return
+  // Error(SpawnFailed(_)) rather than crashing
+  let result = detect_cli_version("/nonexistent/path/to/cli")
+  case result {
+    Error(SpawnFailed(reason)) -> {
+      // Should contain "enoent" in some form (file not found)
+      reason |> should.not_equal("")
+    }
+    _ -> {
+      // Should not succeed or return a different error type
+      should.fail()
+    }
+  }
 }

@@ -38,7 +38,7 @@ open_port_safe(Executable, Args, WorkingDir) ->
         ] ++ Opts),
         {ok, Port}
     catch
-        error:Reason -> {error, atom_to_binary(Reason, utf8)}
+        error:Reason -> {error, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
 %% Blocking receive for port messages.
