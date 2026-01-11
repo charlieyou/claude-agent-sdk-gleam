@@ -132,9 +132,15 @@ run_tests(TestBeams, Quiet) ->
     SavedGL = erlang:group_leader(),
     NullHandle = case Quiet of
         true ->
-            {ok, ND} = file:open("/dev/null", [write]),
-            erlang:group_leader(ND, self()),
-            ND;
+            case file:open("/dev/null", [write]) of
+                {ok, ND} ->
+                    erlang:group_leader(ND, self()),
+                    ND;
+                {error, Reason} ->
+                    io:format(standard_error, "Warning: Could not open /dev/null: ~p~n", [Reason]),
+                    io:format(standard_error, "Test output may pollute JSON output~n", []),
+                    undefined
+            end;
         false ->
             undefined
     end,
