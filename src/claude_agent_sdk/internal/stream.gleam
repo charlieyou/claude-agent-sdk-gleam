@@ -406,6 +406,17 @@ pub fn reset_decode_errors(stream: QueryStream) -> QueryStream {
   }
 }
 
+/// Increment the drain counter (when data arrives after Result).
+/// Returns the updated stream and whether the limit was exceeded.
+pub fn increment_drain_count(stream: QueryStream) -> #(QueryStream, Bool) {
+  let QueryStream(internal) = stream
+  let new_count = internal.drain_count + 1
+  let limit_exceeded = new_count >= constants.post_result_drain_max_iterations
+  let updated =
+    QueryStream(QueryStreamInternal(..internal, drain_count: new_count))
+  #(updated, limit_exceeded)
+}
+
 /// Transition to PendingEndOfStream state (for draining after ResultReceived).
 pub fn mark_pending_end_of_stream(stream: QueryStream) -> QueryStream {
   let QueryStream(internal) = stream
@@ -749,16 +760,27 @@ fn process_line(
   // Check if we're in ResultReceived state - any data after Result is unexpected
   case get_state(stream) {
     ResultReceived -> {
-      // Emit warning but continue streaming (non-terminal)
-      // Reset decode error counter since we're handling this as a warning
-      let updated = reset_decode_errors(stream)
-      let warning =
-        Warning(
-          code: UnexpectedMessageAfterResult,
-          message: "Received data after Result message",
-          context: Some(line),
-        )
-      #(Ok(WarningEvent(warning)), updated)
+      // Increment drain count and check if limit exceeded
+      let #(updated, limit_exceeded) = increment_drain_count(stream)
+      case limit_exceeded {
+        True -> {
+          // Exceeded drain limit, transition to end of stream
+          let final_stream = mark_pending_end_of_stream(updated)
+          #(Ok(EndOfStream), final_stream)
+        }
+        False -> {
+          // Still within limit, emit warning and continue
+          // Reset decode error counter since we're handling this as a warning
+          let final_stream = reset_decode_errors(updated)
+          let warning =
+            Warning(
+              code: UnexpectedMessageAfterResult,
+              message: "Received data after Result message",
+              context: Some(line),
+            )
+          #(Ok(WarningEvent(warning)), final_stream)
+        }
+      }
     }
     _ -> {
       // Normal processing: try to decode the line as a message
