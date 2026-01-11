@@ -56,4 +56,46 @@ gleam run   # Run the project
 gleam test  # Run the tests
 ```
 
+## Testing
+
+### Test Categories
+
+| Category | Description | External Dependencies |
+|----------|-------------|----------------------|
+| **Unit tests** | Schema parsing, type construction | None |
+| **Integration tests** | Real CLI interaction | Claude CLI + auth |
+| **Phase 0 tests** | FFI/runtime validation | Erlang runtime |
+
+### Running Tests
+
+```bash
+# Unit tests only (default, no CLI required)
+gleam test
+
+# Integration tests (requires Claude CLI installed and authenticated)
+CLAUDE_INTEGRATION_TEST=1 gleam test
+
+# Phase 0 FFI validation tests
+PHASE0_RUNTIME=1 gleam test
+
+# Integration tests with non-JSON tolerance (for CLI versions with extra output)
+CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
+```
+
+### Environment Variables
+
+| Variable | Purpose |
+|----------|---------|
+| `ANTHROPIC_API_KEY` | API key for CLI authentication (alternative to `claude login`) |
+| `CLAUDE_INTEGRATION_TEST` | Set to `1` to enable integration tests |
+| `CLAUDE_INTEGRATION_ALLOW_NONJSON` | Set to `1` to tolerate non-JSON CLI output |
+| `PHASE0_RUNTIME` | Set to `1` to enable Phase 0 FFI validation tests |
+
+### Prerequisites for Integration Tests
+
+1. Claude CLI installed (`claude --version` works)
+2. Authentication via one of:
+   - `claude login` (interactive)
+   - `ANTHROPIC_API_KEY` environment variable
+
 Spec from https://gist.github.com/SamSaffron/603648958a8c18ceae34939a8951d417

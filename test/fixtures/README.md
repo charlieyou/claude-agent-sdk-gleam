@@ -2,13 +2,13 @@
 
 ## Status: REAL CLI OUTPUT
 
-These fixtures are captured from **real Claude CLI output** (version 2.1.3).
+These fixtures are captured from **real Claude CLI output** (version 2.1.4).
 
 **Note**: `result_error.json` is intentionally synthetic because error scenarios are difficult to capture naturally from the CLI. It matches the real CLI schema structure.
 
 ## Capture Information
 
-- **CLI version**: 2.1.3 (Claude Code)
+- **CLI version**: 2.1.4 (Claude Code)
 - **Capture date**: 2026-01-11
 - **Capture commands**:
   ```bash
