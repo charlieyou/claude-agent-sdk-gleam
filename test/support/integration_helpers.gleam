@@ -74,7 +74,10 @@ pub fn is_authenticated() -> Bool {
 }
 
 /// Run a command with timeout protection.
-/// Returns Ok(stdout) on success, Error(Nil) on timeout or failure.
+/// Returns Ok(stdout) on successful completion (exit code 0),
+/// Error(Nil) on timeout, spawn failure, or non-zero exit.
+/// Uses deadline-based timeout: total elapsed time is bounded to timeout_ms,
+/// not reset per-message.
 fn run_command_with_timeout(
   path: String,
   args: List(String),
@@ -83,45 +86,57 @@ fn run_command_with_timeout(
   case port_ffi.ffi_open_port_safe(path, args, ".") {
     Error(_) -> Error(Nil)
     Ok(port) -> {
-      let result = collect_output_with_timeout(port, <<>>, timeout_ms)
+      let deadline_ms = port_ffi.monotonic_time_ms() + timeout_ms
+      let result = collect_output_with_deadline(port, <<>>, deadline_ms)
       port_ffi.ffi_close_port(port)
       result
     }
   }
 }
 
-/// Collect output from a port until exit or timeout.
-fn collect_output_with_timeout(
+/// Collect output from a port until exit or deadline exceeded.
+/// Uses deadline-based timeout: tracks remaining time across iterations.
+/// Returns Error(Nil) for non-zero exit codes, timeout, or invalid UTF-8.
+fn collect_output_with_deadline(
   port: port_ffi.Port,
   acc: BitArray,
-  timeout_ms: Int,
+  deadline_ms: Int,
 ) -> Result(String, Nil) {
-  case port_ffi.receive_timeout(port, timeout_ms) {
-    Ok(msg) ->
-      case msg {
-        Data(bytes) ->
-          collect_output_with_timeout(
-            port,
-            bit_array.append(acc, bytes),
-            timeout_ms,
-          )
-        ExitStatus(_code) -> {
-          // Process exited - convert accumulated bytes to string
-          case bit_array.to_string(acc) {
-            Ok(s) -> Ok(s)
-            Error(Nil) -> Error(Nil)
+  let remaining_ms = deadline_ms - port_ffi.monotonic_time_ms()
+  case remaining_ms <= 0 {
+    True -> Error(Nil)
+    False ->
+      case port_ffi.receive_timeout(port, remaining_ms) {
+        Ok(msg) ->
+          case msg {
+            Data(bytes) ->
+              collect_output_with_deadline(
+                port,
+                bit_array.append(acc, bytes),
+                deadline_ms,
+              )
+            ExitStatus(code) -> {
+              // Only return Ok for exit code 0
+              case code {
+                0 ->
+                  case bit_array.to_string(acc) {
+                    Ok(s) -> Ok(s)
+                    Error(Nil) -> Error(Nil)
+                  }
+                _ -> Error(Nil)
+              }
+            }
+            Eof -> {
+              // EOF without ExitStatus - convert accumulated bytes
+              case bit_array.to_string(acc) {
+                Ok(s) -> Ok(s)
+                Error(Nil) -> Error(Nil)
+              }
+            }
+            Timeout -> Error(Nil)
           }
-        }
-        Eof -> {
-          // EOF received - convert accumulated bytes to string
-          case bit_array.to_string(acc) {
-            Ok(s) -> Ok(s)
-            Error(Nil) -> Error(Nil)
-          }
-        }
-        Timeout -> Error(Nil)
+        Error(_) -> Error(Nil)
       }
-    Error(_) -> Error(Nil)
   }
 }
 

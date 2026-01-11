@@ -169,3 +169,9 @@ fn decode_port_message(raw: Dynamic) -> Result(PortMessage, String) {
 /// Used to ensure cleanup (e.g., with_stream closes port) even when callbacks panic.
 @external(erlang, "claude_agent_sdk_ffi", "rescue")
 pub fn rescue(thunk: fn() -> a) -> Result(a, String)
+
+/// Returns monotonic time in milliseconds.
+/// Use for deadline-based timeouts that don't reset on each message.
+/// Monotonic time is guaranteed to never go backwards (unlike wall clock time).
+@external(erlang, "claude_agent_sdk_ffi", "monotonic_time_ms")
+pub fn monotonic_time_ms() -> Int

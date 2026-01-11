@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, find_cli_path/1, rescue/1]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, find_cli_path/1, rescue/1, monotonic_time_ms/0]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -120,3 +120,8 @@ rescue(Thunk) ->
         exit:Reason ->
             {error, list_to_binary(io_lib:format("exit: ~p", [Reason]))}
     end.
+
+%% Returns monotonic time in milliseconds.
+%% Used for deadline-based timeouts that don't reset on each message.
+monotonic_time_ms() ->
+    erlang:monotonic_time(millisecond).
