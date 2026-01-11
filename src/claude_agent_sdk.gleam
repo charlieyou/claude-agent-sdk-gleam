@@ -324,13 +324,18 @@ pub fn query(
   prompt: String,
   options: QueryOptions,
 ) -> Result(QueryStream, QueryError) {
-  // Step 1: Find CLI in PATH
-  case port_ffi.find_cli_path(cli_name) {
-    Error(_) ->
-      Error(error.CliNotFoundError(
-        "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
-      ))
-    Ok(cli_path) -> query_with_cli_path(prompt, options, cli_path)
+  case options.test_mode {
+    True -> spawn_query(prompt, options, cli_name)
+    False -> {
+      // Step 1: Find CLI in PATH
+      case port_ffi.find_cli_path(cli_name) {
+        Error(_) ->
+          Error(error.CliNotFoundError(
+            "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
+          ))
+        Ok(cli_path) -> query_with_cli_path(prompt, options, cli_path)
+      }
+    }
   }
 }
 
@@ -431,15 +436,24 @@ fn spawn_query(
       }
   }
 
-  // Spawn port (production path uses port_ffi directly)
-  // Note: test_mode path would use test_runner here, but TestRunner is
-  // currently an opaque placeholder. When implemented, this would be:
-  // case options.test_mode {
-  //   True -> test_runner_spawn(options.test_runner, args, cwd)
-  //   False -> ... production spawn ...
-  // }
-  case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
-    Error(reason) -> Error(error.SpawnError(reason))
-    Ok(port) -> Ok(internal_stream.new(port))
+  case options.test_mode {
+    True -> {
+      case options.test_runner {
+        Some(test_runner) -> {
+          case runner.spawn(test_runner, cli_path, args, cwd) {
+            Error(reason) -> Error(error.SpawnError(reason))
+            Ok(handle) -> Ok(internal_stream.new_from_runner(test_runner, handle))
+          }
+        }
+        None -> Error(error.SpawnError(
+          "test_mode enabled but no test_runner provided",
+        ))
+      }
+    }
+    False ->
+      case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
+        Error(reason) -> Error(error.SpawnError(reason))
+        Ok(port) -> Ok(internal_stream.new(port))
+      }
   }
 }

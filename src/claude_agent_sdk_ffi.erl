@@ -92,13 +92,13 @@ drain_port_messages(Port, Remaining) ->
     end.
 
 %% Finds an executable in PATH using os:find_executable/1.
-%% Returns {ok, AbsolutePath} if found, {error, <<"not_found">>} otherwise.
+%% Returns {<<"ok">>, AbsolutePath} if found, {<<"error">>, <<"not_found">>} otherwise.
 %% Name is expected to be a Gleam binary (e.g., <<"claude">>).
 find_cli_path(Name) ->
     NameStr = binary_to_list(Name),
     case os:find_executable(NameStr) of
-        false -> {error, <<"not_found">>};
-        Path -> {ok, list_to_binary(Path)}
+        false -> {<<"error">>, <<"not_found">>};
+        Path -> {<<"ok">>, list_to_binary(Path)}
     end.
 
 %% Rescue function to catch panics for testing.

@@ -109,62 +109,62 @@ pub fn decode_system_message(raw: Dynamic) -> Result(Message, DecodeError) {
     use subtype <- decode.optional_field(
       "subtype",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use uuid <- decode.optional_field(
       "uuid",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use session_id <- decode.optional_field(
       "session_id",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use cwd <- decode.optional_field(
       "cwd",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use model <- decode.optional_field(
       "model",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use tools <- decode.optional_field(
       "tools",
       None,
-      decode.list(decode.string) |> decode.map(Some),
+      decode.optional(decode.list(decode.string)),
     )
     use mcp_servers <- decode.optional_field(
       "mcp_servers",
       None,
-      decode.list(mcp_server_status_decoder()) |> decode.map(Some),
+      decode.optional(decode.list(mcp_server_status_decoder())),
     )
     use permission_mode <- decode.optional_field(
       "permissionMode",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use api_key_source <- decode.optional_field(
       "apiKeySource",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use slash_commands <- decode.optional_field(
       "slash_commands",
       None,
-      decode.list(decode.string) |> decode.map(Some),
+      decode.optional(decode.list(decode.string)),
     )
     use agents <- decode.optional_field(
       "agents",
       None,
-      decode.list(decode.string) |> decode.map(Some),
+      decode.optional(decode.list(decode.string)),
     )
     use claude_code_version <- decode.optional_field(
       "claude_code_version",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     decode.success(SystemMessage(
       subtype:,
@@ -193,22 +193,22 @@ pub fn decode_assistant_message(raw: Dynamic) -> Result(Message, DecodeError) {
     use uuid <- decode.optional_field(
       "uuid",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use session_id <- decode.optional_field(
       "session_id",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use parent_tool_use_id <- decode.optional_field(
       "parent_tool_use_id",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use message <- decode.optional_field(
       "message",
       None,
-      assistant_message_content_decoder() |> decode.map(Some),
+      decode.optional(assistant_message_content_decoder()),
     )
     decode.success(AssistantMessage(
       uuid:,
@@ -229,27 +229,27 @@ pub fn decode_user_message(raw: Dynamic) -> Result(Message, DecodeError) {
     use uuid <- decode.optional_field(
       "uuid",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use session_id <- decode.optional_field(
       "session_id",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use parent_tool_use_id <- decode.optional_field(
       "parent_tool_use_id",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use message <- decode.optional_field(
       "message",
       None,
-      user_message_content_decoder() |> decode.map(Some),
+      decode.optional(user_message_content_decoder()),
     )
     use tool_use_result <- decode.optional_field(
       "tool_use_result",
       None,
-      decode.dynamic |> decode.map(Some),
+      decode.optional(decode.dynamic),
     )
     decode.success(UserMessage(
       uuid:,
@@ -271,72 +271,72 @@ pub fn decode_result_message(raw: Dynamic) -> Result(Message, DecodeError) {
     use subtype_str <- decode.optional_field(
       "subtype",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use uuid <- decode.optional_field(
       "uuid",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use session_id <- decode.optional_field(
       "session_id",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use is_error <- decode.optional_field(
       "is_error",
       None,
-      decode.bool |> decode.map(Some),
+      decode.optional(decode.bool),
     )
     use duration_ms <- decode.optional_field(
       "duration_ms",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     use duration_api_ms <- decode.optional_field(
       "duration_api_ms",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     use num_turns <- decode.optional_field(
       "num_turns",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     use result <- decode.optional_field(
       "result",
       None,
-      decode.string |> decode.map(Some),
+      decode.optional(decode.string),
     )
     use total_cost_usd <- decode.optional_field(
       "total_cost_usd",
       None,
-      decode.float |> decode.map(Some),
+      decode.optional(decode.float),
     )
     use usage <- decode.optional_field(
       "usage",
       None,
-      usage_decoder() |> decode.map(Some),
+      decode.optional(usage_decoder()),
     )
     use model_usage <- decode.optional_field(
       "modelUsage",
       None,
-      decode.dynamic |> decode.map(Some),
+      decode.optional(decode.dynamic),
     )
     use permission_denials <- decode.optional_field(
       "permission_denials",
       None,
-      decode.list(permission_denial_decoder()) |> decode.map(Some),
+      decode.optional(decode.list(permission_denial_decoder())),
     )
     use structured_output <- decode.optional_field(
       "structured_output",
       None,
-      decode.dynamic |> decode.map(Some),
+      decode.optional(decode.dynamic),
     )
     use errors <- decode.optional_field(
       "errors",
       None,
-      decode.list(decode.string) |> decode.map(Some),
+      decode.optional(decode.list(decode.string)),
     )
     // Convert subtype string to ResultSubtype
     let subtype = case subtype_str {
@@ -384,33 +384,33 @@ fn assistant_message_content_decoder() -> decode.Decoder(
   use model <- decode.optional_field(
     "model",
     None,
-    decode.string |> decode.map(Some),
+    decode.optional(decode.string),
   )
-  use id <- decode.optional_field("id", None, decode.string |> decode.map(Some))
+  use id <- decode.optional_field("id", None, decode.optional(decode.string))
   use message_type <- decode.optional_field(
     "type",
     None,
-    decode.string |> decode.map(Some),
+    decode.optional(decode.string),
   )
   use role <- decode.optional_field(
     "role",
     None,
-    decode.string |> decode.map(Some),
+    decode.optional(decode.string),
   )
   use content <- decode.optional_field(
     "content",
     None,
-    content_blocks_decoder() |> decode.map(Some),
+    decode.optional(content_blocks_decoder()),
   )
   use stop_reason <- decode.optional_field(
     "stop_reason",
     None,
-    decode.string |> decode.map(Some),
+    decode.optional(decode.string),
   )
   use usage <- decode.optional_field(
     "usage",
     None,
-    usage_decoder() |> decode.map(Some),
+    decode.optional(usage_decoder()),
   )
   decode.success(AssistantMessageContent(
     model:,
@@ -428,12 +428,12 @@ fn user_message_content_decoder() -> decode.Decoder(UserMessageContent) {
   use role <- decode.optional_field(
     "role",
     None,
-    decode.string |> decode.map(Some),
+    decode.optional(decode.string),
   )
   use content <- decode.optional_field(
     "content",
     None,
-    tool_result_blocks_decoder() |> decode.map(Some),
+    decode.optional(tool_result_blocks_decoder()),
   )
   decode.success(UserMessageContent(role:, content:))
 }
@@ -443,22 +443,22 @@ fn usage_decoder() -> decode.Decoder(Usage) {
   use input_tokens <- decode.optional_field(
     "input_tokens",
     None,
-    decode.int |> decode.map(Some),
+    decode.optional(decode.int),
   )
   use output_tokens <- decode.optional_field(
     "output_tokens",
     None,
-    decode.int |> decode.map(Some),
+    decode.optional(decode.int),
   )
   use cache_creation_input_tokens <- decode.optional_field(
     "cache_creation_input_tokens",
     None,
-    decode.int |> decode.map(Some),
+    decode.optional(decode.int),
   )
   use cache_read_input_tokens <- decode.optional_field(
     "cache_read_input_tokens",
     None,
-    decode.int |> decode.map(Some),
+    decode.optional(decode.int),
   )
   decode.success(Usage(
     input_tokens:,
@@ -539,7 +539,7 @@ fn tool_result_block_decoder() -> decode.Decoder(ToolResultBlock) {
   use is_error <- decode.optional_field(
     "is_error",
     None,
-    decode.bool |> decode.map(Some),
+    decode.optional(decode.bool),
   )
   decode.success(ToolResultBlock(tool_use_id:, content:, is_error:))
 }
@@ -691,7 +691,7 @@ pub fn decode_tool_result_block(
     use is_error <- decode.optional_field(
       "is_error",
       None,
-      decode.bool |> decode.map(Some),
+      decode.optional(decode.bool),
     )
     decode.success(ToolResultBlock(tool_use_id:, content:, is_error:))
   }
@@ -724,22 +724,22 @@ pub fn decode_usage(raw: Dynamic) -> Result(Usage, DecodeError) {
     use input_tokens <- decode.optional_field(
       "input_tokens",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     use output_tokens <- decode.optional_field(
       "output_tokens",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     use cache_creation_input_tokens <- decode.optional_field(
       "cache_creation_input_tokens",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     use cache_read_input_tokens <- decode.optional_field(
       "cache_read_input_tokens",
       None,
-      decode.int |> decode.map(Some),
+      decode.optional(decode.int),
     )
     decode.success(Usage(
       input_tokens:,

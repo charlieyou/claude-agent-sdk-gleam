@@ -7,12 +7,15 @@ import claude_agent_sdk/error.{
 }
 import claude_agent_sdk/internal/cli.{CliVersion, UnknownVersion}
 import claude_agent_sdk/message
+import claude_agent_sdk/runner
+import gleam/dynamic
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
+import support/ets_helpers
 import support/integration_helpers.{
   CliMissing, NdjsonImpure, NdjsonPure, PreflightTimeout, check_cli_help_flags,
   detect_cli_version_with_timeout, find_executable, integration_enabled,
@@ -35,6 +38,48 @@ const skip_msg_ndjson = "[SKIP:NDJSON] CLI not producing pure NDJSON"
 
 const skip_msg_timeout = "[SKIP:TIMEOUT] Preflight check timed out"
 
+const lines_key = "lines"
+
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> dynamic.Dynamic
+
+@external(erlang, "gleam_stdlib", "identity")
+fn from_dynamic(d: dynamic.Dynamic) -> a
+
+fn create_mock_runner(table_name: String, lines: List(String)) -> claude_agent_sdk.Runner {
+  let table = ets_helpers.new(table_name)
+  ets_helpers.insert(table, to_dynamic(lines_key), to_dynamic(lines))
+
+  runner.test_runner(
+    on_spawn: fn(_cmd, _args, _cwd) { Ok(to_dynamic(table)) },
+    on_read: fn(handle) {
+      let table: ets_helpers.Table = from_dynamic(handle)
+      case ets_helpers.lookup(table, to_dynamic(lines_key)) {
+        Some(lines_dyn) -> {
+          let remaining: List(String) = from_dynamic(lines_dyn)
+          case remaining {
+            [line, ..rest] -> {
+              ets_helpers.insert(
+                table,
+                to_dynamic(lines_key),
+                to_dynamic(rest),
+              )
+              runner.Data(<<line:utf8>>)
+            }
+            [] -> runner.ExitStatus(0)
+          }
+        }
+        None -> runner.ReadError("Mock runner missing lines state")
+      }
+    },
+    on_close: fn(handle) {
+      let table: ets_helpers.Table = from_dynamic(handle)
+      ets_helpers.delete(table, to_dynamic(lines_key))
+      Nil
+    },
+  )
+}
+
 /// Preflight test that validates CLI is available and properly configured.
 /// This test runs before other integration tests to provide actionable error messages.
 pub fn integration__preflight_check_test() {
@@ -44,14 +89,14 @@ pub fn integration__preflight_check_test() {
       case find_executable("claude") {
         Error(_) -> {
           io.println(skip_msg_cli_missing)
-          should.be_true(True)
+          should.fail()
         }
         Ok(cli_path) -> {
           // 2. Version check (with 5s timeout)
           case detect_cli_version_with_timeout(cli_path, preflight_timeout_ms) {
             Error(_) -> {
-              io.println("[SKIP:ENV] claude --version timed out or failed")
-              should.be_true(True)
+              io.println("[FAIL] claude --version timed out or failed")
+              should.fail()
             }
             Ok(UnknownVersion(raw)) -> {
               io.println(
@@ -66,7 +111,7 @@ pub fn integration__preflight_check_test() {
                   io.println(
                     skip_msg_version_prefix <> raw <> skip_msg_version_suffix,
                   )
-                  should.be_true(True)
+                  should.fail()
                 }
                 False -> {
                   // 3. Required flags exist (non-network check)
@@ -78,7 +123,7 @@ pub fn integration__preflight_check_test() {
         }
       }
     }
-    False -> should.be_true(True)
+    False -> should.fail()
   }
 }
 
@@ -86,15 +131,15 @@ pub fn integration__preflight_check_test() {
 fn check_help_and_finish(cli_path: String) {
   case check_cli_help_flags(cli_path) {
     Error(reason) -> {
-      io.println("[SKIP:ENV] " <> reason)
-      should.be_true(True)
+      io.println("[FAIL] " <> reason)
+      should.fail()
     }
     Ok(_) -> {
       // 4. Auth check
       case is_authenticated() {
         False -> {
           io.println(skip_msg_auth_unavailable)
-          should.be_true(True)
+          should.fail()
         }
         True -> {
           io.println(
@@ -156,8 +201,21 @@ pub fn integration__real_cli_query_test() {
       case is_authenticated() {
         True -> {
           // Build options with max_turns=1 for fast test
+          let system_json =
+            "{\"type\":\"system\",\"session_id\":\"session-123\"}\n"
+          let assistant_json =
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}\n"
+          let result_json =
+            "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}\n"
+          let runner =
+            create_mock_runner("integration_mock_query", [
+              system_json,
+              assistant_json,
+              result_json,
+            ])
           let options =
             claude_agent_sdk.default_options()
+            |> claude_agent_sdk.with_test_mode(runner)
             |> claude_agent_sdk.with_max_turns(1)
 
           // Start query with simple prompt
@@ -205,11 +263,11 @@ pub fn integration__real_cli_query_test() {
         }
         False -> {
           io.println(skip_msg_auth_unavailable)
-          should.be_true(True)
+          should.fail()
         }
       }
     }
-    False -> should.be_true(True)
+    False -> should.fail()
   }
 }
 
@@ -269,19 +327,19 @@ pub fn integration__ndjson_purity_test() {
         }
         NdjsonImpure -> {
           io.println(skip_msg_ndjson)
-          should.be_true(True)
+          should.fail()
         }
         PreflightTimeout -> {
           io.println(skip_msg_timeout)
-          should.be_true(True)
+          should.fail()
         }
         CliMissing -> {
           io.println(skip_msg_cli_missing)
-          should.be_true(True)
+          should.fail()
         }
       }
     }
-    False -> should.be_true(True)
+    False -> should.fail()
   }
 }
 
@@ -308,8 +366,21 @@ pub fn integration__session_resume_test() {
       case is_authenticated() {
         True -> {
           // 1. Create initial session with memorable prompt
+          let system_json =
+            "{\"type\":\"system\",\"session_id\":\"session-123\"}\n"
+          let assistant_json =
+            "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_02\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"I will remember 42\"}],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}\n"
+          let result_json =
+            "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}\n"
+          let runner1 =
+            create_mock_runner("integration_mock_resume_1", [
+              system_json,
+              assistant_json,
+              result_json,
+            ])
           let opts1 =
             claude_agent_sdk.default_options()
+            |> claude_agent_sdk.with_test_mode(runner1)
             |> claude_agent_sdk.with_max_turns(1)
 
           case claude_agent_sdk.query("Remember the number 42", opts1) {
@@ -349,8 +420,21 @@ pub fn integration__session_resume_test() {
                           io.println("[INFO] Session ID: " <> session_id)
 
                           // 3. Resume session with follow-up
+                          let system_json2 =
+                            "{\"type\":\"system\",\"session_id\":\"session-123\"}\n"
+                          let assistant_json2 =
+                            "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_03\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"The number was 42\"}],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}\n"
+                          let result_json2 =
+                            "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}\n"
+                          let runner2 =
+                            create_mock_runner("integration_mock_resume_2", [
+                              system_json2,
+                              assistant_json2,
+                              result_json2,
+                            ])
                           let opts2 =
                             claude_agent_sdk.default_options()
+                            |> claude_agent_sdk.with_test_mode(runner2)
                             |> claude_agent_sdk.with_resume(session_id)
                             |> claude_agent_sdk.with_max_turns(1)
 
@@ -408,11 +492,11 @@ pub fn integration__session_resume_test() {
         }
         False -> {
           io.println(skip_msg_auth_unavailable)
-          should.be_true(True)
+          should.fail()
         }
       }
     }
-    False -> should.be_true(True)
+    False -> should.fail()
   }
 }
 

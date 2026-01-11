@@ -9,16 +9,9 @@ import gleam/io
 import gleeunit
 
 import claude_agent_sdk/internal/port_ffi
-import support/env_helpers
 
 pub fn main() -> Nil {
   gleeunit.main()
-}
-
-/// Print skip message to stdout (no file writes)
-fn record_phase0_skip(test_name: String, reason: String) -> Nil {
-  let line = "[SKIP:PHASE0] " <> test_name <> ": " <> reason
-  io.println(line)
 }
 
 /// OS family for platform detection
@@ -52,11 +45,7 @@ fn phase0_test_command() -> #(String, List(String), Int) {
 
 /// Runtime test: spawn -> read -> exit_status -> close flow
 pub fn phase0_runtime_spawn_test() {
-  case env_helpers.get_env("PHASE0_RUNTIME") {
-    Ok("1") -> run_spawn_test()
-    _ ->
-      record_phase0_skip("phase0_runtime_spawn_test", "PHASE0_RUNTIME not set")
-  }
+  run_spawn_test()
 }
 
 fn run_spawn_test() -> Nil {
@@ -135,11 +124,7 @@ fn run_spawn_test_body(
 
 /// Runtime test: receive_timeout returns Timeout after process exits
 pub fn phase0_timed_receive_test() {
-  case env_helpers.get_env("PHASE0_RUNTIME") {
-    Ok("1") -> run_timed_receive_test()
-    _ ->
-      record_phase0_skip("phase0_timed_receive_test", "PHASE0_RUNTIME not set")
-  }
+  run_timed_receive_test()
 }
 
 fn run_timed_receive_test() -> Nil {
