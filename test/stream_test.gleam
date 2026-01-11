@@ -16,6 +16,7 @@ import claude_agent_sdk/internal/stream.{
 import gleam/bit_array
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleam/yielder
 import gleeunit/should
 
@@ -297,6 +298,79 @@ fn create_large_bit_array_loop(remaining: Int, acc: BitArray) -> BitArray {
   case remaining {
     0 -> acc
     _ -> create_large_bit_array_loop(remaining - 1, <<acc:bits, 0x61>>)
+  }
+}
+
+/// Generate a valid NDJSON assistant message with specified content size.
+/// The padding fills the "text" field to reach approximately the target size.
+/// Uses string concatenation instead of json module to avoid OTP 27 requirement.
+fn generate_large_message(size_bytes: Int) -> String {
+  // JSON structure overhead is approximately 200 bytes
+  let overhead = 200
+  let padding_size = case size_bytes > overhead {
+    True -> size_bytes - overhead
+    False -> 0
+  }
+  let padding = string.repeat("A", padding_size)
+  "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\""
+  <> padding
+  <> "\"}],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}"
+}
+
+// ============================================================================
+// Buffer Overflow Tests (casg-tc3.6)
+// ============================================================================
+
+pub fn buffer_handles_1mb_message_test() {
+  // 1MB message should be well under the 10MB limit
+  let large_json = generate_large_message(1_000_000)
+  let data = bit_array.from_string(large_json)
+
+  // Verify data is approximately 1MB
+  let size = bit_array.byte_size(data)
+  { size > 900_000 && size < 1_100_000 } |> should.be_true
+
+  // Should append to buffer successfully (not near limit)
+  case append_to_buffer(<<>>, data) {
+    Ok(buffer) -> {
+      // Buffer should contain our data
+      bit_array.byte_size(buffer) |> should.equal(size)
+    }
+    Error(_) -> should.fail()
+  }
+}
+
+pub fn buffer_overflow_at_11mb_test() {
+  // 11MB exceeds the 10MB limit (10_485_760 bytes)
+  let huge_json = generate_large_message(11_000_000)
+  let data = bit_array.from_string(huge_json)
+
+  // Verify data exceeds limit
+  let size = bit_array.byte_size(data)
+  { size > constants.max_line_size_bytes } |> should.be_true
+
+  // Should trigger BufferOverflow
+  case append_to_buffer(<<>>, data) {
+    Ok(_) -> should.fail()
+    Error(BufferOverflow) -> should.be_ok(Ok(Nil))
+    Error(_) -> should.fail()
+  }
+}
+
+pub fn buffer_overflow_at_15mb_test() {
+  // 15MB well exceeds the 10MB limit
+  let huge_json = generate_large_message(15_000_000)
+  let data = bit_array.from_string(huge_json)
+
+  // Verify data exceeds limit
+  let size = bit_array.byte_size(data)
+  { size > constants.max_line_size_bytes } |> should.be_true
+
+  // Should trigger BufferOverflow
+  case append_to_buffer(<<>>, data) {
+    Ok(_) -> should.fail()
+    Error(BufferOverflow) -> should.be_ok(Ok(Nil))
+    Error(_) -> should.fail()
   }
 }
 
@@ -654,19 +728,40 @@ pub fn next_handles_invalid_json_as_non_terminal_error_test() {
 }
 
 pub fn next_buffer_overflow_is_terminal_test() {
-  // This test verifies buffer overflow is terminal
-  // We can't easily trigger a real overflow, but we can test the logic
-  // by using the append_to_buffer function result handling
+  // BufferOverflow is terminal: once triggered, stream is closed
+  // and subsequent next() calls return EndOfStream.
+  //
+  // We verify this by:
+  // 1. Creating a stream
+  // 2. Manually closing it (simulating what happens after BufferOverflow)
+  // 3. Calling next() and verifying EndOfStream is returned
+  //
+  // The actual BufferOverflow -> closed transition is tested via:
+  // - append_to_buffer_overflow_test (buffer limit check)
+  // - buffer_overflow_at_11mb_test (realistic payload)
+  // - buffer_overflow_at_15mb_test (realistic payload)
   let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
   let stream_instance = new(port)
 
-  // Manually set a large buffer that would overflow on next append
-  // This is tested via append_to_buffer_overflow_test already
-  // Just verify the stream returns BufferOverflow as terminal
+  // Simulate what happens when BufferOverflow occurs: stream is closed
+  let closed_stream = mark_closed(stream_instance)
 
-  // Close for cleanup
-  let _ = close(stream_instance)
-  Nil
+  // Verify stream is closed
+  is_closed(closed_stream) |> should.be_true
+
+  // Next call should return EndOfStream (terminal behavior)
+  let #(result, final_stream) = next(closed_stream)
+  case result {
+    Ok(EndOfStream) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
+
+  // Subsequent calls also return EndOfStream
+  let #(result2, _) = next(final_stream)
+  case result2 {
+    Ok(EndOfStream) -> should.be_ok(Ok(Nil))
+    _ -> should.fail()
+  }
 }
 
 pub fn next_increments_decode_error_counter_test() {
