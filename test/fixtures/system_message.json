@@ -1,15 +1,55 @@
 {
   "type": "system",
   "subtype": "init",
-  "uuid": "550e8400-e29b-41d4-a716-446655440000",
-  "session_id": "550e8400-e29b-41d4-a716-446655440001",
-  "cwd": "/home/user/project",
-  "model": "claude-sonnet-4-5-20250929",
-  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+  "cwd": "/home/cyou/claude-agent-sdk-gleam",
+  "session_id": "40e7b02d-c0f9-4876-9010-f514d4eb0603",
+  "tools": [
+    "Task",
+    "TaskOutput",
+    "Bash",
+    "Glob",
+    "Grep",
+    "ExitPlanMode",
+    "Read",
+    "Edit",
+    "Write",
+    "NotebookEdit",
+    "WebFetch",
+    "TodoWrite",
+    "WebSearch",
+    "KillShell",
+    "AskUserQuestion",
+    "Skill",
+    "EnterPlanMode"
+  ],
   "mcp_servers": [],
-  "permissionMode": "default",
-  "apiKeySource": "ANTHROPIC_API_KEY",
-  "slash_commands": ["compact", "context", "cost"],
-  "agents": ["Bash", "Explore", "Plan"],
-  "claude_code_version": "1.0.0"
+  "model": "claude-opus-4-5-20251101",
+  "permissionMode": "acceptEdits",
+  "slash_commands": [
+    "beads",
+    "mala-logs",
+    "compact",
+    "context",
+    "cost"
+  ],
+  "apiKeySource": "none",
+  "claude_code_version": "2.1.3",
+  "output_style": "default",
+  "agents": [
+    "Bash",
+    "general-purpose",
+    "Explore",
+    "Plan"
+  ],
+  "skills": [
+    "beads",
+    "mala-logs"
+  ],
+  "plugins": [
+    {
+      "name": "pyright-lsp",
+      "path": "/home/cyou/.claude/plugins/cache/claude-plugins-official/pyright-lsp/1.0.0"
+    }
+  ],
+  "uuid": "53e9d0b7-d864-43b8-a2cb-83c601deb075"
 }

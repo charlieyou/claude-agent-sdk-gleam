@@ -1,20 +1,40 @@
 {
   "type": "result",
   "subtype": "success",
-  "uuid": "550e8400-e29b-41d4-a716-446655440004",
-  "session_id": "550e8400-e29b-41d4-a716-446655440001",
   "is_error": false,
-  "duration_ms": 1234,
-  "duration_api_ms": 800,
-  "num_turns": 1,
-  "result": "Task completed successfully.",
-  "total_cost_usd": 0.01,
+  "duration_ms": 8722,
+  "duration_api_ms": 21034,
+  "num_turns": 2,
+  "result": "Here are the files in the current directory.",
+  "session_id": "40e7b02d-c0f9-4876-9010-f514d4eb0603",
+  "total_cost_usd": 0.24722425,
   "usage": {
-    "input_tokens": 100,
-    "output_tokens": 50,
-    "cache_creation_input_tokens": 0,
-    "cache_read_input_tokens": 0
+    "input_tokens": 18,
+    "cache_creation_input_tokens": 25067,
+    "cache_read_input_tokens": 17254,
+    "output_tokens": 424,
+    "server_tool_use": {
+      "web_search_requests": 0,
+      "web_fetch_requests": 0
+    },
+    "service_tier": "standard",
+    "cache_creation": {
+      "ephemeral_1h_input_tokens": 0,
+      "ephemeral_5m_input_tokens": 25067
+    }
   },
-  "modelUsage": {},
-  "permission_denials": []
+  "modelUsage": {
+    "claude-opus-4-5-20251101": {
+      "inputTokens": 38,
+      "outputTokens": 765,
+      "cacheReadInputTokens": 28775,
+      "cacheCreationInputTokens": 31159,
+      "webSearchRequests": 0,
+      "costUSD": 0.22844625,
+      "contextWindow": 200000,
+      "maxOutputTokens": 64000
+    }
+  },
+  "permission_denials": [],
+  "uuid": "ca659dd8-fe04-4dc4-969f-a3d55f43c1d3"
 }

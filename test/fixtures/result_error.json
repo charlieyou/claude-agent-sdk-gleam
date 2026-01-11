@@ -1,13 +1,12 @@
 {
   "type": "result",
   "subtype": "error_during_execution",
-  "uuid": "550e8400-e29b-41d4-a716-446655440005",
-  "session_id": "550e8400-e29b-41d4-a716-446655440001",
   "is_error": true,
   "duration_ms": 500,
   "duration_api_ms": 200,
   "num_turns": 1,
   "result": "",
+  "session_id": "40e7b02d-c0f9-4876-9010-f514d4eb0603",
   "total_cost_usd": 0.005,
   "usage": {
     "input_tokens": 50,
@@ -15,5 +14,5 @@
   },
   "modelUsage": {},
   "permission_denials": [],
-  "errors": ["An error occurred during execution"]
+  "uuid": "error-uuid-placeholder"
 }

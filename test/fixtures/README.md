@@ -1,28 +1,40 @@
 # Test Fixtures
 
-## Status: SYNTHETIC
+## Status: REAL CLI OUTPUT
 
-These fixtures are **synthetic** (spec-derived minimal JSON), NOT captured from real CLI output.
+These fixtures are captured from **real Claude CLI output** (version 2.1.3).
 
-## Fixture Policy
+## Capture Information
 
-- Unit tests must run without a real CLI installed
-- These fixtures are derived from the Claude Agent SDK specification
-- Real CLI fixtures will be captured and committed in issue casg-k92.11
+- **CLI version**: 2.1.3 (Claude Code)
+- **Capture date**: 2026-01-11
+- **Capture commands**:
+  ```bash
+  claude --print --output-format stream-json --verbose -- "List the files in the current directory using ls"
+  claude --help
+  ```
 
 ## Fixtures
 
 | File | Description |
 |------|-------------|
-| `system_message.json` | Full system message with all observed fields |
-| `system_message_minimal.json` | System message with only `type` field (core required) |
-| `assistant_message.json` | Assistant message with text and tool_use blocks |
+| `system_message.json` | System init message with tools, model, and session config |
+| `assistant_message.json` | Assistant message with tool_use content block |
+| `user_message.json` | User message with tool_result content block |
+| `result_success.json` | Successful result message with usage/cost data |
+| `result_error.json` | Error result message (synthetic - matches CLI schema) |
+| `cli_help_excerpt.txt` | Full `claude --help` output for flag validation |
+
+## Compatibility Test Fixtures
+
+These fixtures test forward compatibility and edge cases:
+
+| File | Description |
+|------|-------------|
+| `system_message_minimal.json` | System message with only `type` field |
 | `assistant_unknown_block.json` | Assistant message with unknown content block type |
-| `user_message.json` | User message with tool_result |
-| `result_success.json` | Successful result message |
-| `result_error.json` | Error result message |
 | `unknown_message_type.json` | Message with unknown type (forward-compat test) |
-| `unknown_content_block.json` | Assistant with unknown content block type |
+| `unknown_content_block.json` | Content block with unknown type |
 
 ## Field Verification Status
 
@@ -32,6 +44,14 @@ Per plan section "Schema Source and Forward Compatibility":
 |-------|--------|-------|
 | `type` (all messages) | **Required** | Needed for message dispatch |
 | All other fields | **Optional** | Per default policy: "When in doubt, make it Optional" |
+
+## Required CLI Flags
+
+The following flags are required for SDK operation (verified in `cli_help_excerpt.txt`):
+
+- `--print` / `-p`: Non-interactive output mode
+- `--output-format`: Supports `stream-json` for structured output
+- `--verbose`: Enables verbose output
 
 ## Spec Reference
 
