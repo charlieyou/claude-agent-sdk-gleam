@@ -3,6 +3,9 @@
 //// This module provides the main entry point for the Claude Agent SDK.
 //// Re-exports all public types for convenient imports.
 
+import gleam/dynamic
+import gleam/option
+
 // =============================================================================
 // Message Types (from message.gleam)
 // =============================================================================
@@ -54,8 +57,36 @@ import claude_agent_sdk/content
 pub type ContentBlock =
   content.ContentBlock
 
+/// Creates a TextBlock content block
+pub fn text_block(text: String) -> ContentBlock {
+  content.TextBlock(text)
+}
+
+/// Creates a ToolUseBlock content block
+pub fn tool_use_block(
+  id: String,
+  name: String,
+  input: dynamic.Dynamic,
+) -> ContentBlock {
+  content.ToolUseBlock(id, name, input)
+}
+
+/// Creates an UnknownBlock content block for forward compatibility
+pub fn unknown_block(raw: dynamic.Dynamic) -> ContentBlock {
+  content.UnknownBlock(raw)
+}
+
 pub type ToolResultBlock =
   content.ToolResultBlock
+
+/// Creates a ToolResultBlock
+pub fn tool_result_block(
+  tool_use_id: String,
+  content_text: String,
+  is_error: option.Option(Bool),
+) -> ToolResultBlock {
+  content.ToolResultBlock(tool_use_id, content_text, is_error)
+}
 
 // =============================================================================
 // Error Types (from error.gleam)
