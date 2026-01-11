@@ -432,7 +432,7 @@ pub fn reset_decode_errors(stream: QueryStream) -> QueryStream {
 pub fn increment_drain_count(stream: QueryStream) -> #(QueryStream, Bool) {
   let QueryStream(internal) = stream
   let new_count = internal.drain_count + 1
-  let limit_exceeded = new_count >= constants.post_result_drain_max_iterations
+  let limit_exceeded = new_count > constants.post_result_drain_max_iterations
   let updated =
     QueryStream(QueryStreamInternal(..internal, drain_count: new_count))
   #(updated, limit_exceeded)
