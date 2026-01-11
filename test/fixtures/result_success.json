@@ -1,0 +1,20 @@
+{
+  "type": "result",
+  "subtype": "success",
+  "uuid": "550e8400-e29b-41d4-a716-446655440004",
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "is_error": false,
+  "duration_ms": 1234,
+  "duration_api_ms": 800,
+  "num_turns": 1,
+  "result": "Task completed successfully.",
+  "total_cost_usd": 0.01,
+  "usage": {
+    "input_tokens": 100,
+    "output_tokens": 50,
+    "cache_creation_input_tokens": 0,
+    "cache_read_input_tokens": 0
+  },
+  "modelUsage": {},
+  "permission_denials": []
+}

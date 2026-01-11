@@ -1,0 +1,15 @@
+{
+  "type": "system",
+  "subtype": "init",
+  "uuid": "550e8400-e29b-41d4-a716-446655440000",
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "cwd": "/home/user/project",
+  "model": "claude-sonnet-4-5-20250929",
+  "tools": ["Bash", "Read", "Write", "Edit", "Glob", "Grep"],
+  "mcp_servers": [],
+  "permissionMode": "default",
+  "apiKeySource": "ANTHROPIC_API_KEY",
+  "slash_commands": ["compact", "context", "cost"],
+  "agents": ["Bash", "Explore", "Plan"],
+  "claude_code_version": "1.0.0"
+}

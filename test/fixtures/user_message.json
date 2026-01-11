@@ -1,0 +1,22 @@
+{
+  "type": "user",
+  "uuid": "550e8400-e29b-41d4-a716-446655440003",
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "parent_tool_use_id": null,
+  "message": {
+    "role": "user",
+    "content": [
+      {
+        "type": "tool_result",
+        "tool_use_id": "toolu_01XYZ789",
+        "content": "src/main.gleam\nsrc/lib.gleam"
+      }
+    ]
+  },
+  "tool_use_result": {
+    "filenames": ["src/main.gleam", "src/lib.gleam"],
+    "durationMs": 12,
+    "numFiles": 2,
+    "truncated": false
+  }
+}

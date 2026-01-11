@@ -1,0 +1,19 @@
+{
+  "type": "result",
+  "subtype": "error_during_execution",
+  "uuid": "550e8400-e29b-41d4-a716-446655440005",
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "is_error": true,
+  "duration_ms": 500,
+  "duration_api_ms": 200,
+  "num_turns": 1,
+  "result": "",
+  "total_cost_usd": 0.005,
+  "usage": {
+    "input_tokens": 50,
+    "output_tokens": 10
+  },
+  "modelUsage": {},
+  "permission_denials": [],
+  "errors": ["An error occurred during execution"]
+}

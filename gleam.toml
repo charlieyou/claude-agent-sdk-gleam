@@ -13,3 +13,4 @@ gleam_json = "== 3.1.0"
 
 [dev-dependencies]
 gleeunit = "== 1.9.0"
+simplifile = "== 2.2.0"

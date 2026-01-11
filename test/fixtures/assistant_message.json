@@ -1,0 +1,33 @@
+{
+  "type": "assistant",
+  "uuid": "550e8400-e29b-41d4-a716-446655440002",
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "parent_tool_use_id": null,
+  "message": {
+    "model": "claude-sonnet-4-5-20250929",
+    "id": "msg_01ABC123",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "Hello, I can help you with that."
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_01XYZ789",
+        "name": "Glob",
+        "input": {
+          "pattern": "**/*.gleam"
+        }
+      }
+    ],
+    "stop_reason": null,
+    "usage": {
+      "input_tokens": 100,
+      "output_tokens": 50,
+      "cache_creation_input_tokens": 0,
+      "cache_read_input_tokens": 0
+    }
+  }
+}
