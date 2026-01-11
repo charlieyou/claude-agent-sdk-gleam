@@ -511,7 +511,7 @@ fn next_receive(
           let closed = mark_closed(updated)
           #(
             Error(NextTooManyDecodeErrors(
-              constants.max_consecutive_decode_errors,
+              get_consecutive_decode_errors(closed),
               msg,
             )),
             closed,
@@ -581,9 +581,9 @@ fn receive_from_port(
       case internal.state {
         ResultReceived -> {
           // After result, timeout means nothing more to drain
+          // Transition to PendingEndOfStream and let next_impl handle the yield
           let updated = mark_pending_end_of_stream(stream)
-          let closed = mark_closed(updated)
-          #(Ok(EndOfStream), closed)
+          next_impl(updated)
         }
         _ -> {
           // In other states, shouldn't timeout (blocking)
@@ -649,8 +649,6 @@ fn process_line(
   stream: QueryStream,
   line: String,
 ) -> #(Result(StreamItem, NextError), QueryStream) {
-  let QueryStream(internal) = stream
-
   // Try to decode the line as a message
   let raw_bytes = bit_array.from_string(line)
   case decoder.decode_message_envelope(line, raw_bytes) {
@@ -674,7 +672,7 @@ fn process_line(
           let closed = mark_closed(updated)
           #(
             Error(NextTooManyDecodeErrors(
-              internal.consecutive_decode_errors + 1,
+              get_consecutive_decode_errors(closed),
               msg,
             )),
             closed,
@@ -691,7 +689,7 @@ fn process_line(
           let closed = mark_closed(updated)
           #(
             Error(NextTooManyDecodeErrors(
-              internal.consecutive_decode_errors + 1,
+              get_consecutive_decode_errors(closed),
               msg,
             )),
             closed,
