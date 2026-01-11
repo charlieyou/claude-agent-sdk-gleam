@@ -21,12 +21,16 @@ import claude_agent_sdk/content.{
   ToolUseBlock, UnknownBlock,
 }
 import claude_agent_sdk/message.{
-  type McpServerStatus, type PermissionDenial, type ResultSubtype, type Usage,
-  ErrorDuringExecution, ErrorMaxBudget, ErrorMaxTurns, McpServerStatus,
-  PermissionDenial, Success, UnknownSubtype, Usage,
+  type AssistantMessageContent, type McpServerStatus, type Message,
+  type PermissionDenial, type ResultSubtype, type Usage, type UserMessageContent,
+  Assistant, AssistantMessage, AssistantMessageContent, ErrorDuringExecution,
+  ErrorMaxBudget, ErrorMaxTurns, McpServerStatus, PermissionDenial, Result,
+  ResultMessage, Success, System, SystemMessage, UnknownSubtype, Usage, User,
+  UserMessage, UserMessageContent,
 }
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 
@@ -40,31 +44,473 @@ pub type DecodeError {
   JsonDecodeError(String)
 }
 
-/// Decode a JSON string into a message type.
+/// Decode a JSON string into a Message type.
 /// Returns DecodeError for invalid JSON, unknown types, or missing required fields.
-pub fn decode_message(_json_string: String) -> Result(Dynamic, DecodeError) {
-  // Skeleton: always fails until implemented
-  Error(JsonDecodeError("decoder not implemented"))
+pub fn decode_message(json_string: String) -> Result(Message, DecodeError) {
+  // First parse JSON string to Dynamic
+  case json.parse(json_string, decode.dynamic) {
+    Error(_) -> Error(JsonSyntaxError("Invalid JSON"))
+    Ok(raw) -> {
+      // Get the type field to dispatch to correct decoder
+      let type_decoder = {
+        use msg_type <- decode.field("type", decode.string)
+        decode.success(msg_type)
+      }
+      case decode.run(raw, type_decoder) {
+        Error(_) -> Error(JsonDecodeError("Missing required field: type"))
+        Ok(msg_type) -> {
+          case msg_type {
+            "system" -> decode_system_message(raw)
+            "assistant" -> decode_assistant_message(raw)
+            "user" -> decode_user_message(raw)
+            "result" -> decode_result_message(raw)
+            unknown -> Error(UnexpectedMessageType(unknown))
+          }
+        }
+      }
+    }
+  }
 }
 
 /// Decode a system message from Dynamic.
-pub fn decode_system_message(_raw: Dynamic) -> Result(Dynamic, DecodeError) {
-  Error(JsonDecodeError("decode_system_message not implemented"))
+pub fn decode_system_message(raw: Dynamic) -> Result(Message, DecodeError) {
+  let decoder = {
+    use subtype <- decode.optional_field(
+      "subtype",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use uuid <- decode.optional_field(
+      "uuid",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use session_id <- decode.optional_field(
+      "session_id",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use cwd <- decode.optional_field(
+      "cwd",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use model <- decode.optional_field(
+      "model",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use tools <- decode.optional_field(
+      "tools",
+      None,
+      decode.list(decode.string) |> decode.map(Some),
+    )
+    use mcp_servers <- decode.optional_field(
+      "mcp_servers",
+      None,
+      decode.list(mcp_server_status_decoder()) |> decode.map(Some),
+    )
+    use permission_mode <- decode.optional_field(
+      "permissionMode",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use api_key_source <- decode.optional_field(
+      "apiKeySource",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use slash_commands <- decode.optional_field(
+      "slash_commands",
+      None,
+      decode.list(decode.string) |> decode.map(Some),
+    )
+    use agents <- decode.optional_field(
+      "agents",
+      None,
+      decode.list(decode.string) |> decode.map(Some),
+    )
+    use claude_code_version <- decode.optional_field(
+      "claude_code_version",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    decode.success(SystemMessage(
+      subtype:,
+      uuid:,
+      session_id:,
+      cwd:,
+      model:,
+      tools:,
+      mcp_servers:,
+      permission_mode:,
+      api_key_source:,
+      slash_commands:,
+      agents:,
+      claude_code_version:,
+    ))
+  }
+  case decode.run(raw, decoder) {
+    Ok(msg) -> Ok(System(msg))
+    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+  }
 }
 
 /// Decode an assistant message from Dynamic.
-pub fn decode_assistant_message(_raw: Dynamic) -> Result(Dynamic, DecodeError) {
-  Error(JsonDecodeError("decode_assistant_message not implemented"))
+pub fn decode_assistant_message(raw: Dynamic) -> Result(Message, DecodeError) {
+  let decoder = {
+    use uuid <- decode.optional_field(
+      "uuid",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use session_id <- decode.optional_field(
+      "session_id",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use parent_tool_use_id <- decode.optional_field(
+      "parent_tool_use_id",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use message <- decode.optional_field(
+      "message",
+      None,
+      assistant_message_content_decoder() |> decode.map(Some),
+    )
+    decode.success(AssistantMessage(
+      uuid:,
+      session_id:,
+      parent_tool_use_id:,
+      message:,
+    ))
+  }
+  case decode.run(raw, decoder) {
+    Ok(msg) -> Ok(Assistant(msg))
+    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+  }
 }
 
 /// Decode a user message from Dynamic.
-pub fn decode_user_message(_raw: Dynamic) -> Result(Dynamic, DecodeError) {
-  Error(JsonDecodeError("decode_user_message not implemented"))
+pub fn decode_user_message(raw: Dynamic) -> Result(Message, DecodeError) {
+  let decoder = {
+    use uuid <- decode.optional_field(
+      "uuid",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use session_id <- decode.optional_field(
+      "session_id",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use parent_tool_use_id <- decode.optional_field(
+      "parent_tool_use_id",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use message <- decode.optional_field(
+      "message",
+      None,
+      user_message_content_decoder() |> decode.map(Some),
+    )
+    use tool_use_result <- decode.optional_field(
+      "tool_use_result",
+      None,
+      decode.dynamic |> decode.map(Some),
+    )
+    decode.success(UserMessage(
+      uuid:,
+      session_id:,
+      parent_tool_use_id:,
+      message:,
+      tool_use_result:,
+    ))
+  }
+  case decode.run(raw, decoder) {
+    Ok(msg) -> Ok(User(msg))
+    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+  }
 }
 
 /// Decode a result message from Dynamic.
-pub fn decode_result_message(_raw: Dynamic) -> Result(Dynamic, DecodeError) {
-  Error(JsonDecodeError("decode_result_message not implemented"))
+pub fn decode_result_message(raw: Dynamic) -> Result(Message, DecodeError) {
+  let decoder = {
+    use subtype_str <- decode.optional_field(
+      "subtype",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use uuid <- decode.optional_field(
+      "uuid",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use session_id <- decode.optional_field(
+      "session_id",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use is_error <- decode.optional_field(
+      "is_error",
+      None,
+      decode.bool |> decode.map(Some),
+    )
+    use duration_ms <- decode.optional_field(
+      "duration_ms",
+      None,
+      decode.int |> decode.map(Some),
+    )
+    use duration_api_ms <- decode.optional_field(
+      "duration_api_ms",
+      None,
+      decode.int |> decode.map(Some),
+    )
+    use num_turns <- decode.optional_field(
+      "num_turns",
+      None,
+      decode.int |> decode.map(Some),
+    )
+    use result <- decode.optional_field(
+      "result",
+      None,
+      decode.string |> decode.map(Some),
+    )
+    use total_cost_usd <- decode.optional_field(
+      "total_cost_usd",
+      None,
+      decode.float |> decode.map(Some),
+    )
+    use usage <- decode.optional_field(
+      "usage",
+      None,
+      usage_decoder() |> decode.map(Some),
+    )
+    use model_usage <- decode.optional_field(
+      "modelUsage",
+      None,
+      decode.dynamic |> decode.map(Some),
+    )
+    use permission_denials <- decode.optional_field(
+      "permission_denials",
+      None,
+      decode.list(permission_denial_decoder()) |> decode.map(Some),
+    )
+    use structured_output <- decode.optional_field(
+      "structured_output",
+      None,
+      decode.dynamic |> decode.map(Some),
+    )
+    use errors <- decode.optional_field(
+      "errors",
+      None,
+      decode.list(decode.string) |> decode.map(Some),
+    )
+    // Convert subtype string to ResultSubtype
+    let subtype = case subtype_str {
+      Some(s) -> Some(decode_result_subtype(s))
+      None -> None
+    }
+    decode.success(ResultMessage(
+      subtype:,
+      uuid:,
+      session_id:,
+      is_error:,
+      duration_ms:,
+      duration_api_ms:,
+      num_turns:,
+      result:,
+      total_cost_usd:,
+      usage:,
+      model_usage:,
+      permission_denials:,
+      structured_output:,
+      errors:,
+    ))
+  }
+  case decode.run(raw, decoder) {
+    Ok(msg) -> Ok(Result(msg))
+    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+  }
+}
+
+// =============================================================================
+// Internal Decoders
+// =============================================================================
+
+/// Decoder for McpServerStatus
+fn mcp_server_status_decoder() -> decode.Decoder(McpServerStatus) {
+  use name <- decode.field("name", decode.string)
+  use status <- decode.field("status", decode.string)
+  decode.success(McpServerStatus(name:, status:))
+}
+
+/// Decoder for AssistantMessageContent
+fn assistant_message_content_decoder() -> decode.Decoder(
+  AssistantMessageContent,
+) {
+  use model <- decode.optional_field(
+    "model",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use id <- decode.optional_field("id", None, decode.string |> decode.map(Some))
+  use message_type <- decode.optional_field(
+    "type",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use role <- decode.optional_field(
+    "role",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use content <- decode.optional_field(
+    "content",
+    None,
+    content_blocks_decoder() |> decode.map(Some),
+  )
+  use stop_reason <- decode.optional_field(
+    "stop_reason",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use usage <- decode.optional_field(
+    "usage",
+    None,
+    usage_decoder() |> decode.map(Some),
+  )
+  decode.success(AssistantMessageContent(
+    model:,
+    id:,
+    message_type:,
+    role:,
+    content:,
+    stop_reason:,
+    usage:,
+  ))
+}
+
+/// Decoder for UserMessageContent
+fn user_message_content_decoder() -> decode.Decoder(UserMessageContent) {
+  use role <- decode.optional_field(
+    "role",
+    None,
+    decode.string |> decode.map(Some),
+  )
+  use content <- decode.optional_field(
+    "content",
+    None,
+    tool_result_blocks_decoder() |> decode.map(Some),
+  )
+  decode.success(UserMessageContent(role:, content:))
+}
+
+/// Decoder for Usage
+fn usage_decoder() -> decode.Decoder(Usage) {
+  use input_tokens <- decode.optional_field(
+    "input_tokens",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  use output_tokens <- decode.optional_field(
+    "output_tokens",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  use cache_creation_input_tokens <- decode.optional_field(
+    "cache_creation_input_tokens",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  use cache_read_input_tokens <- decode.optional_field(
+    "cache_read_input_tokens",
+    None,
+    decode.int |> decode.map(Some),
+  )
+  decode.success(Usage(
+    input_tokens:,
+    output_tokens:,
+    cache_creation_input_tokens:,
+    cache_read_input_tokens:,
+  ))
+}
+
+/// Decoder for PermissionDenial
+fn permission_denial_decoder() -> decode.Decoder(PermissionDenial) {
+  use tool_name <- decode.field("tool_name", decode.string)
+  use tool_use_id <- decode.field("tool_use_id", decode.string)
+  use tool_input <- decode.field("tool_input", decode.dynamic)
+  decode.success(PermissionDenial(tool_name:, tool_use_id:, tool_input:))
+}
+
+/// Decoder for content blocks list
+fn content_blocks_decoder() -> decode.Decoder(List(ContentBlock)) {
+  decode.list(content_block_decoder())
+}
+
+/// Decoder for a single content block
+fn content_block_decoder() -> decode.Decoder(ContentBlock) {
+  // First try to get the type field
+  let type_decoder = {
+    use block_type <- decode.field("type", decode.string)
+    decode.success(block_type)
+  }
+  use type_result <- decode.then(decode.dynamic)
+  case decode.run(type_result, type_decoder) {
+    Ok(block_type) -> {
+      case block_type {
+        "text" -> text_block_inner_decoder(type_result)
+        "tool_use" -> tool_use_block_inner_decoder(type_result)
+        _ -> decode.success(UnknownBlock(type_result))
+      }
+    }
+    Error(_) -> decode.success(UnknownBlock(type_result))
+  }
+}
+
+/// Decoder for TextBlock (inner)
+fn text_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
+  let decoder = {
+    use text <- decode.field("text", decode.string)
+    decode.success(TextBlock(text))
+  }
+  case decode.run(raw, decoder) {
+    Ok(block) -> decode.success(block)
+    Error(_) -> decode.success(UnknownBlock(raw))
+  }
+}
+
+/// Decoder for ToolUseBlock (inner)
+fn tool_use_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
+  let decoder = {
+    use id <- decode.field("id", decode.string)
+    use name <- decode.field("name", decode.string)
+    use input <- decode.field("input", decode.dynamic)
+    decode.success(ToolUseBlock(id:, name:, input:))
+  }
+  case decode.run(raw, decoder) {
+    Ok(block) -> decode.success(block)
+    Error(_) -> decode.success(UnknownBlock(raw))
+  }
+}
+
+/// Decoder for tool result blocks list
+fn tool_result_blocks_decoder() -> decode.Decoder(List(ToolResultBlock)) {
+  decode.list(tool_result_block_decoder())
+}
+
+/// Decoder for a single tool result block
+fn tool_result_block_decoder() -> decode.Decoder(ToolResultBlock) {
+  use tool_use_id <- decode.field("tool_use_id", decode.string)
+  use content <- decode.field("content", decode.string)
+  use is_error <- decode.optional_field(
+    "is_error",
+    None,
+    decode.bool |> decode.map(Some),
+  )
+  decode.success(ToolResultBlock(tool_use_id:, content:, is_error:))
 }
 
 /// Decode content blocks from an assistant message.
