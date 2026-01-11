@@ -140,11 +140,9 @@ fn collect_output_with_deadline(
               }
             }
             Eof -> {
-              // EOF without ExitStatus - convert accumulated bytes
-              case bit_array.to_string(acc) {
-                Ok(s) -> Ok(s)
-                Error(Nil) -> Error(Nil)
-              }
+              // EOF without ExitStatus - continue waiting for exit status
+              // to validate the command actually succeeded (exit code 0)
+              collect_output_with_deadline(port, acc, deadline_ms)
             }
             Timeout -> Error(Nil)
           }
