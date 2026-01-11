@@ -1,6 +1,7 @@
 /// Tests for stream module - QueryStream and StreamState.
 import claude_agent_sdk/error.{
   CleanExitNoResult, IncompleteLastLine, NonZeroExitAfterResult,
+  UnexpectedMessageAfterResult,
 }
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
@@ -931,6 +932,63 @@ pub fn next_result_then_exit_zero_yields_normal_end_test() {
   }
 
   s2 |> is_closed |> should.be_true
+}
+
+// Test: Message arrives after Result -> yields UnexpectedMessageAfterResult warning
+pub fn next_message_after_result_yields_warning_test() {
+  // Output: Result, then another line, then exit
+  // Note: content_block_start is not a recognized message type, but that doesn't
+  // matter - ANY data after Result should trigger the warning
+  let result_json =
+    "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}"
+  let late_data = "{\"type\":\"content_block_start\",\"index\":0}"
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "echo '" <> result_json <> "'; echo '" <> late_data <> "'"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // First: get the Result message
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Ok(Message(_)) -> Nil
+    _ -> should.fail()
+  }
+  s1 |> get_result_seen |> should.be_true
+  s1 |> get_state |> should.equal(ResultReceived)
+
+  // Second: should yield UnexpectedMessageAfterResult warning (not the late data)
+  let #(result2, s2) = next(s1)
+  case result2 {
+    Ok(WarningEvent(warning)) -> {
+      case warning.code {
+        UnexpectedMessageAfterResult -> {
+          // Context should contain the raw line
+          case warning.context {
+            Some(ctx) -> {
+              ctx |> string.contains("content_block_start") |> should.be_true
+            }
+            None -> should.fail()
+          }
+        }
+        _ -> should.fail()
+      }
+    }
+    _ -> should.fail()
+  }
+
+  // Stream should still be open (non-terminal warning)
+  s2 |> is_closed |> should.be_false
+
+  // Next call should get EndOfStream
+  let #(result3, s3) = next(s2)
+  case result3 {
+    Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+  s3 |> is_closed |> should.be_true
 }
 
 pub fn next_exit_before_result_nonzero_yields_process_error_test() {

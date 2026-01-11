@@ -11,7 +11,8 @@
 /// It must only be used from the process that created it.
 import claude_agent_sdk/error.{
   type ErrorDiagnostic, type StreamError, type Warning, CleanExitNoResult,
-  IncompleteLastLine, NonZeroExitAfterResult, Warning, diagnose_exit_code,
+  IncompleteLastLine, NonZeroExitAfterResult, UnexpectedMessageAfterResult,
+  Warning, diagnose_exit_code,
 }
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/decoder
@@ -745,60 +746,77 @@ fn process_line(
   stream: QueryStream,
   line: String,
 ) -> #(Result(StreamItem, NextError), QueryStream) {
-  // Try to decode the line as a message
-  let raw_bytes = bit_array.from_string(line)
-  case decoder.decode_message_envelope(line, raw_bytes) {
-    Ok(envelope) -> {
-      // Reset decode error counter on success
+  // Check if we're in ResultReceived state - any data after Result is unexpected
+  case get_state(stream) {
+    ResultReceived -> {
+      // Emit warning but continue streaming (non-terminal)
+      // Reset decode error counter since we're handling this as a warning
       let updated = reset_decode_errors(stream)
+      let warning =
+        Warning(
+          code: UnexpectedMessageAfterResult,
+          message: "Received data after Result message",
+          context: Some(line),
+        )
+      #(Ok(WarningEvent(warning)), updated)
+    }
+    _ -> {
+      // Normal processing: try to decode the line as a message
+      let raw_bytes = bit_array.from_string(line)
+      case decoder.decode_message_envelope(line, raw_bytes) {
+        Ok(envelope) -> {
+          // Reset decode error counter on success
+          let updated = reset_decode_errors(stream)
 
-      // Check if this is a Result message -> transition state
-      let final_stream = case envelope.message {
-        Result(_) -> mark_result_received(updated)
-        _ -> updated
-      }
+          // Check if this is a Result message -> transition state
+          let final_stream = case envelope.message {
+            Result(_) -> mark_result_received(updated)
+            _ -> updated
+          }
 
-      #(Ok(Message(envelope)), final_stream)
-    }
-    Error(decoder.JsonSyntaxError(msg)) -> {
-      // Invalid JSON - increment error counter
-      let #(updated, exceeded) = increment_decode_errors(stream, msg)
-      case exceeded {
-        True -> {
-          let closed = mark_closed(updated)
-          #(
-            Error(NextTooManyDecodeErrors(
-              get_consecutive_decode_errors(closed),
-              msg,
-            )),
-            closed,
-          )
+          #(Ok(Message(envelope)), final_stream)
         }
-        False -> #(Error(NextJsonDecodeError(line, msg)), updated)
-      }
-    }
-    Error(decoder.JsonDecodeError(msg)) -> {
-      // Valid JSON but missing/invalid fields
-      let #(updated, exceeded) = increment_decode_errors(stream, msg)
-      case exceeded {
-        True -> {
-          let closed = mark_closed(updated)
-          #(
-            Error(NextTooManyDecodeErrors(
-              get_consecutive_decode_errors(closed),
-              msg,
-            )),
-            closed,
-          )
+        Error(decoder.JsonSyntaxError(msg)) -> {
+          // Invalid JSON - increment error counter
+          let #(updated, exceeded) = increment_decode_errors(stream, msg)
+          case exceeded {
+            True -> {
+              let closed = mark_closed(updated)
+              #(
+                Error(NextTooManyDecodeErrors(
+                  get_consecutive_decode_errors(closed),
+                  msg,
+                )),
+                closed,
+              )
+            }
+            False -> #(Error(NextJsonDecodeError(line, msg)), updated)
+          }
         }
-        False -> #(Error(NextJsonDecodeError(line, msg)), updated)
+        Error(decoder.JsonDecodeError(msg)) -> {
+          // Valid JSON but missing/invalid fields
+          let #(updated, exceeded) = increment_decode_errors(stream, msg)
+          case exceeded {
+            True -> {
+              let closed = mark_closed(updated)
+              #(
+                Error(NextTooManyDecodeErrors(
+                  get_consecutive_decode_errors(closed),
+                  msg,
+                )),
+                closed,
+              )
+            }
+            False -> #(Error(NextJsonDecodeError(line, msg)), updated)
+          }
+        }
+        Error(decoder.UnexpectedMessageType(_type_str)) -> {
+          // Valid JSON but unknown message type - non-terminal
+          // Don't increment decode error counter for unknown types (forward compat)
+          let updated = reset_decode_errors(stream)
+          #(Error(NextUnexpectedMessageError(line)), updated)
+        }
       }
-    }
-    Error(decoder.UnexpectedMessageType(_type_str)) -> {
-      // Valid JSON but unknown message type - non-terminal
-      // Don't increment decode error counter for unknown types (forward compat)
-      let updated = reset_decode_errors(stream)
-      #(Error(NextUnexpectedMessageError(line)), updated)
     }
   }
 }
