@@ -163,7 +163,7 @@ pub fn version_meets_minimum_prerelease_passes_test() {
 
 pub fn minimum_cli_version_is_1_0_0_test() {
   let min = minimum_cli_version
-  let CliVersion(major, minor, patch, raw) = min
+  let assert CliVersion(major, minor, patch, raw) = min
   major |> should.equal(1)
   minor |> should.equal(0)
   patch |> should.equal(0)
@@ -194,9 +194,6 @@ pub fn format_version_error_basic_test() {
 // ============================================================================
 
 pub fn unknown_version_stores_raw_output_test() {
-  let unknown = UnknownVersion("some weird output")
-  case unknown {
-    UnknownVersion(raw) -> raw |> should.equal("some weird output")
-    _ -> should.fail()
-  }
+  let UnknownVersion(raw) = UnknownVersion("some weird output")
+  raw |> should.equal("some weird output")
 }
