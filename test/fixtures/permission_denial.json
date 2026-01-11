@@ -1,0 +1,8 @@
+{
+  "tool_name": "Bash",
+  "tool_use_id": "toolu_01XyZ789AbCdEfGhIjKlMnOp",
+  "tool_input": {
+    "command": "rm -rf /important_dir",
+    "description": "Delete directory"
+  }
+}

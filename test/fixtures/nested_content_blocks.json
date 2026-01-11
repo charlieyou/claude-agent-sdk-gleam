@@ -1,0 +1,38 @@
+{
+  "type": "assistant",
+  "uuid": "550e8400-e29b-41d4-a716-446655440010",
+  "session_id": "550e8400-e29b-41d4-a716-446655440001",
+  "message": {
+    "model": "claude-opus-4-5-20251101",
+    "id": "msg_01MultiBlock",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "I'll help you with that. Let me run the command."
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_01First",
+        "name": "Bash",
+        "input": {"command": "ls -la"}
+      },
+      {
+        "type": "text",
+        "text": "And also check the git status."
+      },
+      {
+        "type": "tool_use",
+        "id": "toolu_02Second",
+        "name": "Bash",
+        "input": {"command": "git status"}
+      }
+    ],
+    "stop_reason": "tool_use",
+    "usage": {
+      "input_tokens": 100,
+      "output_tokens": 50
+    }
+  }
+}

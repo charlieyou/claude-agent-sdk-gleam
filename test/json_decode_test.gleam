@@ -1,11 +1,13 @@
 /// Tests for JSON decoding of Claude CLI messages.
 ///
 /// These tests load fixtures from test/fixtures/ and verify decoder behavior.
-/// Per TDD methodology: tests are written first and skip until decoders are
-/// implemented. Set DECODER_IMPLEMENTED=1 to run full tests.
+import claude_agent_sdk/content
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/message
 import gleam/bit_array
+import gleam/dynamic/decode
+import gleam/json
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 import simplifile
@@ -127,7 +129,7 @@ pub fn decode_text_block_missing_text_field_test() {
       }
     }
     Ok(_) -> panic as "Expected error for text block missing text field"
-    Error(other) ->
+    Error(_other) ->
       panic as {
         "Expected JsonDecodeError for missing field, got different error type"
       }
@@ -239,5 +241,106 @@ pub fn decode_message_envelope_error_returns_decode_error_test() {
     Error(decoder.JsonSyntaxError(_)) -> Nil
     Error(decoder.JsonDecodeError(_)) -> Nil
     _ -> panic as "Expected decode error for invalid JSON"
+  }
+}
+
+// =============================================================================
+// Standalone Type Decoder Tests
+// =============================================================================
+
+/// Helper to parse JSON string to Dynamic
+fn parse_json_to_dynamic(json_str: String) {
+  case json.parse(json_str, decode.dynamic) {
+    Ok(dynamic) -> dynamic
+    Error(_) -> panic as "Failed to parse JSON fixture"
+  }
+}
+
+pub fn decode_tool_result_block_test() {
+  let json = load_fixture("tool_result_block.json")
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_tool_result_block(dynamic) {
+    Ok(block) -> {
+      should.equal(block.tool_use_id, "toolu_01BeipFBP3sUY3EAwVg3qQnE")
+      should.equal(block.content, "File created successfully.")
+      should.equal(block.is_error, Some(False))
+    }
+    Error(_) -> panic as "Expected successful decode for tool_result_block.json"
+  }
+}
+
+pub fn decode_usage_test() {
+  let json = load_fixture("usage_stats.json")
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_usage(dynamic) {
+    Ok(usage) -> {
+      should.equal(usage.input_tokens, Some(1500))
+      should.equal(usage.output_tokens, Some(350))
+      should.equal(usage.cache_creation_input_tokens, Some(2000))
+      should.equal(usage.cache_read_input_tokens, Some(800))
+    }
+    Error(_) -> panic as "Expected successful decode for usage_stats.json"
+  }
+}
+
+pub fn decode_mcp_server_status_test() {
+  let json = load_fixture("mcp_server_status.json")
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_mcp_server_status(dynamic) {
+    Ok(status) -> {
+      should.equal(status.name, "my-mcp-server")
+      should.equal(status.status, "connected")
+    }
+    Error(_) -> panic as "Expected successful decode for mcp_server_status.json"
+  }
+}
+
+pub fn decode_permission_denial_test() {
+  let json = load_fixture("permission_denial.json")
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_permission_denial(dynamic) {
+    Ok(denial) -> {
+      should.equal(denial.tool_name, "Bash")
+      should.equal(denial.tool_use_id, "toolu_01XyZ789AbCdEfGhIjKlMnOp")
+      // tool_input is Dynamic, just verify it's present (not None/nil)
+      Nil
+    }
+    Error(_) -> panic as "Expected successful decode for permission_denial.json"
+  }
+}
+
+// =============================================================================
+// Multiple Content Blocks Tests
+// =============================================================================
+
+pub fn decode_nested_content_blocks_test() {
+  let json = load_fixture("nested_content_blocks.json")
+  let result = decoder.decode_message(json)
+  case result {
+    Ok(message.Assistant(msg)) -> {
+      case msg.message {
+        Some(inner) -> {
+          case inner.content {
+            Some(blocks) -> {
+              // Should have 4 blocks: text, tool_use, text, tool_use
+              should.equal(4, list_length(blocks))
+            }
+            None -> panic as "Expected content in assistant message"
+          }
+        }
+        None -> panic as "Expected inner message in assistant message"
+      }
+    }
+    Ok(_) -> panic as "Expected Assistant message type"
+    Error(_) ->
+      panic as "Expected successful decode for nested_content_blocks.json"
+  }
+}
+
+/// Helper to count list length
+fn list_length(lst: List(content.ContentBlock)) -> Int {
+  case lst {
+    [] -> 0
+    [_, ..rest] -> 1 + list_length(rest)
   }
 }

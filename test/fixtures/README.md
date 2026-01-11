@@ -38,6 +38,18 @@ These fixtures test forward compatibility and edge cases:
 | `unknown_message_type.json` | Message with unknown type (forward-compat test) |
 | `unknown_content_block.json` | Content block with unknown type |
 
+## Standalone Type Fixtures
+
+These fixtures test individual decoder functions for specific types:
+
+| File | Description |
+|------|-------------|
+| `tool_result_block.json` | Tool result block (standalone, for decode_tool_result_block) |
+| `usage_stats.json` | Usage statistics (standalone, for decode_usage) |
+| `mcp_server_status.json` | MCP server status (standalone, for decode_mcp_server_status) |
+| `permission_denial.json` | Permission denial record (standalone, for decode_permission_denial) |
+| `nested_content_blocks.json` | Assistant message with multiple text and tool_use blocks |
+
 ## Negative Test Fixtures (Known Types Missing Required Fields)
 
 These fixtures verify that known content block types with missing required fields
