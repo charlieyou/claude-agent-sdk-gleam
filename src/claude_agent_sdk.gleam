@@ -203,35 +203,48 @@ pub type WarningCode =
 pub const is_terminal = error.is_terminal
 
 // =============================================================================
-// Stream Helpers (from internal/stream.gleam)
+// Stream Helpers (from claude_agent_sdk/stream.gleam)
 // =============================================================================
 
-import claude_agent_sdk/internal/stream
+import claude_agent_sdk/internal/stream as internal_stream
+import claude_agent_sdk/stream
 
 pub type QueryStream =
   stream.QueryStream
 
+/// Advance the stream by one item.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const next = stream.next
+
+/// Close the stream and release resources. Idempotent.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const close = stream.close
+
+/// Check if the stream is closed.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const stream_is_closed = stream.is_closed
+
 pub type CollectResult(a) =
-  stream.CollectResult(a)
+  internal_stream.CollectResult(a)
 
 pub type FoldAction(a) =
-  stream.FoldAction(a)
+  internal_stream.FoldAction(a)
 
 /// Execute a function with a stream, ensuring cleanup on any exit path.
 /// **STABLE API**: Breaking changes require major version bump.
-pub const with_stream = stream.with_stream
+pub const with_stream = internal_stream.with_stream
 
 /// Collect all items from a stream.
 /// **STABLE API**: Breaking changes require major version bump.
-pub const collect_items = stream.collect_items
+pub const collect_items = internal_stream.collect_items
 
 /// Collect only messages from a stream (filtering out warnings).
 /// **STABLE API**: Breaking changes require major version bump.
-pub const collect_messages = stream.collect_messages
+pub const collect_messages = internal_stream.collect_messages
 
 /// Fold over stream items with custom accumulation logic.
 /// **STABLE API**: Breaking changes require major version bump.
-pub const fold_stream = stream.fold_stream
+pub const fold_stream = internal_stream.fold_stream
 
 // =============================================================================
 // SDK Version

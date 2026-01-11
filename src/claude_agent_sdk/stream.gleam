@@ -2,6 +2,10 @@
 ///
 /// This module exposes the stream iteration API without leaking internal implementation.
 /// Users can `import claude_agent_sdk/stream.{next, close, QueryStream, StreamItem}`.
+///
+/// **Note**: `StreamItem`, `Warning`, `WarningCode`, and `StreamError` are also available
+/// from the main `claude_agent_sdk` module. They are re-exported here for convenience
+/// when working exclusively with stream operations.
 import claude_agent_sdk/error
 import claude_agent_sdk/internal/stream as internal_stream
 
