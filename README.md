@@ -1,20 +1,20 @@
-# claude_agent_sdk_gleam
+# claude_agent_sdk
 
-[![Package Version](https://img.shields.io/hexpm/v/claude_agent_sdk_gleam)](https://hex.pm/packages/claude_agent_sdk_gleam)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/claude_agent_sdk_gleam/)
+[![Package Version](https://img.shields.io/hexpm/v/claude_agent_sdk)](https://hex.pm/packages/claude_agent_sdk)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/claude_agent_sdk/)
 
 ```sh
-gleam add claude_agent_sdk_gleam@1
+gleam add claude_agent_sdk@1
 ```
 ```gleam
-import claude_agent_sdk_gleam
+import claude_agent_sdk
 
 pub fn main() -> Nil {
   // TODO: An example of the project in use
 }
 ```
 
-Further documentation can be found at <https://hexdocs.pm/claude_agent_sdk_gleam>.
+Further documentation can be found at <https://hexdocs.pm/claude_agent_sdk>.
 
 ## Process Ownership Contract
 
@@ -140,10 +140,11 @@ gleam add gleam_otp
 ```gleam
 import gleam/erlang/process.{type Subject}
 import gleam/otp/task
-import claude_agent_sdk_gleam.{
+import claude_agent_sdk.{
   type QueryOptions, type QueryStream, type StreamError, type StreamItem,
-  EndOfStream, close, next, query,
+  close, next, query,
 }
+import claude_agent_sdk/error.{EndOfStream}
 
 /// Message type for cancellation signal
 pub type Cancel {
@@ -152,8 +153,8 @@ pub type Cancel {
 
 /// Error wrapper for query failures
 pub type StreamResult {
-  QueryStartError(claude_agent_sdk_gleam.QueryError)
-  StreamReadError(claude_agent_sdk_gleam.StreamError)
+  QueryStartError(claude_agent_sdk.QueryError)
+  StreamReadError(claude_agent_sdk.StreamError)
 }
 
 /// Run a query with cancellation support.
@@ -251,10 +252,10 @@ pub fn main() {
 For simple consumption without cancellation:
 
 ```gleam
-import claude_agent_sdk_gleam.{
-  type QueryStream, type StreamItem, EndOfStream, Message,
-  close, next, query, default_options,
+import claude_agent_sdk.{
+  type QueryStream, type StreamItem, close, next, query, default_options,
 }
+import claude_agent_sdk/error.{EndOfStream, Message}
 import gleam/io
 import gleam/string
 
@@ -291,8 +292,9 @@ fn consume_stream(stream: QueryStream) -> Nil {
 Handle recoverable vs terminal errors:
 
 ```gleam
-import claude_agent_sdk_gleam.{
-  type StreamError, BufferOverflow, JsonDecodeError, ProcessError,
+import claude_agent_sdk.{type StreamError}
+import claude_agent_sdk/error.{
+  BufferOverflow, JsonDecodeError, ProcessError,
   TooManyDecodeErrors, UnexpectedMessageError,
 }
 
@@ -326,11 +328,11 @@ type ErrorAction {
 For pipelines where warnings should fail the build:
 
 ```gleam
-import claude_agent_sdk_gleam.{
-  type StreamItem, EndOfStream, Message, WarningEvent,
-  with_stream, next, query, default_options,
+import claude_agent_sdk.{
+  type StreamItem, with_stream, next, query, default_options,
 }
-import claude_agent_sdk_gleam/message.{Result as ResultMsg}
+import claude_agent_sdk/error.{EndOfStream, Message, WarningEvent}
+import claude_agent_sdk/message.{Result as ResultMsg}
 import gleam/string
 
 pub fn ci_query(prompt: String) -> Result(String, String) {
