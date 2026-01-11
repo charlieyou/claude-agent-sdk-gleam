@@ -31,6 +31,69 @@ import gleam/dynamic
 import gleam/option
 
 // =============================================================================
+// Query Options (from options.gleam)
+// =============================================================================
+
+import claude_agent_sdk/options
+
+pub type QueryOptions =
+  options.QueryOptions
+
+pub type PermissionMode =
+  options.PermissionMode
+
+pub type TestRunner =
+  options.TestRunner
+
+/// Create default query options with all fields unset.
+pub const default_options = options.default_options
+
+/// Set the model to use.
+pub const with_model = options.with_model
+
+/// Set maximum number of agent turns.
+pub const with_max_turns = options.with_max_turns
+
+/// Set maximum budget in USD.
+pub const with_max_budget = options.with_max_budget
+
+/// Set the system prompt (replaces default).
+pub const with_system_prompt = options.with_system_prompt
+
+/// Append to the default system prompt.
+pub const with_append_system_prompt = options.with_append_system_prompt
+
+/// Set allowed tools (whitelist).
+pub const with_allowed_tools = options.with_allowed_tools
+
+/// Set disallowed tools (blacklist).
+pub const with_disallowed_tools = options.with_disallowed_tools
+
+/// Set path to MCP configuration file.
+pub const with_mcp_config = options.with_mcp_config
+
+/// Set permission mode for tool execution.
+pub const with_permission_mode = options.with_permission_mode
+
+/// Resume a specific session by ID.
+pub const with_resume = options.with_resume
+
+/// Continue the most recent session.
+pub const with_continue = options.with_continue
+
+/// Set working directory for the CLI process.
+pub const with_cwd = options.with_cwd
+
+/// Enable test mode with a mock runner.
+pub const with_test_mode = options.with_test_mode
+
+/// Skip CLI version check entirely.
+pub const with_skip_version_check = options.with_skip_version_check
+
+/// Allow unknown CLI versions with a warning.
+pub const with_permissive_version_check = options.with_permissive_version_check
+
+// =============================================================================
 // Message Types (from message.gleam)
 // =============================================================================
 
