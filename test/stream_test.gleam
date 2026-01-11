@@ -1300,3 +1300,99 @@ pub fn test_runner_spawn_error_test() {
     Ok(_) -> should.fail()
   }
 }
+
+// ============================================================================
+// Malformed JSON Error Tests
+// ============================================================================
+
+/// Test that 4 consecutive malformed lines yield 4 non-terminal JsonDecodeErrors
+/// and the stream can still continue (counter stays at 4, under threshold).
+pub fn malformed_json_four_consecutive_non_terminal_test() {
+  // Output 4 invalid JSON lines followed by valid JSON
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      [
+        "-c",
+        "echo 'bad1' && echo 'bad2' && echo 'bad3' && echo 'bad4' && echo '{\"type\":\"system\"}'",
+      ],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // First 4 calls should yield JsonDecodeError (all non-terminal)
+  let #(result1, s1) = next(stream_instance)
+  case result1 {
+    Error(NextJsonDecodeError(_, _)) -> Nil
+    _ -> should.fail()
+  }
+  s1 |> is_closed |> should.be_false
+  s1 |> get_consecutive_decode_errors |> should.equal(1)
+
+  let #(result2, s2) = next(s1)
+  case result2 {
+    Error(NextJsonDecodeError(_, _)) -> Nil
+    _ -> should.fail()
+  }
+  s2 |> is_closed |> should.be_false
+  s2 |> get_consecutive_decode_errors |> should.equal(2)
+
+  let #(result3, s3) = next(s2)
+  case result3 {
+    Error(NextJsonDecodeError(_, _)) -> Nil
+    _ -> should.fail()
+  }
+  s3 |> is_closed |> should.be_false
+  s3 |> get_consecutive_decode_errors |> should.equal(3)
+
+  let #(result4, s4) = next(s3)
+  case result4 {
+    Error(NextJsonDecodeError(_, _)) -> Nil
+    _ -> should.fail()
+  }
+  s4 |> is_closed |> should.be_false
+  s4 |> get_consecutive_decode_errors |> should.equal(4)
+
+  // 5th call should yield valid message and reset counter
+  let #(result5, s5) = next(s4)
+  case result5 {
+    Ok(Message(_)) -> Nil
+    _ -> should.fail()
+  }
+  s5 |> get_consecutive_decode_errors |> should.equal(0)
+}
+
+/// Test that TooManyDecodeErrors is terminal: after it occurs,
+/// subsequent next() calls return EndOfStream.
+pub fn malformed_json_terminal_subsequent_next_returns_end_of_stream_test() {
+  // Output 5 invalid JSON lines to trigger TooManyDecodeErrors
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "for i in 1 2 3 4 5; do echo 'bad'; done"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // Consume first 4 errors (non-terminal)
+  let #(_, s1) = next(stream_instance)
+  let #(_, s2) = next(s1)
+  let #(_, s3) = next(s2)
+  let #(_, s4) = next(s3)
+
+  // 5th error triggers terminal TooManyDecodeErrors
+  let #(result5, s5) = next(s4)
+  case result5 {
+    Error(NextTooManyDecodeErrors(count, _)) -> count |> should.equal(5)
+    _ -> should.fail()
+  }
+  s5 |> is_closed |> should.be_true
+
+  // Subsequent next() should return EndOfStream (terminal behavior)
+  let #(result6, s6) = next(s5)
+  case result6 {
+    Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+  s6 |> is_closed |> should.be_true
+}
