@@ -3,15 +3,15 @@ import claude_agent_sdk/error.{CleanExitNoResult, NonZeroExitAfterResult}
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream.{
-  BufferOverflow, Closed, CollectResult, CompleteLine, Continue, EndOfStream,
-  Message, NeedMoreData, NextJsonDecodeError, NextProcessError,
-  NextTooManyDecodeErrors, PendingEndOfStream, ReadError, ResultReceived, Stop,
-  Streaming, WarningEvent, YieldEndOfStream, YieldProcessError,
-  YieldWarningThenEnd, append_to_buffer, close, collect_items, collect_messages,
-  fold_stream, get_buffer, get_consecutive_decode_errors, get_result_seen,
-  get_state, handle_exit_status, increment_decode_errors, is_closed, mark_closed,
-  mark_pending_end_of_stream, mark_result_received, new, next, normalize_crlf,
-  read_line, reset_decode_errors, set_buffer, to_yielder, with_stream,
+  BufferOverflow, Closed, CompleteLine, Continue, EndOfStream, Message,
+  NeedMoreData, NextJsonDecodeError, NextProcessError, NextTooManyDecodeErrors,
+  PendingEndOfStream, ReadError, ResultReceived, Stop, Streaming, WarningEvent,
+  YieldEndOfStream, YieldProcessError, YieldWarningThenEnd, append_to_buffer,
+  close, collect_items, collect_messages, fold_stream, get_buffer,
+  get_consecutive_decode_errors, get_result_seen, get_state, handle_exit_status,
+  increment_decode_errors, is_closed, mark_closed, mark_pending_end_of_stream,
+  mark_result_received, new, next, normalize_crlf, read_line,
+  reset_decode_errors, set_buffer, to_yielder, with_stream,
 }
 import gleam/bit_array
 import gleam/list
@@ -1096,6 +1096,10 @@ import support/ets_helpers
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> dynamic.Dynamic
 
+/// FFI to unsafely coerce Dynamic to any type (TEST ONLY)
+@external(erlang, "gleam_stdlib", "identity")
+fn from_dynamic(d: dynamic.Dynamic) -> a
+
 /// Valid JSON message fixtures for testing.
 /// These match the format expected by the decoder.
 const valid_system_json = "{\"type\":\"system\"}"
@@ -1131,7 +1135,7 @@ pub fn valid_json_stream_via_test_runner_test() {
         case ets_helpers.lookup(table, state) {
           option.Some(lines_dyn) -> {
             // Cast back to List(String)
-            let lines: List(String) = dynamic.unsafe_coerce(lines_dyn)
+            let lines: List(String) = from_dynamic(lines_dyn)
             case lines {
               [line, ..rest] -> {
                 // Update state with remaining lines
