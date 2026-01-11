@@ -3,6 +3,7 @@
 /// These tests validate actual port spawn/read/close operations.
 /// Opt-in only via PHASE0_RUNTIME=1 environment variable to avoid
 /// failures in restricted environments.
+import gleam/bit_array
 import gleam/erlang/atom
 import gleam/io
 import gleeunit
@@ -64,39 +65,72 @@ fn run_spawn_test() -> Nil {
   // Spawn the port
   let port = port_ffi.ffi_open_port(executable, args, "")
 
+  // Run test and capture result
+  let result = run_spawn_test_body(port, expected_bytes)
+
+  // Always close the port, even on failure
+  port_ffi.ffi_close_port(port)
+
+  // Now panic if test failed
+  case result {
+    Ok(Nil) -> Nil
+    Error(msg) -> panic as msg
+  }
+}
+
+fn run_spawn_test_body(
+  port: port_ffi.Port,
+  expected_bytes: Int,
+) -> Result(Nil, String) {
   // Read data message
   case port_ffi.receive_blocking(port) {
     Ok(port_ffi.Data(data)) -> {
       let size = byte_size(data)
-      assert size == expected_bytes
+      case size == expected_bytes {
+        True -> {
+          // Read exit status message
+          case port_ffi.receive_blocking(port) {
+            Ok(port_ffi.ExitStatus(code)) -> {
+              case code == 0 {
+                True -> Ok(Nil)
+                False -> {
+                  io.println("Exit code was: " <> int_to_string(code))
+                  Error("Expected exit code 0")
+                }
+              }
+            }
+            Ok(other) -> {
+              io.println(
+                "Expected ExitStatus, got: " <> debug_port_message(other),
+              )
+              Error("Expected ExitStatus message")
+            }
+            Error(err) -> {
+              io.println("Receive error: " <> err)
+              Error("Failed to receive exit status")
+            }
+          }
+        }
+        False -> {
+          io.println(
+            "Size mismatch: got "
+            <> int_to_string(size)
+            <> ", expected "
+            <> int_to_string(expected_bytes),
+          )
+          Error("Size mismatch")
+        }
+      }
     }
     Ok(other) -> {
       io.println("Expected Data, got: " <> debug_port_message(other))
-      panic as "Expected Data message"
+      Error("Expected Data message")
     }
     Error(err) -> {
       io.println("Receive error: " <> err)
-      panic as "Failed to receive data"
+      Error("Failed to receive data")
     }
   }
-
-  // Read exit status message
-  case port_ffi.receive_blocking(port) {
-    Ok(port_ffi.ExitStatus(code)) -> {
-      assert code == 0
-    }
-    Ok(other) -> {
-      io.println("Expected ExitStatus, got: " <> debug_port_message(other))
-      panic as "Expected ExitStatus message"
-    }
-    Error(err) -> {
-      io.println("Receive error: " <> err)
-      panic as "Failed to receive exit status"
-    }
-  }
-
-  // Close the port
-  port_ffi.ffi_close_port(port)
 }
 
 /// Runtime test: receive_timeout returns Timeout after process exits
@@ -114,33 +148,44 @@ fn run_timed_receive_test() -> Nil {
   // Spawn the port
   let port = port_ffi.ffi_open_port(executable, args, "")
 
+  // Run test and capture result
+  let result = run_timed_receive_test_body(port)
+
+  // Always close the port, even on failure
+  port_ffi.ffi_close_port(port)
+
+  // Now panic if test failed
+  case result {
+    Ok(Nil) -> Nil
+    Error(msg) -> panic as msg
+  }
+}
+
+fn run_timed_receive_test_body(port: port_ffi.Port) -> Result(Nil, String) {
   // Drain data message
   case port_ffi.receive_blocking(port) {
-    Ok(port_ffi.Data(_)) -> Nil
-    _ -> panic as "Expected Data message"
-  }
-
-  // Drain exit status message
-  case port_ffi.receive_blocking(port) {
-    Ok(port_ffi.ExitStatus(_)) -> Nil
-    _ -> panic as "Expected ExitStatus message"
-  }
-
-  // Now port is closed - receive_timeout should return Timeout
-  case port_ffi.receive_timeout(port, 100) {
-    Ok(port_ffi.Timeout) -> Nil
-    Ok(other) -> {
-      io.println("Expected Timeout, got: " <> debug_port_message(other))
-      panic as "Expected Timeout after exit"
+    Ok(port_ffi.Data(_)) -> {
+      // Drain exit status message
+      case port_ffi.receive_blocking(port) {
+        Ok(port_ffi.ExitStatus(_)) -> {
+          // Now port is closed - receive_timeout should return Timeout
+          case port_ffi.receive_timeout(port, 100) {
+            Ok(port_ffi.Timeout) -> Ok(Nil)
+            Ok(other) -> {
+              io.println("Expected Timeout, got: " <> debug_port_message(other))
+              Error("Expected Timeout after exit")
+            }
+            Error(err) -> {
+              io.println("Receive error: " <> err)
+              Error("Failed during timed receive")
+            }
+          }
+        }
+        _ -> Error("Expected ExitStatus message")
+      }
     }
-    Error(err) -> {
-      io.println("Receive error: " <> err)
-      panic as "Failed during timed receive"
-    }
+    _ -> Error("Expected Data message")
   }
-
-  // Close the port
-  port_ffi.ffi_close_port(port)
 }
 
 fn debug_port_message(msg: port_ffi.PortMessage) -> String {
@@ -167,10 +212,9 @@ fn int_to_string(n: Int) -> String {
 fn list_to_binary(chars: List(Int)) -> BitArray
 
 fn list_to_string(chars: List(Int)) -> String {
-  chars
-  |> list_to_binary
-  |> bitarray_to_string
+  let bin = list_to_binary(chars)
+  case bit_array.to_string(bin) {
+    Ok(s) -> s
+    Error(_) -> "<invalid UTF-8>"
+  }
 }
-
-@external(erlang, "erlang", "binary_to_list")
-fn bitarray_to_string(bin: BitArray) -> String

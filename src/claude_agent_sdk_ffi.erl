@@ -50,8 +50,8 @@ receive_port_msg_timeout(Port, TimeoutMs) ->
 %% Uses bounded drain: max 100 messages, 50ms timeout per message.
 %% Safe to call on already-closed ports (no-op).
 close_port(Port) ->
-    drain_port_messages(Port, 100),
     try
+        drain_port_messages(Port, 100),
         erlang:port_close(Port)
     catch
         error:badarg -> ok  % Port already closed
