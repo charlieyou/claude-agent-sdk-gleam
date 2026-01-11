@@ -17,11 +17,28 @@
 /// )
 /// ```
 ///
-/// ## Process Ownership
+/// ## Process Ownership Contract
 ///
-/// **Critical**: QueryStream must only be used from the process that created it.
-/// The underlying BEAM port sends messages exclusively to its owning process.
-/// See `QueryStream` documentation for details.
+/// **Critical**: QueryStream is not process-safe; use from the process that created it.
+/// The SDK does not detect cross-process use; violating this contract results in
+/// undefined behavior (typically deadlock).
+///
+/// Behavior is UNDEFINED if:
+/// - `next()` is called from a different process than `query()`
+/// - `next()` is called from multiple processes concurrently
+/// - `close()` is called from a different process than `query()`
+///
+/// Because `next()` blocks, cross-process cancellation requires an OTP wrapper
+/// (see Cancellation Recipe in README).
+///
+/// ### Mailbox Isolation Invariant
+///
+/// The Erlang FFI uses selective receive to match only the specific Port reference:
+/// ```erlang
+/// receive {Port, Msg} -> ... end  % CORRECT - isolates to this port
+/// ```
+/// This ensures each stream only receives its own port's messages, even when
+/// multiple streams exist in the same process.
 ///
 /// ## Type Re-exports
 ///
@@ -152,7 +169,9 @@ pub type FoldAction(a) =
 ///
 /// ## Process Ownership (Critical)
 ///
-/// **Blocks until next message. Cannot be cancelled from another process.**
+/// **Process Safety**: Must be called from the same process that called `query()`.
+/// Blocks until the next message arrives. Cannot be cancelled from another process.
+/// Because `next()` blocks, cross-process cancellation requires an OTP wrapper.
 ///
 /// This function receives messages from the underlying BEAM port. If called
 /// from a process other than the one that created the stream, it will block
@@ -239,13 +258,15 @@ pub fn next(
 ///
 /// ## Process Ownership (Critical)
 ///
-/// **Only effective when called by the process that spawned the query.**
+/// **Process Safety**: `close()` is only effective when called by the process
+/// that spawned the query.
 ///
 /// The BEAM port is owned by the process that called `query()`. If `close()`
 /// is called from a different process:
-/// - The port will NOT be closed
+/// - The port will NOT be closed (the close message goes to a different process)
 /// - The CLI process will continue running
 /// - Resources will not be released
+/// - A waiting `next()` will NOT be unblocked
 ///
 /// For reliable cleanup across process boundaries, use `with_stream()` or
 /// ensure the owning process handles cleanup.

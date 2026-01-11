@@ -16,6 +16,30 @@ pub fn main() -> Nil {
 
 Further documentation can be found at <https://hexdocs.pm/claude_agent_sdk_gleam>.
 
+## Process Ownership Contract
+
+**Critical**: QueryStream is not process-safe; use from the process that created it.
+
+Behavior is **UNDEFINED** if:
+- `next()` is called from a different process than `query()`
+- `next()` is called from multiple processes concurrently
+- `close()` is called from a different process than `query()`
+
+### Why This Matters
+
+Erlang ports deliver messages to the spawning process's mailbox. This creates fundamental constraints:
+- `next()` can only receive messages in the process that called `query()`
+- `close()` from another process closes the port but doesn't unblock a waiting `next()`
+- Cross-process use leads to deadlock or resource leaks
+
+The SDK does not detect cross-process use; violating this contract results in undefined behavior (typically deadlock).
+
+### Cancellation
+
+Because `next()` blocks, cross-process cancellation requires an OTP wrapper. The `close()` function is only effective when called by the process that spawned the query. See the [Cancellation Recipe](#cancellation-recipe) for patterns to safely cancel from another process.
+
+See the `stream.gleam` module documentation for detailed API constraints.
+
 ## Stream Operations
 
 The SDK provides several ways to consume query streams:
