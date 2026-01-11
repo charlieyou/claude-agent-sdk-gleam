@@ -9,9 +9,14 @@
 ///
 /// **Single-process constraint**: QueryStream is NOT thread-safe.
 /// It must only be used from the process that created it.
+import claude_agent_sdk/error.{
+  type Warning, CleanExitNoResult, NonZeroExitAfterResult, Warning,
+}
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi.{type Port}
 import gleam/bit_array
+import gleam/int
+import gleam/option.{None}
 import gleam/string
 
 // ============================================================================
@@ -77,6 +82,9 @@ type QueryStreamInternal {
     drain_count: Int,
     /// Whether close() has been called
     closed: Bool,
+    /// Whether a Result message has been received.
+    /// CRITICAL: If True, no exit_status can produce ProcessError.
+    result_seen: Bool,
   )
 }
 
@@ -109,6 +117,7 @@ pub fn new(port: Port) -> QueryStream {
     consecutive_decode_errors: 0,
     drain_count: 0,
     closed: False,
+    result_seen: False,
   ))
 }
 
@@ -240,9 +249,148 @@ pub fn set_buffer(stream: QueryStream, buffer: BitArray) -> QueryStream {
   let QueryStream(internal) = stream
   QueryStream(QueryStreamInternal(..internal, buffer: buffer))
 }
+
+// ============================================================================
+// State Accessors (continued)
+// ============================================================================
+
+/// Check if a Result message has been seen.
+pub fn get_result_seen(stream: QueryStream) -> Bool {
+  let QueryStream(internal) = stream
+  internal.result_seen
+}
+
+/// Get the consecutive decode error count.
+pub fn get_consecutive_decode_errors(stream: QueryStream) -> Int {
+  let QueryStream(internal) = stream
+  internal.consecutive_decode_errors
+}
+
+// ============================================================================
+// State Machine Transitions
+// ============================================================================
+
+/// Transition result for exit status handling.
+/// Describes the next action after receiving an exit status.
+pub type ExitTransitionResult {
+  /// Yield a ProcessError (terminal - stream will close)
+  YieldProcessError(exit_code: Int)
+  /// Yield a warning, then EndOfStream (non-fatal anomaly)
+  YieldWarningThenEnd(warning: Warning)
+  /// Yield EndOfStream (normal completion)
+  YieldEndOfStream
+}
+
+/// Handle exit status according to the state machine.
+///
+/// **State Machine (result_seen precedence)**:
+/// | result_seen | exit_code | Outcome                          |
+/// |-------------|-----------|----------------------------------|
+/// | FALSE       | 0         | Warning(CleanExitNoResult) + EoS |
+/// | FALSE       | !=0       | ProcessError (terminal)          |
+/// | TRUE        | 0         | EndOfStream (normal)             |
+/// | TRUE        | !=0       | Warning(NonZeroAfter) + EoS      |
+///
+/// CRITICAL: If result_seen == TRUE, no exit_status produces ProcessError.
+pub fn handle_exit_status(
+  stream: QueryStream,
+  exit_code: Int,
+) -> #(ExitTransitionResult, QueryStream) {
+  let QueryStream(internal) = stream
+  let result_seen = internal.result_seen
+
+  case result_seen, exit_code {
+    // Result seen + exit 0 -> normal completion
+    True, 0 -> {
+      let updated =
+        QueryStream(QueryStreamInternal(..internal, state: PendingEndOfStream))
+      #(YieldEndOfStream, updated)
+    }
+
+    // Result seen + non-zero exit -> warning only, Result is authoritative
+    True, code -> {
+      let warning =
+        Warning(
+          code: NonZeroExitAfterResult(code),
+          message: "CLI exited with code "
+            <> int.to_string(code)
+            <> " after Result message; Result is authoritative",
+          context: None,
+        )
+      let updated =
+        QueryStream(QueryStreamInternal(..internal, state: PendingEndOfStream))
+      #(YieldWarningThenEnd(warning), updated)
+    }
+
+    // No result + exit 0 -> anomaly warning
+    False, 0 -> {
+      let warning =
+        Warning(
+          code: CleanExitNoResult,
+          message: "CLI exited cleanly (code 0) but no Result message was received",
+          context: None,
+        )
+      let updated =
+        QueryStream(QueryStreamInternal(..internal, state: PendingEndOfStream))
+      #(YieldWarningThenEnd(warning), updated)
+    }
+
+    // No result + non-zero exit -> terminal error
+    False, code -> {
+      let updated = QueryStream(QueryStreamInternal(..internal, state: Closed))
+      #(YieldProcessError(code), updated)
+    }
+  }
+}
+
+/// Transition to ResultReceived state after seeing a Result message.
+/// Sets result_seen = True and state = ResultReceived.
+pub fn mark_result_received(stream: QueryStream) -> QueryStream {
+  let QueryStream(internal) = stream
+  QueryStream(
+    QueryStreamInternal(..internal, state: ResultReceived, result_seen: True),
+  )
+}
+
+/// Increment the consecutive decode error counter.
+/// Returns the updated stream and whether the threshold was exceeded.
+pub fn increment_decode_errors(
+  stream: QueryStream,
+  _last_error: String,
+) -> #(QueryStream, Bool) {
+  let QueryStream(internal) = stream
+  let new_count = internal.consecutive_decode_errors + 1
+  let threshold_exceeded = new_count >= constants.max_consecutive_decode_errors
+  let updated =
+    QueryStream(
+      QueryStreamInternal(..internal, consecutive_decode_errors: new_count),
+    )
+  #(updated, threshold_exceeded)
+}
+
+/// Reset the consecutive decode error counter (on successful decode).
+pub fn reset_decode_errors(stream: QueryStream) -> QueryStream {
+  let QueryStream(internal) = stream
+  case internal.consecutive_decode_errors {
+    0 -> stream
+    _ ->
+      QueryStream(QueryStreamInternal(..internal, consecutive_decode_errors: 0))
+  }
+}
+
+/// Transition to PendingEndOfStream state (for draining after ResultReceived).
+pub fn mark_pending_end_of_stream(stream: QueryStream) -> QueryStream {
+  let QueryStream(internal) = stream
+  QueryStream(QueryStreamInternal(..internal, state: PendingEndOfStream))
+}
+
+/// Transition to Closed state (terminal).
+pub fn mark_closed(stream: QueryStream) -> QueryStream {
+  let QueryStream(internal) = stream
+  QueryStream(QueryStreamInternal(..internal, state: Closed, closed: True))
+}
 // ============================================================================
 // Placeholder API (to be implemented in later issues)
 // ============================================================================
 
-// TODO(casg-j37.7): Implement state machine transitions
 // TODO(casg-j37.8): Implement next() iterator

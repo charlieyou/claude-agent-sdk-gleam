@@ -1,10 +1,15 @@
 /// Tests for stream module - QueryStream and StreamState.
+import claude_agent_sdk/error.{CleanExitNoResult, NonZeroExitAfterResult}
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream.{
   BufferOverflow, Closed, CompleteLine, NeedMoreData, PendingEndOfStream,
-  ReadError, ResultReceived, Streaming, append_to_buffer, close, get_buffer,
-  get_state, is_closed, new, normalize_crlf, read_line, set_buffer,
+  ReadError, ResultReceived, Streaming, YieldEndOfStream, YieldProcessError,
+  YieldWarningThenEnd, append_to_buffer, close, get_buffer,
+  get_consecutive_decode_errors, get_result_seen, get_state, handle_exit_status,
+  increment_decode_errors, is_closed, mark_closed, mark_pending_end_of_stream,
+  mark_result_received, new, normalize_crlf, read_line, reset_decode_errors,
+  set_buffer,
 }
 import gleam/bit_array
 import gleeunit/should
@@ -334,12 +339,213 @@ pub fn read_line_invalid_utf8_test() {
     _ -> should.fail()
   }
 }
+
 // ============================================================================
-// State Transition Tests (Failing - to be implemented in casg-j37.7)
+// State Machine Transition Tests (casg-j37.7)
 // ============================================================================
 
-// TODO(casg-j37.7): Add tests for state transitions once implemented
-// - Streaming -> ResultReceived (on Result message)
-// - Streaming -> PendingEndOfStream (on exit_status after Result)
-// - ResultReceived -> PendingEndOfStream (on drain complete)
-// - PendingEndOfStream -> Closed (after yielding EndOfStream)
+pub fn result_seen_initially_false_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  stream |> get_result_seen |> should.be_false
+
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn mark_result_received_sets_state_and_flag_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Initially Streaming and result_seen=False
+  stream |> get_state |> should.equal(Streaming)
+  stream |> get_result_seen |> should.be_false
+
+  // After marking result received
+  let updated = mark_result_received(stream)
+  updated |> get_state |> should.equal(ResultReceived)
+  updated |> get_result_seen |> should.be_true
+
+  port_ffi.ffi_close_port(port)
+}
+
+// Test: exit_status before Result -> ProcessError (from plan line 4697)
+pub fn exit_status_before_result_nonzero_yields_process_error_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // No Result seen, non-zero exit -> ProcessError
+  let #(result, updated) = handle_exit_status(stream, 1)
+
+  case result {
+    YieldProcessError(code) -> code |> should.equal(1)
+    _ -> should.fail()
+  }
+
+  updated |> get_state |> should.equal(Closed)
+
+  port_ffi.ffi_close_port(port)
+}
+
+// Test: exit_status=0 before Result -> WarningEvent(CleanExitNoResult), EndOfStream (from plan line 4700)
+pub fn exit_status_zero_before_result_yields_warning_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // No Result seen, exit 0 -> warning about no result
+  let #(result, updated) = handle_exit_status(stream, 0)
+
+  case result {
+    YieldWarningThenEnd(warning) ->
+      warning.code |> should.equal(CleanExitNoResult)
+    _ -> should.fail()
+  }
+
+  updated |> get_state |> should.equal(PendingEndOfStream)
+
+  port_ffi.ffi_close_port(port)
+}
+
+// Test: Result then exit_status=0 -> Result, EndOfStream (from plan line 4698)
+pub fn result_then_exit_zero_yields_end_of_stream_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Mark result received
+  let stream_with_result = mark_result_received(stream)
+  stream_with_result |> get_result_seen |> should.be_true
+
+  // Exit 0 after Result -> normal end
+  let #(result, updated) = handle_exit_status(stream_with_result, 0)
+
+  result |> should.equal(YieldEndOfStream)
+  updated |> get_state |> should.equal(PendingEndOfStream)
+
+  port_ffi.ffi_close_port(port)
+}
+
+// Test: Result then exit_status!=0 -> Result, WarningEvent, EndOfStream (from plan line 4699)
+pub fn result_then_exit_nonzero_yields_warning_not_error_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Mark result received
+  let stream_with_result = mark_result_received(stream)
+
+  // Non-zero exit after Result -> warning only, NOT ProcessError
+  let #(result, updated) = handle_exit_status(stream_with_result, 42)
+
+  case result {
+    YieldWarningThenEnd(warning) -> {
+      case warning.code {
+        NonZeroExitAfterResult(code) -> code |> should.equal(42)
+        _ -> should.fail()
+      }
+    }
+    _ -> should.fail()
+  }
+
+  // Should NOT be Closed (ProcessError), should be PendingEndOfStream
+  updated |> get_state |> should.equal(PendingEndOfStream)
+
+  port_ffi.ffi_close_port(port)
+}
+
+// ============================================================================
+// Consecutive Decode Errors Tests
+// ============================================================================
+
+pub fn consecutive_decode_errors_initially_zero_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  stream |> get_consecutive_decode_errors |> should.equal(0)
+
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn increment_decode_errors_counts_up_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  let #(s1, exceeded1) = increment_decode_errors(stream, "error1")
+  exceeded1 |> should.be_false
+  s1 |> get_consecutive_decode_errors |> should.equal(1)
+
+  let #(s2, exceeded2) = increment_decode_errors(s1, "error2")
+  exceeded2 |> should.be_false
+  s2 |> get_consecutive_decode_errors |> should.equal(2)
+
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn increment_decode_errors_threshold_exceeded_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Increment up to threshold (5)
+  let #(s1, _) = increment_decode_errors(stream, "e1")
+  let #(s2, _) = increment_decode_errors(s1, "e2")
+  let #(s3, _) = increment_decode_errors(s2, "e3")
+  let #(s4, _) = increment_decode_errors(s3, "e4")
+
+  // 4 errors, not exceeded yet
+  s4 |> get_consecutive_decode_errors |> should.equal(4)
+
+  // 5th error exceeds threshold
+  let #(s5, exceeded5) = increment_decode_errors(s4, "e5")
+  exceeded5 |> should.be_true
+  s5 |> get_consecutive_decode_errors |> should.equal(5)
+
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn reset_decode_errors_clears_counter_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  let #(s1, _) = increment_decode_errors(stream, "error")
+  let #(s2, _) = increment_decode_errors(s1, "error")
+  s2 |> get_consecutive_decode_errors |> should.equal(2)
+
+  let s3 = reset_decode_errors(s2)
+  s3 |> get_consecutive_decode_errors |> should.equal(0)
+
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn reset_decode_errors_no_op_when_zero_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Should be a no-op (returns same stream)
+  let updated = reset_decode_errors(stream)
+  updated |> get_consecutive_decode_errors |> should.equal(0)
+
+  port_ffi.ffi_close_port(port)
+}
+
+// ============================================================================
+// State Transition Helper Tests
+// ============================================================================
+
+pub fn mark_pending_end_of_stream_sets_state_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  let updated = mark_pending_end_of_stream(stream)
+  updated |> get_state |> should.equal(PendingEndOfStream)
+
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn mark_closed_sets_state_and_flag_test() {
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  let updated = mark_closed(stream)
+  updated |> get_state |> should.equal(Closed)
+  updated |> is_closed |> should.be_true
+
+  port_ffi.ffi_close_port(port)
+}
