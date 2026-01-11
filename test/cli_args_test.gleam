@@ -1,8 +1,5 @@
 /// Tests for CLI argument building from QueryOptions.
-///
-/// These tests follow TDD - they are written BEFORE build_args is implemented,
-/// so they will fail initially. Once casg-j37.2 implements build_cli_args,
-/// these tests should pass.
+import claude_agent_sdk/internal/cli
 import claude_agent_sdk/options.{
   AcceptEdits, BypassPermissions, Plan, default_options, with_allowed_tools,
   with_append_system_prompt, with_continue, with_disallowed_tools,
@@ -48,15 +45,11 @@ fn find_index_helper(
 }
 
 // =============================================================================
-// Placeholder for build_args - will be implemented in casg-j37.2
+// Helper: delegate to actual implementation
 // =============================================================================
 
-/// Placeholder implementation that always fails.
-/// This will be replaced by the actual implementation in internal/cli.gleam
-fn build_args(_options: options.QueryOptions, _prompt: String) -> List(String) {
-  // TODO: This is a placeholder that causes tests to fail.
-  // The real implementation will be in src/claude_agent_sdk/internal/cli.gleam
-  panic as "build_args not implemented yet - see casg-j37.2"
+fn build_args(opts: options.QueryOptions, prompt: String) -> List(String) {
+  cli.build_cli_args(opts, prompt)
 }
 
 // =============================================================================
