@@ -1,10 +1,39 @@
 /// Error types for Claude Agent SDK.
 ///
-/// This module defines all error, warning, and stream item types used for SDK error handling.
-/// Errors are categorized into:
-/// - QueryError: Startup errors that prevent query from starting
-/// - StreamError: Runtime errors during stream iteration
-/// - Warning: Non-fatal warnings that can be yielded from the stream
+/// This module defines all error, warning, and stream item types for error handling.
+/// Import this module when pattern matching on error variants returned by SDK functions.
+///
+/// ## Error Categories
+///
+/// - **QueryError**: Startup errors that prevent `query()` from returning a stream
+///   (CLI not found, version incompatible, spawn failed)
+/// - **StreamError**: Runtime errors during stream iteration via `next()`
+///   (process exited, decode errors, buffer overflow)
+/// - **Warning**: Non-fatal conditions that can be yielded from the stream
+///   (unparseable version, incomplete line)
+///
+/// ## StreamItem
+///
+/// `StreamItem` is the success type returned by `stream.next()`:
+/// - `Message(envelope)`: A parsed message from the CLI
+/// - `WarningEvent(warning)`: A non-fatal warning
+/// - `EndOfStream`: Normal completion marker
+///
+/// ## Example
+///
+/// ```gleam
+/// import claude_agent_sdk/error
+///
+/// case stream.next(stream) {
+///   #(Ok(error.Message(envelope)), stream) -> // handle message
+///   #(Ok(error.EndOfStream), stream) -> // done
+///   #(Error(err), stream) ->
+///     case error.is_terminal(err) {
+///       True -> // stop iteration
+///       False -> // continue, maybe log
+///     }
+/// }
+/// ```
 import gleam/int
 import gleam/option.{type Option, None}
 
@@ -14,38 +43,77 @@ import claude_agent_sdk/message.{type MessageEnvelope}
 // StreamError Type (Runtime Errors)
 // ============================================================================
 
-/// Errors during stream iteration (does NOT include normal end-of-stream)
+/// Errors during stream iteration.
+///
+/// StreamError represents problems encountered during `next()` calls. Errors
+/// are classified as either **terminal** (stream is done) or **non-terminal**
+/// (stream continues, call `next()` again).
+///
+/// Use `is_terminal()` to check if iteration should stop.
 pub type StreamError {
   // --- Terminal errors (port closed, stream done) ---
-  /// CLI process exited with non-zero code
+  /// CLI process exited with non-zero code.
+  /// The `diagnostic` field provides troubleshooting guidance.
   ProcessError(exit_code: Int, diagnostic: ErrorDiagnostic)
-  /// Single line exceeded 10MB buffer limit
+  /// Single line exceeded 10MB buffer limit.
+  /// This is a safety limit to prevent memory exhaustion.
   BufferOverflow
-  /// Too many consecutive JSON decode failures (default: 5)
+  /// Too many consecutive JSON decode failures (default threshold: 5).
+  /// Indicates the CLI is producing malformed output.
   TooManyDecodeErrors(count: Int, last_error: String)
 
   // --- Non-terminal errors (stream continues) ---
-  /// Line was not valid JSON (continues until TooManyDecodeErrors threshold)
+  /// Line was not valid JSON.
+  /// Non-terminal: continues until `TooManyDecodeErrors` threshold is reached.
   JsonDecodeError(line: String, error: String)
-  /// Valid JSON but unknown message type
+  /// Valid JSON but unrecognized message type.
+  /// Non-terminal: the message is logged but iteration continues.
   UnexpectedMessageError(raw_json: String)
 }
 
-/// Diagnostic context for ProcessError (since stderr is not captured in v1)
+/// Diagnostic context for ProcessError.
+///
+/// Since the SDK captures only stdout (not stderr), this type provides
+/// contextual hints to help diagnose CLI failures. The `diagnose_exit_code()`
+/// function populates these fields based on common failure patterns.
 pub type ErrorDiagnostic {
   ErrorDiagnostic(
-    /// Last non-JSON line seen on stdout (if any) — may contain error hints
+    /// Last non-JSON line seen on stdout (if any).
+    /// May contain error hints or partial output before the crash.
     last_non_json_line: Option(String),
-    /// True if stdout was completely empty (common for auth failures)
+    /// True if stdout was completely empty.
+    /// Common for auth failures where CLI writes only to stderr.
     stdout_was_empty: Bool,
-    /// Common exit code interpretations
+    /// Human-readable interpretation of the exit code.
+    /// Examples: "Authentication required", "Invalid arguments"
     exit_code_hint: String,
-    /// Guidance for users
+    /// Actionable troubleshooting guidance for the user.
     troubleshooting: String,
   )
 }
 
-/// Check if an error is terminal (stream closed, no more items)
+/// Check if an error is terminal (stream closed, no more items).
+///
+/// Terminal errors mean the stream is done and `next()` should not be called again.
+/// Non-terminal errors allow iteration to continue.
+///
+/// ## Returns
+///
+/// - `True` for: `ProcessError`, `BufferOverflow`, `TooManyDecodeErrors`
+/// - `False` for: `JsonDecodeError`, `UnexpectedMessageError`
+///
+/// ## Example
+///
+/// ```gleam
+/// case stream.next(stream) {
+///   #(Error(err), stream) ->
+///     case error.is_terminal(err) {
+///       True -> stream.close(stream)  // Done
+///       False -> iterate(stream)       // Continue
+///     }
+///   // ...
+/// }
+/// ```
 pub fn is_terminal(error: StreamError) -> Bool {
   case error {
     ProcessError(_, _) | BufferOverflow | TooManyDecodeErrors(_, _) -> True
@@ -109,21 +177,29 @@ pub fn diagnose_exit_code(
 // QueryError Type (Startup Errors)
 // ============================================================================
 
-/// Errors that prevent query from starting
+/// Errors that prevent query from starting.
+///
+/// QueryError is returned by `query()` when the SDK cannot start a CLI session.
+/// These errors occur before streaming begins, so no stream cleanup is needed.
 pub type QueryError {
-  /// Claude CLI not found in PATH
+  /// Claude CLI not found in PATH.
+  /// Install with: `npm install -g @anthropic-ai/claude-code`
   CliNotFoundError(message: String)
-  /// CLI version too old or incompatible
+  /// CLI version too old or incompatible.
+  /// The `suggestion` field contains upgrade instructions.
   UnsupportedCliVersionError(
     detected_version: String,
     minimum_required: String,
     suggestion: String,
   )
-  /// CLI version could not be parsed (fail-fast default behavior)
+  /// CLI version could not be parsed.
+  /// Default behavior is fail-fast; use `with_permissive_version_check()`
+  /// to allow unknown versions with a warning.
   UnknownVersionError(raw_output: String, suggestion: String)
-  /// Version detection failed (timeout, spawn error, etc.)
+  /// Version detection failed (timeout, spawn error, etc.).
   VersionDetectionError(reason: String)
-  /// Failed to spawn process
+  /// Failed to spawn the CLI process.
+  /// May indicate permission issues, missing dependencies, or resource limits.
   SpawnError(reason: String)
 }
 
@@ -131,23 +207,42 @@ pub type QueryError {
 // Warning Type
 // ============================================================================
 
-/// Non-fatal warning that can be yielded from the stream
+/// Non-fatal warning that can be yielded from the stream.
+///
+/// Warnings indicate conditions that don't prevent stream iteration from
+/// continuing but may require attention. They are yielded as `WarningEvent`
+/// items from `next()`.
+///
+/// ## Fields
+///
+/// - `code`: Machine-readable warning category for programmatic handling
+/// - `message`: Human-readable description of the warning
+/// - `context`: Optional additional context (e.g., the malformed line)
 pub type Warning {
   Warning(code: WarningCode, message: String, context: Option(String))
 }
 
+/// Warning codes for categorizing warnings.
+///
+/// Use these codes for programmatic warning handling rather than parsing
+/// message strings. Each code represents a specific condition that occurred
+/// during stream processing.
 pub type WarningCode {
-  /// CLI version string didn't match expected format
+  /// CLI version string didn't match expected format.
+  /// Occurs when `permissive_version_check` is enabled.
   UnparseableCliVersion
-  /// CLI exited 0 but no Result message received
+  /// CLI exited with status 0 but no Result message was received.
+  /// The query may have been interrupted or the CLI output was truncated.
   CleanExitNoResult
-  /// Non-zero exit code after Result message (includes exit code)
+  /// Non-zero exit code received after Result message.
+  /// The Result was successfully parsed, but the CLI reported an error on exit.
   NonZeroExitAfterResult(Int)
-  /// Data received after Result message
+  /// Data received after Result message (unexpected trailing output).
   UnexpectedMessageAfterResult
-  /// Incomplete line in buffer when exit_status=0 received (line discarded)
+  /// Incomplete line in buffer when exit_status=0 received.
+  /// The partial line is discarded; content is included in the warning.
   IncompleteLastLine(String)
-  /// Reserved for future use
+  /// Reserved for future deprecation warnings.
   DeprecatedOption
 }
 
@@ -156,13 +251,18 @@ pub type WarningCode {
 // ============================================================================
 
 /// What the stream can yield on success.
-/// Note: MessageEnvelope will be defined in messages.gleam; using opaque placeholder for now.
+///
+/// StreamItem is the success type in the Result returned by `stream.next()`.
+/// It represents the three possible outcomes when reading from the stream succeeds.
 pub type StreamItem {
-  /// A parsed message from the CLI
+  /// A parsed message from the CLI.
+  /// The envelope contains both the parsed `Message` and raw JSON for debugging.
   Message(MessageEnvelope)
-  /// A non-fatal warning (stream continues)
+  /// A non-fatal warning (stream continues).
+  /// Call `next()` again to get the next item.
   WarningEvent(Warning)
-  /// Normal end of stream (terminal - no more items)
+  /// Normal end of stream (terminal).
+  /// The CLI has finished and the stream is complete. Do not call `next()` again.
   EndOfStream
 }
 
@@ -170,7 +270,9 @@ pub type StreamItem {
 // Error to String Functions
 // ============================================================================
 
-/// Convert a QueryError to a human-readable string
+/// Convert a QueryError to a human-readable string.
+///
+/// Useful for logging or displaying errors to users.
 pub fn error_to_string(error: QueryError) -> String {
   case error {
     CliNotFoundError(message) -> "CLI not found: " <> message
@@ -188,7 +290,9 @@ pub fn error_to_string(error: QueryError) -> String {
   }
 }
 
-/// Convert a StreamError to a human-readable string
+/// Convert a StreamError to a human-readable string.
+///
+/// Useful for logging or displaying errors to users.
 pub fn stream_error_to_string(error: StreamError) -> String {
   case error {
     ProcessError(exit_code, diagnostic) ->

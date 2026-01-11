@@ -1,11 +1,36 @@
-/// Public stream module for Claude Agent SDK.
+/// Stream iteration API for Claude Agent SDK.
 ///
-/// This module exposes the stream iteration API without leaking internal implementation.
-/// Users can `import claude_agent_sdk/stream.{next, close, QueryStream, StreamItem}`.
+/// This module provides the core streaming interface for processing Claude CLI responses.
+/// Use `next()` to iterate through messages, `close()` to release resources, and the
+/// helper functions (`with_stream`, `collect_*`, `fold_stream`) for common patterns.
 ///
-/// **Note**: `StreamItem`, `Warning`, `WarningCode`, and `StreamError` are also available
+/// ## Quick Start
+///
+/// ```gleam
+/// import claude_agent_sdk
+/// import claude_agent_sdk/stream
+///
+/// // Collect all messages (recommended for simple use cases)
+/// let result = claude_agent_sdk.with_stream(
+///   claude_agent_sdk.query("Hello!", options),
+///   claude_agent_sdk.collect_messages,
+/// )
+/// ```
+///
+/// ## Process Ownership
+///
+/// **Critical**: QueryStream must only be used from the process that created it.
+/// The underlying BEAM port sends messages exclusively to its owning process.
+/// See `QueryStream` documentation for details.
+///
+/// ## Type Re-exports
+///
+/// `StreamItem`, `Warning`, `WarningCode`, and `StreamError` are also available
 /// from the main `claude_agent_sdk` module. They are re-exported here for convenience
 /// when working exclusively with stream operations.
+///
+/// For pattern matching on variant types, import the source module:
+/// - `claude_agent_sdk/error` for `StreamItem`, `StreamError`, `Warning`, `WarningCode`
 import claude_agent_sdk/error
 import claude_agent_sdk/internal/stream as internal_stream
 
@@ -15,34 +40,103 @@ import claude_agent_sdk/internal/stream as internal_stream
 
 /// Opaque iterator over CLI output.
 ///
-/// **Ownership**: Always use the most recent copy returned from next()
-/// to maintain correct state.
+/// QueryStream wraps a BEAM port that communicates with the Claude CLI process.
+/// Each call to `next()` advances the iterator and returns the next message or
+/// error from the stream.
 ///
-/// **Single-process**: Must only be used from the creating process.
+/// ## Process Ownership (Critical)
+///
+/// **Single-process only. Use from the process that created it.**
+///
+/// QueryStream is bound to the BEAM process that called `query()`. The underlying
+/// port sends messages only to its owning process. Calling `next()`, `close()`,
+/// or any stream operation from a different process will:
+/// - Never receive port messages (they go to the owner)
+/// - Block indefinitely on `next()`
+/// - Fail silently on `close()`
+///
+/// If you need cross-process streaming, have the owner process forward messages
+/// or use the `with_stream()` helper to ensure cleanup within the owning process.
+///
+/// ## Value Semantics
+///
+/// **Always use the most recent QueryStream returned from `next()`.**
+///
+/// QueryStream is immutable. Each `next()` call returns a new QueryStream with
+/// updated internal state (buffer contents, closed flag, etc.). Using a stale
+/// copy may cause missed messages or incorrect state.
+///
+/// ## Example
+///
+/// ```gleam
+/// case claude_agent_sdk.query("Hello", options) {
+///   Ok(stream) -> {
+///     // Iterate within the same process
+///     let #(result, stream) = stream.next(stream)
+///     // Always use the returned stream for the next call
+///     stream.close(stream)
+///   }
+///   Error(err) -> // handle error
+/// }
+/// ```
 pub type QueryStream =
   internal_stream.QueryStream
 
 /// What the stream can yield on success.
+///
+/// StreamItem represents the three possible outcomes of a successful `next()` call:
+/// - `Message(envelope)`: A parsed message from the CLI (assistant response, tool result, etc.)
+/// - `WarningEvent(warning)`: A non-fatal warning (continue iterating)
+/// - `EndOfStream`: Normal completion marker (stop iterating)
+///
+/// See `claude_agent_sdk/error` for variant constructors when pattern matching.
 pub type StreamItem =
   error.StreamItem
 
 /// Non-fatal warning that can be yielded from the stream.
+///
+/// Warnings indicate issues that don't prevent stream iteration from continuing.
+/// Each warning has a `WarningCode` for programmatic handling and a human-readable message.
+///
+/// See `claude_agent_sdk/error` for the Warning constructor.
 pub type Warning =
   error.Warning
 
 /// Warning codes for categorizing warnings.
+///
+/// Use these codes for programmatic warning handling rather than parsing message strings.
+/// Codes include: `UnparseableCliVersion`, `CleanExitNoResult`, `NonZeroExitAfterResult`,
+/// `UnexpectedMessageAfterResult`, `IncompleteLastLine`, `DeprecatedOption`.
+///
+/// See `claude_agent_sdk/error` for variant constructors when pattern matching.
 pub type WarningCode =
   error.WarningCode
 
 /// Errors during stream iteration.
+///
+/// StreamError indicates problems during `next()` calls. Errors are either:
+/// - **Terminal**: Stream is done, stop iterating (`ProcessError`, `BufferOverflow`, `TooManyDecodeErrors`)
+/// - **Non-terminal**: Stream continues, call `next()` again (`JsonDecodeError`, `UnexpectedMessageError`)
+///
+/// Use `error.is_terminal()` to check if iteration should stop.
+///
+/// See `claude_agent_sdk/error` for variant constructors when pattern matching.
 pub type StreamError =
   error.StreamError
 
 /// Result of collecting stream items or messages.
+///
+/// Contains the collected items/messages along with any warnings and decode errors
+/// that occurred during collection. Terminal errors (if any) are returned in the
+/// `terminal_error` field.
 pub type CollectResult(a) =
   internal_stream.CollectResult(a)
 
 /// Control flow for fold_stream callback.
+///
+/// Return from the fold callback to control iteration:
+/// - `Continue(new_accumulator)`: Continue to the next item with updated state
+/// - `Stop(final_value)`: Stop iteration early and return this value
 pub type FoldAction(a) =
   internal_stream.FoldAction(a)
 
@@ -52,7 +146,31 @@ pub type FoldAction(a) =
 
 /// Advance the stream by one item.
 ///
-/// **Timeout Behavior by State**:
+/// Reads the next message from the Claude CLI process and returns it along
+/// with an updated stream. This is the primary iteration function for
+/// processing CLI responses.
+///
+/// ## Process Ownership (Critical)
+///
+/// **Blocks until next message. Cannot be cancelled from another process.**
+///
+/// This function receives messages from the underlying BEAM port. If called
+/// from a process other than the one that created the stream, it will block
+/// indefinitely because port messages are delivered only to the owning process.
+///
+/// ## Parameters
+///
+/// - `stream`: The current QueryStream state. Must be the most recent copy
+///   returned from a previous `next()` call.
+///
+/// ## Returns
+///
+/// A tuple of `#(Result(StreamItem, StreamError), QueryStream)`:
+/// - The Result contains either a StreamItem on success or a StreamError on failure
+/// - The QueryStream is the updated stream state (always use this for the next call)
+///
+/// ## Timeout Behavior by State
+///
 /// | Stream State           | Timeout Behavior       | Notes                        |
 /// |------------------------|------------------------|------------------------------|
 /// | Streaming (before Res) | Blocks indefinitely    | User controls via max_turns  |
@@ -60,17 +178,35 @@ pub type FoldAction(a) =
 /// | PendingEndOfStream     | Returns immediately    | Yield EndOfStream            |
 /// | Closed                 | Returns immediately    | No I/O needed                |
 ///
-/// **Return Value Classification**:
-/// - Ok(Message(envelope)) -> call next() again
-/// - Ok(WarningEvent(warning)) -> call next() again
-/// - Ok(EndOfStream) -> stop iteration
-/// - Error(JsonDecodeError(_)) -> Non-terminal, call next() again
-/// - Error(UnexpectedMessageError(_)) -> Non-terminal, call next() again
-/// - Error(ProcessError(_)) -> Terminal, stop iteration
-/// - Error(BufferOverflow) -> Terminal, stop iteration
-/// - Error(TooManyDecodeErrors(_)) -> Terminal, stop iteration
+/// ## Return Value Classification
 ///
-/// **Critical Contract**: Always use returned QueryStream - old copies have stale state.
+/// - `Ok(Message(envelope))` -> call `next()` again
+/// - `Ok(WarningEvent(warning))` -> call `next()` again
+/// - `Ok(EndOfStream)` -> stop iteration (normal completion)
+/// - `Error(JsonDecodeError(_))` -> Non-terminal, call `next()` again
+/// - `Error(UnexpectedMessageError(_))` -> Non-terminal, call `next()` again
+/// - `Error(ProcessError(_))` -> Terminal, stop iteration
+/// - `Error(BufferOverflow)` -> Terminal, stop iteration
+/// - `Error(TooManyDecodeErrors(_))` -> Terminal, stop iteration
+///
+/// Use `error.is_terminal()` to check if an error ends the stream.
+///
+/// ## Example
+///
+/// ```gleam
+/// fn iterate(stream: QueryStream) -> Nil {
+///   let #(result, stream) = stream.next(stream)
+///   case result {
+///     Ok(stream.Message(envelope)) -> {
+///       // Process message
+///       iterate(stream)  // Use updated stream
+///     }
+///     Ok(stream.EndOfStream) -> stream.close(stream)
+///     Error(err) if error.is_terminal(err) -> stream.close(stream)
+///     Error(_) -> iterate(stream)  // Non-terminal, continue
+///   }
+/// }
+/// ```
 pub fn next(
   stream: QueryStream,
 ) -> #(Result(StreamItem, StreamError), QueryStream) {
@@ -97,21 +233,67 @@ pub fn next(
 
 /// Close the stream and release resources.
 ///
-/// This function:
+/// Closes the underlying BEAM port immediately, sending an exit signal to
+/// the Claude CLI process. This is an abort operation—any messages remaining
+/// in the stream are discarded.
+///
+/// ## Process Ownership (Critical)
+///
+/// **Only effective when called by the process that spawned the query.**
+///
+/// The BEAM port is owned by the process that called `query()`. If `close()`
+/// is called from a different process:
+/// - The port will NOT be closed
+/// - The CLI process will continue running
+/// - Resources will not be released
+///
+/// For reliable cleanup across process boundaries, use `with_stream()` or
+/// ensure the owning process handles cleanup.
+///
+/// ## Behavior
+///
 /// - Closes the port immediately (sends exit signal to CLI process)
 /// - Marks the stream as closed
 /// - Is idempotent: safe to call multiple times
+/// - Discards any unread messages in the stream buffer
 ///
-/// **Note**: close() performs a user-initiated abort and does NOT parse/emit
-/// any remaining messages in the mailbox.
+/// ## Parameters
 ///
-/// Returns an updated QueryStream with closed=True. Always use the returned
-/// stream for subsequent operations to maintain correct state.
+/// - `stream`: The QueryStream to close
+///
+/// ## Returns
+///
+/// An updated QueryStream with `closed=True`. Always use the returned stream
+/// for subsequent operations to maintain correct state.
+///
+/// ## Example
+///
+/// ```gleam
+/// // Manual cleanup
+/// let stream = stream.close(stream)
+///
+/// // Preferred: use with_stream for automatic cleanup
+/// with_stream(query(prompt, options), fn(stream) {
+///   // Stream is automatically closed when this returns
+///   Ok(result)
+/// })
+/// ```
 pub fn close(stream: QueryStream) -> QueryStream {
   internal_stream.close(stream)
 }
 
 /// Check if the stream is closed.
+///
+/// Returns `True` if the stream has been closed (either explicitly via
+/// `close()` or implicitly when iteration completes).
+///
+/// ## Parameters
+///
+/// - `stream`: The QueryStream to check
+///
+/// ## Returns
+///
+/// `True` if the stream is closed, `False` if it's still active.
 pub fn is_closed(stream: QueryStream) -> Bool {
   internal_stream.is_closed(stream)
 }

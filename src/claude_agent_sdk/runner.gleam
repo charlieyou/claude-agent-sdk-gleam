@@ -1,28 +1,53 @@
 /// Runner: Abstraction layer for CLI process execution.
 ///
-/// This module provides the Runner type that abstracts over process execution,
+/// This module provides the `Runner` type that abstracts over process execution,
 /// enabling unit testing of stream semantics without spawning actual OS processes.
+///
+/// ## Purpose
+///
+/// In production, the SDK spawns the Claude CLI directly via BEAM ports. For testing,
+/// you can provide a mock `Runner` that simulates CLI behavior, allowing you to:
+/// - Test stream iteration logic without external dependencies
+/// - Simulate various CLI outputs, errors, and edge cases
+/// - Run tests deterministically without network or filesystem access
 ///
 /// ## Design
 ///
 /// The Runner is an opaque function record with three operations:
-/// - spawn: Start a process and return a handle
-/// - read_next: Read the next chunk of output from a handle
-/// - close: Close a handle and clean up resources
+/// - `spawn`: Start a process and return a handle
+/// - `read_next`: Read the next chunk of output from a handle
+/// - `close`: Close a handle and clean up resources
 ///
-/// For testing, `test_runner()` creates a Runner backed by user-provided
-/// callback functions that can simulate CLI behavior with ETS state management.
+/// ## Usage
+///
+/// Create a test runner with `test_runner()` and pass it to `with_test_mode()`:
+///
+/// ```gleam
+/// let runner = runner.test_runner(
+///   on_spawn: fn(_, _, _) { Ok(dynamic.from(my_state)) },
+///   on_read: fn(handle) { runner.Data(<<"{...}\n":utf8>>) },
+///   on_close: fn(_) { Nil },
+/// )
+/// let opts = options.default_options() |> options.with_test_mode(runner)
+/// ```
 import gleam/dynamic.{type Dynamic}
 
 /// Result of reading from a process handle.
+///
+/// Returned by the `on_read` callback in test runners and internally by the
+/// production port reader. Each variant represents a different outcome from
+/// reading the next chunk of process output.
 pub type ReadResult {
-  /// Data chunk received from process stdout
+  /// Data chunk received from process stdout.
+  /// The BitArray contains raw bytes that may or may not be newline-terminated.
   Data(BitArray)
-  /// Process exited with the given status code
+  /// Process exited with the given status code.
+  /// Exit code 0 typically indicates success; non-zero indicates failure.
   ExitStatus(Int)
-  /// An error occurred during read
+  /// An error occurred during read.
+  /// Contains an error message describing what went wrong.
   ReadError(String)
-  /// End of file reached
+  /// End of file reached (port closed without exit status).
   Eof
 }
 
