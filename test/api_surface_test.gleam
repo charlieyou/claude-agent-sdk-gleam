@@ -9,11 +9,12 @@ import gleeunit/should
 // Import all public types from main SDK module to verify they're exported
 import claude_agent_sdk.{
   type AssistantMessage, type AssistantMessageContent, type ContentBlock,
-  type ErrorDiagnostic, type McpServerStatus, type Message, type MessageEnvelope,
-  type PermissionDenial, type QueryError, type ResultMessage, type ResultSubtype,
-  type StreamError, type StreamItem, type SystemMessage, type ToolResultBlock,
-  type Usage, type UserMessage, type UserMessageContent, type Warning,
-  type WarningCode, is_terminal, version,
+  type ErrorDiagnostic, type Handle, type McpServerStatus, type Message,
+  type MessageEnvelope, type PermissionDenial, type QueryError, type ReadResult,
+  type ResultMessage, type ResultSubtype, type Runner, type StreamError,
+  type StreamItem, type SystemMessage, type ToolResultBlock, type Usage,
+  type UserMessage, type UserMessageContent, type Warning, type WarningCode,
+  is_terminal, test_runner, version,
 }
 
 // Import message module constructors for creating test values
@@ -24,6 +25,9 @@ import claude_agent_sdk/error
 
 // Import content module constructors
 import claude_agent_sdk/content
+
+// Import runner module constructors for ReadResult
+import claude_agent_sdk/runner
 
 // =============================================================================
 // API Surface Compilation Tests
@@ -307,4 +311,27 @@ pub fn user_message_importable_test() {
 
   msg.parent_tool_use_id
   |> should.equal(Some("tool-use-456"))
+}
+
+// =============================================================================
+// Runner Types API Surface Tests
+// =============================================================================
+
+pub fn runner_types_importable_test() {
+  // Verify Runner, Handle, ReadResult types and test_runner function are exported
+  // Create a test runner using the runner module directly (test_runner has labeled args)
+  let _test_runner: Runner =
+    runner.test_runner(
+      on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.nil()) },
+      on_read: fn(_handle) { runner.Eof },
+      on_close: fn(_handle) { Nil },
+    )
+
+  // Verify ReadResult constructors work
+  let read_result: ReadResult = runner.Data(<<>>)
+  let is_data = case read_result {
+    runner.Data(_) -> True
+    _ -> False
+  }
+  is_data |> should.be_true()
 }
