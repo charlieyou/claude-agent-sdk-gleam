@@ -228,8 +228,8 @@ pub fn build_cli_args(options: QueryOptions, prompt: String) -> List(String) {
       }
   }
 
-  // Add prompt separator and quoted prompt at the end
-  list.append(args, ["--", "\"" <> prompt <> "\""])
+  // Add prompt separator and prompt at the end
+  list.append(args, ["--", prompt])
 }
 
 /// Add permission mode flags to argument list.
