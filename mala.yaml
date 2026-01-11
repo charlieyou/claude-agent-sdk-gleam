@@ -1,0 +1,6 @@
+commands:
+  build: gleam build
+  test: gleam test
+  format: gleam format
+  typecheck: gleam check
+  e2e: gleam test -- --e2e

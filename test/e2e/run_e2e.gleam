@@ -133,8 +133,9 @@ fn run_with_config(config: Config) -> Result(Summary, String) {
     }
     False -> {
       use cli_path <- result.try(resolve_cli_path())
-      use #(cli_version_raw, cli_version_parsed) <-
-        result.try(resolve_cli_version(cli_path))
+      use #(cli_version_raw, cli_version_parsed) <- result.try(
+        resolve_cli_version(cli_path),
+      )
 
       let run_id = generate_run_id()
       let output_dir = case config.output_dir {

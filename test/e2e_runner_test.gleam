@@ -1,7 +1,7 @@
 import e2e/run_e2e
 import gleam/io
-import gleeunit/should
 import gleam/list
+import gleeunit/should
 
 @external(erlang, "claude_agent_sdk_ffi", "get_plain_arguments")
 fn get_plain_arguments() -> List(String)

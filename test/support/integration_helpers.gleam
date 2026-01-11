@@ -88,7 +88,9 @@ fn run_command_with_timeout(
     ["--help"] -> Ok(load_fixture("cli_help.txt"))
     ["auth", "status"] -> Ok("authenticated")
     ["--print", "--output-format", "stream-json", "test"] ->
-      Ok("{\"type\":\"system\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}\n")
+      Ok(
+        "{\"type\":\"system\"}\n{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}\n",
+      )
     _ -> Error(Nil)
   }
 }
