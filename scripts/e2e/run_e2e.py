@@ -75,6 +75,18 @@ def run_command(
     capture_output: bool = True,
 ) -> tuple[int, str, str]:
     """Run a CLI command with logging."""
+    # Claude CLI requires --verbose when using --print with stream-json output.
+    if "--print" in args and "--output-format" in args and "--verbose" not in args:
+        try:
+            fmt_index = args.index("--output-format")
+            if fmt_index + 1 < len(args) and args[fmt_index + 1] == "stream-json":
+                if args and not args[-1].startswith("-"):
+                    args = args[:-1] + ["--verbose", args[-1]]
+                else:
+                    args = args + ["--verbose"]
+        except ValueError:
+            pass
+
     cmd = [ctx.cli_path] + args
     cmd_str = " ".join(cmd)
     cwd = os.getcwd()
@@ -174,7 +186,7 @@ def run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult:
             result="pass", notes=f"Unparseable version: {ctx.cli_version_raw}"
         )
 
-    # Step 3: Auth check
+    # Step 3: Auth check (non-gating; do not skip tests)
     ctx.logger.log_event("step_start", "INFO", scenario_id=scenario_id, step="auth_check")
     has_api_key = bool(os.environ.get("ANTHROPIC_API_KEY"))
     if has_api_key:
@@ -190,18 +202,12 @@ def run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult:
         if exit_code == 0 and "authenticated" in stdout.lower():
             ctx.logger.log_event(
                 "step_end", "INFO", scenario_id=scenario_id, step="auth_check",
-                result="pass", notes="Authenticated via claude login"
+                result="pass", notes="Authenticated via CLI session"
             )
         else:
             ctx.logger.log_event(
                 "step_end", "WARN", scenario_id=scenario_id, step="auth_check",
-                result="skip", notes="No auth configured"
-            )
-            return ScenarioResult(
-                scenario_id=scenario_id,
-                status="skip",
-                duration_ms=ctx.logger.elapsed_ms() - start_ms,
-                notes="Set ANTHROPIC_API_KEY or run 'claude login'",
+                result="warn", notes="Auth not detected; continuing"
             )
 
     ctx.logger.log_event("scenario_end", "INFO", scenario_id=scenario_id, result="pass")

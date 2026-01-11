@@ -135,7 +135,7 @@ pub fn diagnose_exit_code(
     // First-run auth failure: exit 1, no stdout (stderr has auth error)
     1, True -> #(
       "Authentication required",
-      "Run 'claude login' to authenticate. The CLI produced no output, which typically means authentication failed. If running non-interactively (CI, daemon, container), ensure ANTHROPIC_API_KEY is set or redirect stderr for diagnostics: your_app 2>/tmp/stderr.log",
+      "Authenticate the Claude CLI. The CLI produced no output, which typically means authentication failed. If running non-interactively (CI, daemon, container), ensure ANTHROPIC_API_KEY is set or redirect stderr for diagnostics: your_app 2>/tmp/stderr.log",
     )
     // Exit 1 with some output: more specific error in stdout
     1, False -> #(

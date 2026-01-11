@@ -218,10 +218,10 @@ Emitted once at session start.
 | Value | Description |
 |-------|-------------|
 | `ANTHROPIC_API_KEY` | Using API key from environment variable |
-| `none` | Using OAuth authentication (user login via `claude login`) |
+| `none` | Using OAuth authentication (user login via CLI auth) |
 | `config` | Using API key from config file |
 
-**Note:** When `apiKeySource` is `"none"`, Claude Code authenticates via OAuth tokens from a prior `claude login` session. This enables usage without exposing API keys.
+**Note:** When `apiKeySource` is `"none"`, Claude Code authenticates via OAuth tokens from a prior CLI authentication session. This enables usage without exposing API keys.
 
 ### 4.3 Assistant Message
 

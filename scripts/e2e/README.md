@@ -22,7 +22,7 @@ python scripts/e2e/run_e2e.py --list
 
 - Python 3.10+
 - Claude CLI installed and in PATH (`claude --version`)
-- Authentication: `ANTHROPIC_API_KEY` env var or `claude login`
+- Authentication: `ANTHROPIC_API_KEY` env var or authenticated CLI session
 
 ## Environment Variables
 
@@ -32,7 +32,7 @@ python scripts/e2e/run_e2e.py --list
 | `ANTHROPIC_API_KEY` | No* | API key for authentication |
 | `CLAUDE_INTEGRATION_ALLOW_NONJSON` | No | Set to `1` to tolerate non-JSON CLI output |
 
-*Either `ANTHROPIC_API_KEY` or `claude login` session required.
+*Either `ANTHROPIC_API_KEY` or an authenticated CLI session required.
 
 ## Scenarios
 

@@ -1903,7 +1903,7 @@ If the CLI rejects a flag, users receive `ProcessError` with:
 
 **External requirements**:
 - [ ] Claude CLI must be installed (`claude --version` succeeds)
-- [ ] Claude CLI must be authenticated (`claude login` completed)
+- [ ] Claude CLI must be authenticated (CLI session available)
 
 ## High-Level Approach
 
@@ -3912,7 +3912,7 @@ fn diagnose_exit_code(exit_code: Int, stdout_was_empty: Bool) -> ErrorDiagnostic
     // First-run auth failure: exit 1, no stdout (stderr has auth error)
     #(1, True) -> #(
       "Authentication required",
-      "Run 'claude login' to authenticate. The CLI produced no output, which typically means authentication failed. If running non-interactively (CI, daemon, container), ensure ANTHROPIC_API_KEY is set or redirect stderr for diagnostics: your_app 2>/tmp/stderr.log"
+      "Authenticate the Claude CLI. The CLI produced no output, which typically means authentication failed. If running non-interactively (CI, daemon, container), ensure ANTHROPIC_API_KEY is set or redirect stderr for diagnostics: your_app 2>/tmp/stderr.log"
     )
     // Exit 1 with some output: more specific error in stdout
     #(1, False) -> #(
@@ -3975,8 +3975,8 @@ pub fn is_terminal(error: StreamError) -> Bool {
 **Common failure scenarios and diagnostics**:
 | Scenario | Exit Code | Stdout | Diagnostic Hint | User Action |
 |----------|-----------|--------|-----------------|-------------|
-| Not authenticated (first run) | 1 | Empty | "Authentication required" | Run `claude login` or set `ANTHROPIC_API_KEY` |
-| Auth error with details | 1 | Has content | "check if CLI is authenticated" | Run `claude login` |
+| Not authenticated (first run) | 1 | Empty | "Authentication required" | Authenticate the CLI or set `ANTHROPIC_API_KEY` |
+| Auth error with details | 1 | Has content | "check if CLI is authenticated" | Authenticate the CLI |
 | Invalid flags | 2 | Has content | "check SDK version compatibility" | Update SDK or CLI |
 | CLI moved/removed | 127 | Empty | "CLI may have moved" | Reinstall CLI |
 | Permission denied | 126 | Empty | "check file permissions" | Check path/permissions |
@@ -3999,7 +3999,7 @@ your_gleam_app 2>/tmp/claude_stderr.log
 ```
 
 Common causes of empty stdout with non-zero exit:
-- **Not authenticated**: Run `claude login` or set `ANTHROPIC_API_KEY`
+- **Not authenticated**: Authenticate the CLI or set `ANTHROPIC_API_KEY`
 - **Network issues**: Check connectivity to Anthropic API
 - **Config errors**: Check `~/.claude/` configuration
 ```
@@ -4563,7 +4563,7 @@ Integration tests should default to skipping unless ALL conditions are met:
 1. `CLAUDE_INTEGRATION_TEST=1` environment variable is set
 2. `claude` is found in PATH (non-network check)
 3. `claude --version` succeeds with 5s timeout (non-network check)
-4. For query tests ONLY: auth is available (API key or `claude login` completed)
+4. For query tests ONLY: auth is available (API key or authenticated CLI session)
 
 **Auth detection for query tests**:
 ```gleam
@@ -4584,7 +4584,7 @@ fn is_authenticated() -> Bool {
 pub fn integration__real_cli_query_test() {
   case integration_enabled(...) && is_authenticated() {
     True -> run_query_test()
-    False -> skip_test("[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login")
+    False -> skip_test("[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or authenticate the CLI")
   }
 }
 ```

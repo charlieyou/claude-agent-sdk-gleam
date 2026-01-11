@@ -24,7 +24,7 @@ If you need a Gleam SDK that calls the Anthropic API directly (no CLI), that wor
 
 - **Claude CLI** installed and accessible in PATH (`claude --version` works)
 - **Authentication** via one of:
-  - `claude login` (interactive)
+  - Authenticated Claude CLI session
   - `ANTHROPIC_API_KEY` environment variable
 - **Gleam** 1.0 or later
 
@@ -216,7 +216,7 @@ CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
 
 | Variable | Purpose |
 |----------|---------|
-| `ANTHROPIC_API_KEY` | API key for CLI authentication (alternative to `claude login`) |
+| `ANTHROPIC_API_KEY` | API key for CLI authentication |
 | `CLAUDE_INTEGRATION_TEST` | Set to `1` to enable integration tests |
 | `CLAUDE_INTEGRATION_ALLOW_NONJSON` | Set to `1` to tolerate non-JSON CLI output |
 | `PHASE0_RUNTIME` | Set to `1` to enable Phase 0 FFI validation tests |
@@ -225,7 +225,7 @@ CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
 
 1. Claude CLI installed (`claude --version` works)
 2. Authentication via one of:
-   - `claude login` (interactive)
+   - Authenticated Claude CLI session
    - `ANTHROPIC_API_KEY` environment variable
 
 ### E2E Tests
@@ -239,7 +239,7 @@ End-to-end tests validate the full SDK against a real Claude CLI. See [`scripts/
 npm install -g @anthropic-ai/claude-code
 
 # Authenticate
-export ANTHROPIC_API_KEY=your-key  # or run: claude login
+export ANTHROPIC_API_KEY=your-key
 
 # Run E2E suite
 CLAUDE_INTEGRATION_TEST=1 python scripts/e2e/run_e2e.py
@@ -571,7 +571,7 @@ your_gleam_app 2>/tmp/claude_stderr.log
 ```
 
 Common causes of empty stdout with non-zero exit:
-- **Not authenticated**: Run `claude login` or set `ANTHROPIC_API_KEY`
+- **Not authenticated**: Authenticate the CLI or set `ANTHROPIC_API_KEY`
 - **Network issues**: Check connectivity to Anthropic API
 - **Config errors**: Check `~/.claude/` configuration
 

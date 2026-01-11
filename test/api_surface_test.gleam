@@ -207,7 +207,7 @@ pub fn error_diagnostic_importable_test() {
       last_non_json_line: None,
       stdout_was_empty: True,
       exit_code_hint: "auth required",
-      troubleshooting: "run claude login",
+      troubleshooting: "authenticate the Claude CLI",
     )
 
   diagnostic.stdout_was_empty
