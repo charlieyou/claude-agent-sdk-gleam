@@ -161,3 +161,23 @@ pub const collect_messages = internal_stream.collect_messages
 /// The stream is automatically closed when iteration ends (either by reaching
 /// EndOfStream, encountering a terminal error, or early stop).
 pub const fold_stream = internal_stream.fold_stream
+
+/// Convert a QueryStream to a Yielder for gleam/yielder combinator interop.
+///
+/// **WARNING: Leak Risk**
+/// Unlike `with_stream()`, `collect_*()`, and `fold_stream()`, this function
+/// does NOT guarantee cleanup. The port resource may leak if:
+/// - The yielder is not fully consumed
+/// - An exception occurs during iteration
+/// - Early break from iteration (e.g., via `take()`)
+///
+/// **Preferred Alternatives**:
+/// - Use `with_stream()` for guaranteed cleanup with early termination
+/// - Use `collect_items()` or `collect_messages()` for full consumption
+/// - Use `fold_stream()` for accumulation with early stop
+///
+/// **Use to_yielder() only when**:
+/// - You need gleam/yielder combinators (map, filter, zip, etc.)
+/// - Cleanup is handled externally (e.g., supervisor process)
+/// - You guarantee full consumption of the yielder
+pub const to_yielder = internal_stream.to_yielder
