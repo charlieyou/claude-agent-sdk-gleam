@@ -627,73 +627,75 @@ def main():
     # Initialize logger
     logger = EventLogger(run_id=run_id, output_dir=output_dir)
 
-    # Collect metadata
-    sys_info = get_system_info()
-    metadata = {
-        "run_id": run_id,
-        "start_ts": datetime.now(timezone.utc).isoformat(),
-        "cli_version_raw": cli_version_raw,
-        "cli_version_parsed": cli_version_str,
-        "gleam_version": get_gleam_version(),
-        "repo_sha": get_repo_sha(),
-        **sys_info,
-    }
+    try:
+        # Collect metadata
+        sys_info = get_system_info()
+        metadata = {
+            "run_id": run_id,
+            "start_ts": datetime.now(timezone.utc).isoformat(),
+            "cli_version_raw": cli_version_raw,
+            "cli_version_parsed": cli_version_str,
+            "gleam_version": get_gleam_version(),
+            "repo_sha": get_repo_sha(),
+            **sys_info,
+        }
 
-    # Log run start
-    logger.log_event("run_start", "INFO", env=get_redacted_env(), **metadata)
+        # Log run start
+        logger.log_event("run_start", "INFO", env=get_redacted_env(), **metadata)
 
-    # Create scenario context
-    ctx = ScenarioContext(
-        logger=logger,
-        cli_path=cli_path,
-        cli_version_raw=cli_version_raw,
-        cli_version_parsed=cli_version_parsed,
-    )
+        # Create scenario context
+        ctx = ScenarioContext(
+            logger=logger,
+            cli_path=cli_path,
+            cli_version_raw=cli_version_raw,
+            cli_version_parsed=cli_version_parsed,
+        )
 
-    # Determine scenarios to run
-    if args.scenarios:
-        scenario_ids = []
-        for s in args.scenarios:
-            if s.upper() in SCENARIOS:
-                scenario_ids.append(s.upper())
-            else:
-                print(f"Unknown scenario: {s}", file=sys.stderr)
-                return 1
-    else:
-        scenario_ids = list(SCENARIOS.keys())
+        # Determine scenarios to run
+        if args.scenarios:
+            scenario_ids = []
+            for s in args.scenarios:
+                if s.upper() in SCENARIOS:
+                    scenario_ids.append(s.upper())
+                else:
+                    print(f"Unknown scenario: {s}", file=sys.stderr)
+                    return 1
+        else:
+            scenario_ids = list(SCENARIOS.keys())
 
-    # Run scenarios
-    results = []
-    for scenario_id in scenario_ids:
-        print(f"Running {scenario_id}...", end=" ", flush=True)
-        try:
-            result = SCENARIOS[scenario_id](ctx)
-            results.append(result)
-            status_char = {"pass": "✓", "fail": "✗", "skip": "○"}.get(result.status, "?")
-            print(f"{status_char} {result.status} ({result.duration_ms}ms)")
-        except Exception as e:
-            print(f"✗ error: {e}")
-            logger.log_event(
-                "error", "ERROR", scenario_id=scenario_id,
-                error={"kind": "exception", "message": str(e)}
-            )
-            results.append(ScenarioResult(
-                scenario_id=scenario_id,
-                status="fail",
-                duration_ms=0,
-                error_kind="exception",
-                error_message=str(e),
-            ))
+        # Run scenarios
+        results = []
+        for scenario_id in scenario_ids:
+            print(f"Running {scenario_id}...", end=" ", flush=True)
+            try:
+                result = SCENARIOS[scenario_id](ctx)
+                results.append(result)
+                status_char = {"pass": "✓", "fail": "✗", "skip": "○"}.get(result.status, "?")
+                print(f"{status_char} {result.status} ({result.duration_ms}ms)")
+            except Exception as e:
+                print(f"✗ error: {e}")
+                logger.log_event(
+                    "error", "ERROR", scenario_id=scenario_id,
+                    error={"kind": "exception", "message": str(e)}
+                )
+                results.append(ScenarioResult(
+                    scenario_id=scenario_id,
+                    status="fail",
+                    duration_ms=0,
+                    error_kind="exception",
+                    error_message=str(e),
+                ))
 
-    # Finalize
-    end_ts = datetime.now(timezone.utc)
-    metadata["end_ts"] = end_ts.isoformat()
-    metadata["duration_ms"] = logger.elapsed_ms()
+        # Finalize
+        end_ts = datetime.now(timezone.utc)
+        metadata["end_ts"] = end_ts.isoformat()
+        metadata["duration_ms"] = logger.elapsed_ms()
 
-    logger.log_event("run_end", "INFO", duration_ms=metadata["duration_ms"])
-    logger.write_metadata(metadata)
-    write_summary(output_dir, run_id, metadata, results)
-    logger.close()
+        logger.log_event("run_end", "INFO", duration_ms=metadata["duration_ms"])
+        logger.write_metadata(metadata)
+        write_summary(output_dir, run_id, metadata, results)
+    finally:
+        logger.close()
 
     # Print summary
     print()

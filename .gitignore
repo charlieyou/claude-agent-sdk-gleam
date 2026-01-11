@@ -2,3 +2,10 @@
 *.ez
 /build
 erl_crash.dump
+
+# Python artifacts
+__pycache__/
+*.pyc
+
+# Test artifacts
+artifacts/

@@ -45,9 +45,12 @@ ENV_ALLOWLIST = frozenset([
 MAX_LINE_LENGTH = 4096
 
 # Patterns for secret detection
+# NOTE: These patterns intentionally over-redact for security. The generic long
+# token pattern ([a-zA-Z0-9_-]{32,}) may redact legitimate identifiers like
+# commit SHAs or UUIDs. This is a deliberate trade-off: security over diagnostics.
 SECRET_PATTERNS = [
     re.compile(r"sk-ant-[a-zA-Z0-9_-]{20,}"),  # Anthropic API keys
-    re.compile(r"[a-zA-Z0-9_-]{32,}"),  # Generic long tokens (conservative)
+    re.compile(r"[a-zA-Z0-9_-]{32,}"),  # Generic long tokens (may over-redact)
     re.compile(r"Bearer\s+[a-zA-Z0-9_.-]+"),  # Bearer tokens
     re.compile(r"api[_-]?key[=:]\s*[a-zA-Z0-9_-]+", re.IGNORECASE),
 ]
