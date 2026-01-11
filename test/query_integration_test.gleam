@@ -193,7 +193,7 @@ pub fn integration__skip_message_auth_unavailable_test() {
 // Real CLI Query Integration Test
 // ============================================================================
 
-/// Integration test: real CLI query (opt-in via CLAUDE_INTEGRATION_TEST=1)
+/// Integration test: real CLI query
 /// Makes an actual query to Claude CLI and verifies the stream produces messages.
 pub fn integration__real_cli_query_test() {
   case integration_enabled("integration__real_cli_query_test") {
@@ -358,7 +358,7 @@ pub fn integration__skip_message_timeout_test() {
 // Session Resume Integration Test
 // ============================================================================
 
-/// Integration test: session resume (opt-in via CLAUDE_INTEGRATION_TEST=1)
+/// Integration test: session resume
 /// Creates an initial session, extracts session_id, resumes with follow-up,
 /// and verifies session context is preserved.
 pub fn integration__session_resume_test() {

@@ -1464,7 +1464,6 @@ fn redacted_env_as_json() -> List(#(String, json.Json)) {
 
 fn env_allowlist() -> List(String) {
   [
-    "CLAUDE_INTEGRATION_TEST",
     "CLAUDE_INTEGRATION_ALLOW_NONJSON",
     "PATH",
     "HOME",

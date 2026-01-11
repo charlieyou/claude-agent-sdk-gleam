@@ -5,20 +5,8 @@ End-to-end integration test runner for Claude Agent SDK (Gleam).
 ## Quick Start
 
 ```bash
-# Enable E2E tests (required gate)
-export CLAUDE_INTEGRATION_TEST=1
-
-# Run all scenarios
-gleam run -m e2e/run_e2e
-
 # Run via gleam test (runs unit + integration + E2E)
 gleam test -- --e2e
-
-# Run specific scenario
-gleam run -m e2e/run_e2e -- --scenario E2E-02
-
-# List available scenarios
-gleam run -m e2e/run_e2e -- --list
 ```
 
 ## Prerequisites
@@ -30,7 +18,6 @@ gleam run -m e2e/run_e2e -- --list
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `CLAUDE_INTEGRATION_TEST` | Yes | Set to `1` to enable E2E suite |
 | `ANTHROPIC_API_KEY` | No* | API key for authentication |
 | `CLAUDE_INTEGRATION_ALLOW_NONJSON` | No | Set to `1` to tolerate non-JSON CLI output |
 
@@ -89,7 +76,7 @@ Event types: `run_start`, `run_end`, `scenario_start`, `scenario_end`, `step_sta
 ## Example Output
 
 ```
-$ CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e
+$ gleam test -- --e2e
 
 E2E Run: 20260111-143052-a1b2c3d4
 Output:  artifacts/e2e/20260111-143052-a1b2c3d4

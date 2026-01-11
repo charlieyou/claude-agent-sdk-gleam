@@ -203,13 +203,13 @@ gleam test  # Run the tests
 gleam test
 
 # Integration tests (requires Claude CLI installed and authenticated)
-CLAUDE_INTEGRATION_TEST=1 gleam test
+gleam test
 
 # Phase 0 FFI validation tests
 PHASE0_RUNTIME=1 gleam test
 
 # Integration tests with non-JSON tolerance (for CLI versions with extra output)
-CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
+CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
 ```
 
 ### Environment Variables
@@ -217,7 +217,6 @@ CLAUDE_INTEGRATION_TEST=1 CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | API key for CLI authentication |
-| `CLAUDE_INTEGRATION_TEST` | Set to `1` to enable integration tests |
 | `CLAUDE_INTEGRATION_ALLOW_NONJSON` | Set to `1` to tolerate non-JSON CLI output |
 | `PHASE0_RUNTIME` | Set to `1` to enable Phase 0 FFI validation tests |
 
@@ -241,17 +240,8 @@ npm install -g @anthropic-ai/claude-code
 # Authenticate
 export ANTHROPIC_API_KEY=your-key
 
-# Run E2E suite
-CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e
-
 # Run E2E via gleam test (runs unit + integration + E2E)
 gleam test -- --e2e
-
-# Run specific scenario
-CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e -- --scenario E2E-02
-
-# List scenarios
-gleam run -m e2e/run_e2e -- --list
 ```
 
 #### Running in CI
