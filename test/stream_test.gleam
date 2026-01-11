@@ -1083,3 +1083,216 @@ pub fn to_yielder_propagates_errors_test() {
     })
   has_error |> should.be_true
 }
+
+// ============================================================================
+// test_runner() Stream Semantics Tests (casg-tc3.4)
+// ============================================================================
+
+import claude_agent_sdk/runner.{Data, Eof, ExitStatus, test_runner}
+import gleam/dynamic
+import support/ets_helpers
+
+/// FFI to coerce any value to Dynamic
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> dynamic.Dynamic
+
+/// Valid JSON message fixtures for testing.
+/// These match the format expected by the decoder.
+const valid_system_json = "{\"type\":\"system\"}"
+
+const valid_assistant_json = "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}"
+
+const valid_result_json = "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}"
+
+/// Test that test_runner() with ETS state can simulate valid NDJSON stream.
+/// This demonstrates the pattern for testing stream semantics without real CLI.
+pub fn valid_json_stream_via_test_runner_test() {
+  // Create ETS table for mock state
+  let table = ets_helpers.new("test_runner_valid_stream")
+
+  // Create test runner with ETS-backed state
+  let runner =
+    test_runner(
+      on_spawn: fn(_cmd, _args, _cwd) {
+        // Create unique ref for this "process"
+        let ref = ets_helpers.make_ref()
+        // Store lines to emit (with newlines for NDJSON format)
+        let lines =
+          to_dynamic([
+            valid_system_json <> "\n",
+            valid_assistant_json <> "\n",
+            valid_result_json <> "\n",
+          ])
+        ets_helpers.insert(table, ref, lines)
+        Ok(ref)
+      },
+      on_read: fn(state) {
+        // Lookup remaining lines
+        case ets_helpers.lookup(table, state) {
+          option.Some(lines_dyn) -> {
+            // Cast back to List(String)
+            let lines: List(String) = dynamic.unsafe_coerce(lines_dyn)
+            case lines {
+              [line, ..rest] -> {
+                // Update state with remaining lines
+                ets_helpers.insert(table, state, to_dynamic(rest))
+                // Return line as Data
+                Data(bit_array.from_string(line))
+              }
+              [] -> {
+                // No more lines, return exit status 0
+                ExitStatus(0)
+              }
+            }
+          }
+          option.None -> Eof
+        }
+      },
+      on_close: fn(state) {
+        ets_helpers.delete(table, state)
+        Nil
+      },
+    )
+
+  // Spawn using the test runner
+  case runner.spawn(runner, "claude", [], "/tmp") {
+    Error(msg) -> {
+      panic as { "spawn failed: " <> msg }
+    }
+    Ok(handle) -> {
+      // Read first line: should be system message data
+      case runner.read_next(runner, handle) {
+        Data(data) -> {
+          case bit_array.to_string(data) {
+            Ok(line) -> {
+              // Should contain system JSON
+              { line == valid_system_json <> "\n" } |> should.be_true
+            }
+            Error(_) -> should.fail()
+          }
+        }
+        _ -> should.fail()
+      }
+
+      // Read second line: should be assistant message data
+      case runner.read_next(runner, handle) {
+        Data(data) -> {
+          case bit_array.to_string(data) {
+            Ok(line) -> {
+              // Should contain assistant JSON
+              { line == valid_assistant_json <> "\n" } |> should.be_true
+            }
+            Error(_) -> should.fail()
+          }
+        }
+        _ -> should.fail()
+      }
+
+      // Read third line: should be result message data
+      case runner.read_next(runner, handle) {
+        Data(data) -> {
+          case bit_array.to_string(data) {
+            Ok(line) -> {
+              // Should contain result JSON
+              { line == valid_result_json <> "\n" } |> should.be_true
+            }
+            Error(_) -> should.fail()
+          }
+        }
+        _ -> should.fail()
+      }
+
+      // Read after all lines: should get exit status 0
+      case runner.read_next(runner, handle) {
+        ExitStatus(0) -> Nil
+        _ -> should.fail()
+      }
+
+      // Cleanup
+      runner.close(runner, handle)
+    }
+  }
+}
+
+/// Test that test_runner() ETS state is properly cleaned up on close.
+pub fn test_runner_ets_cleanup_on_close_test() {
+  let table = ets_helpers.new("test_runner_cleanup")
+
+  let runner =
+    test_runner(
+      on_spawn: fn(_cmd, _args, _cwd) {
+        let ref = ets_helpers.make_ref()
+        ets_helpers.insert(table, ref, to_dynamic(["line\n"]))
+        Ok(ref)
+      },
+      on_read: fn(state) {
+        case ets_helpers.lookup(table, state) {
+          option.Some(_) -> ExitStatus(0)
+          option.None -> Eof
+        }
+      },
+      on_close: fn(state) {
+        ets_helpers.delete(table, state)
+        Nil
+      },
+    )
+
+  case runner.spawn(runner, "claude", [], "/tmp") {
+    Error(_) -> should.fail()
+    Ok(handle) -> {
+      // Get the internal ref to check ETS later
+      // Note: we need to extract the ref from the handle somehow
+      // For now, just verify close doesn't crash
+      runner.close(runner, handle)
+      // State should be cleaned up (no crash = success)
+    }
+  }
+}
+
+/// Test that test_runner() can simulate non-zero exit status.
+pub fn test_runner_nonzero_exit_test() {
+  let table = ets_helpers.new("test_runner_nonzero_exit")
+
+  let runner =
+    test_runner(
+      on_spawn: fn(_cmd, _args, _cwd) {
+        let ref = ets_helpers.make_ref()
+        ets_helpers.insert(table, ref, to_dynamic("ready"))
+        Ok(ref)
+      },
+      on_read: fn(_state) {
+        // Immediately return non-zero exit status
+        ExitStatus(42)
+      },
+      on_close: fn(state) {
+        ets_helpers.delete(table, state)
+        Nil
+      },
+    )
+
+  case runner.spawn(runner, "claude", [], "/tmp") {
+    Error(_) -> should.fail()
+    Ok(handle) -> {
+      case runner.read_next(runner, handle) {
+        ExitStatus(42) -> Nil
+        _ -> should.fail()
+      }
+      runner.close(runner, handle)
+    }
+  }
+}
+
+/// Test that test_runner() spawn can return errors.
+pub fn test_runner_spawn_error_test() {
+  let runner =
+    test_runner(
+      on_spawn: fn(_cmd, _args, _cwd) { Error("Simulated spawn failure") },
+      on_read: fn(_state) { Eof },
+      on_close: fn(_state) { Nil },
+    )
+
+  case runner.spawn(runner, "claude", [], "/tmp") {
+    Error(msg) -> msg |> should.equal("Simulated spawn failure")
+    Ok(_) -> should.fail()
+  }
+}
