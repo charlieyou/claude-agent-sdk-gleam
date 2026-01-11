@@ -2,6 +2,30 @@
 ////
 //// This module provides the main entry point for the Claude Agent SDK.
 //// Re-exports all public types for convenient imports.
+////
+//// ## Pattern Matching on Variant Types
+////
+//// Due to Gleam's module system, variant constructors cannot be re-exported.
+//// This means you can import types from this module and use factory functions
+//// to create values, but pattern matching requires importing the source module:
+////
+//// ```gleam
+//// import claude_agent_sdk.{type ContentBlock}
+//// import claude_agent_sdk/content  // Required for pattern matching
+////
+//// // Creating values - use factory functions from main module
+//// let block = claude_agent_sdk.text_block("Hello")
+////
+//// // Pattern matching - use constructors from source module
+//// case block {
+////   content.TextBlock(text) -> // handle text
+////   content.ToolUseBlock(id, name, input) -> // handle tool use
+////   content.UnknownBlock(raw) -> // handle unknown
+//// }
+//// ```
+////
+//// This applies to: ContentBlock, ToolResultBlock, Message, QueryError,
+//// StreamError, and other variant types.
 
 import gleam/dynamic
 import gleam/option
