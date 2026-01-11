@@ -39,7 +39,6 @@ When enabled, these tests validate:
 
 | File | Description |
 |------|-------------|
-| `src/claude_agent_sdk/internal/confirmed_imports.gleam` | Re-exports verified imports for consistency |
 | `src/claude_agent_sdk/internal/port_ffi.gleam` | FFI bindings to Erlang port operations |
 | `src/claude_agent_sdk_ffi.erl` | Erlang FFI implementation |
 | `manifest.toml` | Gleam lockfile for reproducible builds |
