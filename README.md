@@ -150,9 +150,10 @@ pub type Cancel {
   Cancel
 }
 
-/// Error wrapper for query startup failures
+/// Error wrapper for query failures
 pub type StreamResult {
   QueryStartError(claude_agent_sdk_gleam.QueryError)
+  StreamReadError(claude_agent_sdk_gleam.StreamError)
 }
 
 /// Run a query with cancellation support.
@@ -200,7 +201,7 @@ fn consume_with_cancellation(
           consume_with_cancellation(new_stream, result_subject, cancel_subject)
         }
         #(Error(e), _) -> {
-          process.send(result_subject, Error(QueryStartError(e)))
+          process.send(result_subject, Error(StreamReadError(e)))
         }
       }
     }
@@ -251,10 +252,11 @@ For simple consumption without cancellation:
 
 ```gleam
 import claude_agent_sdk_gleam.{
-  type QueryStream, type StreamItem, EndOfStream, MessageEnvelope,
+  type QueryStream, type StreamItem, EndOfStream, Message,
   close, next, query, default_options,
 }
 import gleam/io
+import gleam/string
 
 pub fn stream_query(prompt: String) {
   case query(prompt, default_options()) {
@@ -268,12 +270,12 @@ fn consume_stream(stream: QueryStream) -> Nil {
     #(Ok(EndOfStream), _) -> {
       io.println("Stream complete")
     }
-    #(Ok(MessageEnvelope(msg)), new_stream) -> {
-      io.println("Received: " <> msg.content)
+    #(Ok(Message(envelope)), new_stream) -> {
+      io.println("Received message with raw_json: " <> envelope.raw_json)
       consume_stream(new_stream)
     }
     #(Ok(_other), new_stream) -> {
-      // Skip non-message items
+      // Skip non-message items (warnings, etc.)
       consume_stream(new_stream)
     }
     #(Error(e), stream) -> {
@@ -290,19 +292,26 @@ Handle recoverable vs terminal errors:
 
 ```gleam
 import claude_agent_sdk_gleam.{
-  type StreamError, JsonParseError, PortError, UnexpectedMessage,
+  type StreamError, BufferOverflow, JsonDecodeError, ProcessError,
+  TooManyDecodeErrors, UnexpectedMessageError,
 }
 
 fn handle_stream_error(error: StreamError) -> ErrorAction {
   case error {
-    // JSON parse errors may be recoverable (skip malformed message)
-    JsonParseError(_) -> Continue
+    // JSON decode errors may be recoverable (skip malformed message)
+    JsonDecodeError(_, _) -> Continue
 
-    // Port errors are terminal - the connection is broken
-    PortError(_) -> Stop
+    // Process errors are terminal - the CLI exited
+    ProcessError(_, _) -> Stop
 
     // Unexpected messages can be logged and skipped
-    UnexpectedMessage(_) -> Continue
+    UnexpectedMessageError(_) -> Continue
+
+    // Buffer overflow is terminal
+    BufferOverflow -> Stop
+
+    // Too many decode errors is terminal
+    TooManyDecodeErrors(_, _) -> Stop
   }
 }
 
@@ -318,8 +327,11 @@ For pipelines where warnings should fail the build:
 
 ```gleam
 import claude_agent_sdk_gleam.{
-  type StreamItem, ResultEnvelope, with_stream, query, default_options,
+  type StreamItem, EndOfStream, Message, WarningEvent,
+  with_stream, next, query, default_options,
 }
+import claude_agent_sdk_gleam/message.{Result as ResultMsg}
+import gleam/string
 
 pub fn ci_query(prompt: String) -> Result(String, String) {
   case query(prompt, default_options()) {
@@ -335,14 +347,22 @@ pub fn ci_query(prompt: String) -> Result(String, String) {
 fn check_for_warnings(stream, acc) {
   case next(stream) {
     #(Ok(EndOfStream), _) -> Ok(acc)
-    #(Ok(ResultEnvelope(result)), new_stream) -> {
-      // Fail on any warnings in CI mode
-      case result.warnings {
-        [] -> check_for_warnings(new_stream, acc <> result.result)
-        warnings -> Error("Warnings detected: " <> string.inspect(warnings))
+    #(Ok(Message(envelope)), new_stream) -> {
+      // Check if this is a result message with warnings
+      case envelope.message {
+        ResultMsg(result_msg) -> {
+          case result_msg.warnings {
+            [] -> check_for_warnings(new_stream, acc <> result_msg.result)
+            warnings -> Error("Warnings detected: " <> string.inspect(warnings))
+          }
+        }
+        _ -> check_for_warnings(new_stream, acc)
       }
     }
-    #(Ok(_), new_stream) -> check_for_warnings(new_stream, acc)
+    #(Ok(WarningEvent(warning)), _) -> {
+      // Fail immediately on any warning in CI mode
+      Error("Warning: " <> warning.message)
+    }
     #(Error(e), _) -> Error("Stream error: " <> string.inspect(e))
   }
 }
