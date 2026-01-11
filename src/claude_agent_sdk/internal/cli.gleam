@@ -2,9 +2,14 @@
 //// Internal module - converts QueryOptions to List(String) for CLI invocation,
 //// and provides pure version parsing functions for unit testing.
 
+import claude_agent_sdk/internal/constants
+import claude_agent_sdk/internal/port_ffi.{
+  type Port, Data, Eof, ExitStatus, Timeout,
+}
 import claude_agent_sdk/options.{
   type PermissionMode, type QueryOptions, AcceptEdits, BypassPermissions, Plan,
 }
+import gleam/bit_array
 import gleam/float
 import gleam/int
 import gleam/list
@@ -26,6 +31,79 @@ pub type CliVersion {
 
 /// Minimum CLI version required by SDK (1.0.0)
 pub const minimum_cli_version = CliVersion(1, 0, 0, "1.0.0")
+
+/// Errors from version detection
+pub type VersionCheckError {
+  /// Timeout waiting for CLI response
+  VersionCheckTimeout
+  /// Failed to spawn CLI process
+  SpawnFailed(reason: String)
+  /// CLI output could not be parsed as a version
+  ParseFailed(raw_output: String)
+}
+
+/// Default timeout for version detection (5000ms)
+pub fn default_version_timeout_ms() -> Int {
+  constants.version_detection_timeout_ms
+}
+
+// ============================================================================
+// Version Detection
+// ============================================================================
+
+/// Detect CLI version by spawning `cli_path --version` and parsing output.
+/// Uses port_ffi directly with a 5-second timeout.
+pub fn detect_cli_version(
+  cli_path: String,
+) -> Result(CliVersion, VersionCheckError) {
+  // Spawn the CLI with --version
+  let port = port_ffi.ffi_open_port(cli_path, ["--version"], ".")
+
+  // Collect output with timeout
+  case collect_version_output(port, <<>>) {
+    Ok(output) -> {
+      port_ffi.ffi_close_port(port)
+      case parse_version_string(output) {
+        Ok(version) -> Ok(version)
+        Error(Nil) -> Error(ParseFailed(output))
+      }
+    }
+    Error(err) -> {
+      port_ffi.ffi_close_port(port)
+      Error(err)
+    }
+  }
+}
+
+/// Collect all output from the version command until exit or timeout.
+fn collect_version_output(
+  port: Port,
+  acc: BitArray,
+) -> Result(String, VersionCheckError) {
+  case port_ffi.receive_timeout(port, constants.version_detection_timeout_ms) {
+    Ok(msg) ->
+      case msg {
+        Data(bytes) ->
+          collect_version_output(port, bit_array.append(acc, bytes))
+        ExitStatus(_code) -> {
+          // Process exited - convert accumulated bytes to string
+          case bit_array.to_string(acc) {
+            Ok(s) -> Ok(s)
+            Error(Nil) -> Error(ParseFailed("<invalid utf-8>"))
+          }
+        }
+        Eof -> {
+          // EOF received - convert accumulated bytes to string
+          case bit_array.to_string(acc) {
+            Ok(s) -> Ok(s)
+            Error(Nil) -> Error(ParseFailed("<invalid utf-8>"))
+          }
+        }
+        Timeout -> Error(VersionCheckTimeout)
+      }
+    Error(reason) -> Error(SpawnFailed(reason))
+  }
+}
 
 // ============================================================================
 // Version Parsing Functions
