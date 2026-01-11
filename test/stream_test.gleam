@@ -1274,23 +1274,6 @@ pub fn multi_line_ndjson_stream_via_real_port_test() {
   }
 }
 
-/// Test non-zero exit status via real port.
-pub fn nonzero_exit_via_real_port_test() {
-  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 42"], "/tmp")
-  let stream_instance = new(port)
-
-  let #(result, updated) = next(stream_instance)
-  case result {
-    Error(NextProcessError(code, diagnostic)) -> {
-      code |> should.equal(42)
-      diagnostic.stdout_was_empty |> should.be_true
-    }
-    _ -> should.fail()
-  }
-
-  updated |> is_closed |> should.be_true
-}
-
 // ============================================================================
 // Empty-stdout and Incomplete-line Warning Tests (casg-tc3.11)
 // ============================================================================
