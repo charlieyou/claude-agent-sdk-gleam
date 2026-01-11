@@ -3,18 +3,109 @@
 [![Package Version](https://img.shields.io/hexpm/v/claude_agent_sdk)](https://hex.pm/packages/claude_agent_sdk)
 [![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/claude_agent_sdk/)
 
-```sh
-gleam add claude_agent_sdk@1
-```
-```gleam
-import claude_agent_sdk
+A Gleam SDK for the Claude CLI, providing streaming query support with proper resource management.
 
-pub fn main() -> Nil {
-  // TODO: An example of the project in use
+## Prerequisites
+
+- **Claude CLI** installed and accessible in PATH (`claude --version` works)
+- **Authentication** via one of:
+  - `claude login` (interactive)
+  - `ANTHROPIC_API_KEY` environment variable
+- **Gleam** 1.0 or later
+
+## Installation
+
+```sh
+gleam add claude_agent_sdk
+```
+
+## Quick Start
+
+```gleam
+import claude_agent_sdk.{query, default_options, with_max_turns, next, close}
+import claude_agent_sdk/error.{EndOfStream, Message}
+import gleam/io
+
+pub fn main() {
+  let options = default_options()
+    |> with_max_turns(1)
+
+  case query("Hello, Claude!", options) {
+    Ok(stream) -> consume_stream(stream)
+    Error(e) -> io.println("Error: " <> claude_agent_sdk/error.error_to_string(e))
+  }
+}
+
+fn consume_stream(stream) {
+  case next(stream) {
+    #(Ok(EndOfStream), _) -> io.println("Done!")
+    #(Ok(Message(envelope)), new_stream) -> {
+      io.println("Message: " <> envelope.raw_json)
+      consume_stream(new_stream)
+    }
+    #(Ok(_), new_stream) -> consume_stream(new_stream)
+    #(Error(e), _) -> io.println("Stream error")
+  }
 }
 ```
 
 Further documentation can be found at <https://hexdocs.pm/claude_agent_sdk>.
+
+## API Overview
+
+### Core Functions
+
+| Function | Description |
+|----------|-------------|
+| `query(prompt, options)` | Start a streaming query, returns `Result(QueryStream, QueryError)` |
+| `next(stream)` | Read next item from stream, returns `#(Result(StreamItem, StreamError), QueryStream)` |
+| `close(stream)` | Close the stream and release resources |
+| `is_closed(stream)` | Check if stream is closed |
+
+### Types
+
+| Type | Description |
+|------|-------------|
+| `QueryOptions` | Configuration for queries (model, max_turns, system_prompt, etc.) |
+| `QueryStream` | Opaque handle to a streaming query |
+| `StreamItem` | One of: `Message(MessageEnvelope)`, `WarningEvent(Warning)`, `EndOfStream` |
+| `Message` | One of: `System`, `Assistant`, `User`, `Result` |
+| `QueryError` | Query start failures (CLI not found, spawn failed, version mismatch) |
+| `StreamError` | Stream read failures (process exit, decode errors, buffer overflow) |
+
+### Option Builders
+
+```gleam
+default_options()
+  |> with_model("claude-sonnet-4-20250514")
+  |> with_max_turns(5)
+  |> with_max_budget(1.0)
+  |> with_system_prompt("You are a helpful assistant.")
+  |> with_allowed_tools(["Read", "Write"])
+  |> with_permission_mode(Acceptall)
+```
+
+### Stream Helpers
+
+| Function | Description |
+|----------|-------------|
+| `with_stream(stream, callback)` | Execute callback with automatic cleanup |
+| `collect_items(stream)` | Collect all items into `CollectResult` |
+| `collect_messages(stream)` | Collect only message envelopes |
+| `fold_stream(stream, acc, f)` | Fold with early termination support |
+| `to_yielder(stream)` | Convert to `Yielder` (leak risk - see below) |
+
+### Error Handling
+
+```gleam
+import claude_agent_sdk/error.{is_terminal}
+
+// Check if error is terminal (stream cannot continue)
+case is_terminal(error) {
+  True -> // Must close stream
+  False -> // Can continue reading
+}
+```
 
 ## Process Ownership Contract
 
@@ -325,6 +416,42 @@ type ErrorAction {
 }
 ```
 
+## Success Semantics in Automation
+
+**Important:** By default, the SDK treats `Result` as authoritative for success/failure.
+A non-zero exit code AFTER a `Result` message produces only a *warning*, not an error.
+
+**For CI pipelines, automation, or data reliability contexts**, we recommend treating
+any warnings as potential failures:
+
+```gleam
+import claude_agent_sdk.{collect_messages}
+import claude_agent_sdk/error.{NonZeroExitAfterResult}
+import gleam/list
+
+pub fn strict_query(stream) {
+  let result = collect_messages(stream)
+  case list.is_empty(result.warnings) {
+    True -> // Clean success
+      Ok(result.items)
+    False -> // Has warnings - fail in strict contexts
+      case list.any(result.warnings, is_exit_warning) {
+        True -> Error("Non-zero exit after Result - possible data integrity issue")
+        False -> Ok(result.items)  // Other warnings may be acceptable
+      }
+  }
+}
+
+fn is_exit_warning(w) -> Bool {
+  case w.code {
+    NonZeroExitAfterResult(_) -> True
+    _ -> False
+  }
+}
+```
+
+This ensures pipeline-grade success semantics without waiting for a future `strict_exit_status` option.
+
 ### CI/Automation: Strict Warning Mode
 
 For pipelines where warnings should fail the build:
@@ -370,3 +497,49 @@ fn check_for_warnings(stream, acc) {
     #(Error(e), _) -> Error("Stream error: " <> string.inspect(e))
   }
 }
+```
+
+## Troubleshooting
+
+### Empty stdout errors in CI/containers
+
+When running in non-interactive environments, stderr may not be visible.
+To diagnose errors, redirect stderr to a file:
+
+```bash
+your_gleam_app 2>/tmp/claude_stderr.log
+```
+
+Common causes of empty stdout with non-zero exit:
+- **Not authenticated**: Run `claude login` or set `ANTHROPIC_API_KEY`
+- **Network issues**: Check connectivity to Anthropic API
+- **Config errors**: Check `~/.claude/` configuration
+
+### Stderr visibility across environments
+
+The SDK relies on stderr being visible in your terminal for detailed CLI error messages. However, stderr may be unavailable in certain deployment contexts:
+
+| Environment | Stderr Behavior | Solution |
+|-------------|----------------|----------|
+| Interactive terminal | Visible directly | Default case, no action needed |
+| Daemon/service | May be lost or redirected to syslog | Redirect stderr: `my_app 2>/var/log/my_app.stderr` |
+| CI/CD pipelines | Usually captured in job logs | Check job output for CLI messages |
+| GUI applications | May be discarded | Redirect stderr before launching |
+| Containers | Depends on logging driver | Check container logs |
+
+### ProcessError diagnostics
+
+When you receive a `ProcessError`, check the `ErrorDiagnostic` for guidance:
+
+```gleam
+case error {
+  ProcessError(exit_code, diagnostic) -> {
+    io.println("Exit code: " <> int.to_string(exit_code))
+    io.println("Hint: " <> diagnostic.hint)
+    io.println("Action: " <> diagnostic.troubleshooting)
+  }
+  _ -> // Other error types
+}
+```
+
+If running without an attached terminal (daemon, service, container), stderr output may not be visible. Rerun with stderr redirected to a file: `your_app 2>/tmp/stderr.log`
