@@ -50,6 +50,10 @@ pub fn api_exists_compile_check_test() {
   // string module - used for error formatting
   let _ = string.inspect
 
+  // Note: regex module (regex.from_string, regex.scan) was planned for version
+  // parsing but is not currently used. Add regex checks when/if the dependency
+  // is added to gleam.toml.
+
   Nil
 }
 
@@ -80,7 +84,7 @@ pub fn api_confirmation_test() {
   assert bit_array.byte_size(bytes) == 5
   assert bit_array.to_string(bytes) == Ok("hello")
 
-  // dynamic/decode: decode a tagged tuple (simulates FFI message format)
+  // dynamic/decode: decode a dynamic string value
   let tagged: Dynamic = dynamic.string("test_tag")
   let decoder = decode.string
   case decode.run(tagged, decoder) {
@@ -90,14 +94,8 @@ pub fn api_confirmation_test() {
     Error(_) -> panic as "dynamic decode failed"
   }
 
-  // Test tuple decoding (matches port_ffi message format)
-  let tuple_decoder = {
-    use tag <- decode.field(0, decode.string)
-    use payload <- decode.field(1, decode.bit_array)
-    decode.success(#(tag, payload))
-  }
-  // Note: Can't create Dynamic tuples directly, so we verify the decoder compiles
-  let _ = tuple_decoder
+  // Note: Tuple decoding (for FFI message format) is tested at runtime
+  // in port_ffi tests where actual port messages are decoded.
 
   // string.inspect works for error messages
   let inspected = string.inspect([1, 2, 3])
