@@ -242,13 +242,13 @@ npm install -g @anthropic-ai/claude-code
 export ANTHROPIC_API_KEY=your-key
 
 # Run E2E suite
-CLAUDE_INTEGRATION_TEST=1 python scripts/e2e/run_e2e.py
+CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e
 
 # Run specific scenario
-CLAUDE_INTEGRATION_TEST=1 python scripts/e2e/run_e2e.py --scenario E2E-02
+CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e -- --scenario E2E-02
 
 # List scenarios
-python scripts/e2e/run_e2e.py --list
+gleam run -m e2e/run_e2e -- --list
 ```
 
 #### Running in CI

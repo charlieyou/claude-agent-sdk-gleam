@@ -9,18 +9,17 @@ End-to-end integration test runner for Claude Agent SDK (Gleam).
 export CLAUDE_INTEGRATION_TEST=1
 
 # Run all scenarios
-python scripts/e2e/run_e2e.py
+gleam run -m e2e/run_e2e
 
 # Run specific scenario
-python scripts/e2e/run_e2e.py --scenario E2E-02
+gleam run -m e2e/run_e2e -- --scenario E2E-02
 
 # List available scenarios
-python scripts/e2e/run_e2e.py --list
+gleam run -m e2e/run_e2e -- --list
 ```
 
 ## Prerequisites
 
-- Python 3.10+
 - Claude CLI installed and in PATH (`claude --version`)
 - Authentication: `ANTHROPIC_API_KEY` env var or authenticated CLI session
 
@@ -65,7 +64,7 @@ Each line in `events.jsonl` contains:
 
 ```json
 {
-  "ts": "2026-01-11T12:00:00.000Z",
+  "ts": "2026-01-11T12:00:00Z",
   "level": "INFO",
   "event": "scenario_start",
   "run_id": "20260111-120000-abc12345",
@@ -87,20 +86,20 @@ Event types: `run_start`, `run_end`, `scenario_start`, `scenario_end`, `step_sta
 ## Example Output
 
 ```
-$ CLAUDE_INTEGRATION_TEST=1 python scripts/e2e/run_e2e.py
+$ CLAUDE_INTEGRATION_TEST=1 gleam run -m e2e/run_e2e
 
 E2E Run: 20260111-143052-a1b2c3d4
 Output:  artifacts/e2e/20260111-143052-a1b2c3d4
 CLI:     2.1.4 (Claude Code)
 
-Running E2E-01... ✓ pass (234ms)
-Running E2E-02... ✓ pass (1523ms)
-Running E2E-03... ✓ pass (892ms)
-Running E2E-04... ✓ pass (2105ms)
-Running E2E-05... ✓ pass (12ms)
-Running E2E-06... ○ skip (5ms)
-Running E2E-07... ○ skip (3ms)
-Running E2E-08... ✓ pass (5002ms)
+Running E2E-01... pass (234ms)
+Running E2E-02... pass (1523ms)
+Running E2E-03... pass (892ms)
+Running E2E-04... pass (2105ms)
+Running E2E-05... pass (12ms)
+Running E2E-06... skip (5ms)
+Running E2E-07... skip (3ms)
+Running E2E-08... pass (5002ms)
 
 Results: 6 passed, 0 failed, 2 skipped
 Artifacts: artifacts/e2e/20260111-143052-a1b2c3d4
