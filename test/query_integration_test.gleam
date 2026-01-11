@@ -323,12 +323,32 @@ pub fn integration__session_resume_test() {
               // 2. Consume stream to get session_id from SystemMessage
               let result1 = claude_agent_sdk.collect_messages(stream1)
 
+              // Check for terminal errors before proceeding
+              case result1.terminal_error {
+                Some(err) -> {
+                  io.println(
+                    "[FAIL] Initial query had terminal error: "
+                    <> stream_error_to_string(err),
+                  )
+                  should.be_true(False)
+                }
+                None -> Nil
+              }
+
               case extract_session_id(result1.items) {
                 None -> {
                   io.println("[FAIL] No session_id found in initial session")
                   should.be_true(False)
                 }
                 Some(session_id) -> {
+                  // Validate session_id is non-empty
+                  case string.length(session_id) > 0 {
+                    False -> {
+                      io.println("[FAIL] Empty session_id extracted")
+                      should.be_true(False)
+                    }
+                    True -> Nil
+                  }
                   io.println("[INFO] Session ID: " <> session_id)
 
                   // 3. Resume session with follow-up
@@ -353,6 +373,18 @@ pub fn integration__session_resume_test() {
                     Ok(stream2) -> {
                       // 4. Verify response references the number
                       let result2 = claude_agent_sdk.collect_messages(stream2)
+
+                      // Check for terminal errors before validating content
+                      case result2.terminal_error {
+                        Some(err) -> {
+                          io.println(
+                            "[FAIL] Resume query had terminal error: "
+                            <> stream_error_to_string(err),
+                          )
+                          should.be_true(False)
+                        }
+                        None -> Nil
+                      }
 
                       case check_response_contains_42(result2.items) {
                         True -> {
