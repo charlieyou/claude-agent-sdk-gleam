@@ -7,6 +7,7 @@ import claude_agent_sdk/error.{
 }
 import claude_agent_sdk/internal/cli.{CliVersion, UnknownVersion}
 import claude_agent_sdk/message
+import claude_agent_sdk/options.{QueryOptions}
 import claude_agent_sdk/runner
 import gleam/dynamic
 import gleam/int
@@ -557,21 +558,26 @@ fn check_response_contains_42(
 /// This tests internal consistency - with_test_mode() always provides a runner,
 /// but the query() function guards against manual misconfiguration.
 pub fn test_mode_without_runner_returns_error_test() {
-  // Create options with test_mode=True but no runner (simulates misconfiguration)
-  // We can't use with_test_mode since it always provides a runner,
-  // so we need to directly check the error message format.
-  // The actual test uses query_error_to_string helper to verify the error type.
-
-  // For this test, we verify that TestModeError is properly constructed
-  // by checking its pattern matching works
-  let test_error =
-    TestModeError(
-      "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
+  // Construct misconfigured options manually - test_mode=True but no runner
+  // This simulates what a user might accidentally do by constructing QueryOptions directly
+  let misconfigured_options =
+    QueryOptions(
+      ..options.default_options(),
+      test_mode: True,
+      test_runner: None,
     )
 
-  // Verify the error matches expected pattern
-  let TestModeError(msg) = test_error
-  should.be_true(string.contains(msg, "test_mode enabled"))
-  should.be_true(string.contains(msg, "test_runner"))
-  should.be_true(string.contains(msg, "with_test_mode"))
+  // Call query() with the misconfigured options - should fail with TestModeError
+  let result = claude_agent_sdk.query("test prompt", misconfigured_options)
+
+  // Verify we get TestModeError with the expected message
+  case result {
+    Error(TestModeError(msg)) -> {
+      should.be_true(string.contains(msg, "test_mode enabled"))
+      should.be_true(string.contains(msg, "test_runner"))
+      should.be_true(string.contains(msg, "with_test_mode"))
+    }
+    Ok(_) -> should.be_true(False)
+    Error(_other) -> should.be_true(False)
+  }
 }
