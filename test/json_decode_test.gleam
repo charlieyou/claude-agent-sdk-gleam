@@ -1,12 +1,12 @@
 /// Tests for JSON decoding of Claude CLI messages.
 ///
 /// These tests load fixtures from test/fixtures/ and verify decoder behavior.
-import claude_agent_sdk/content
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/message
 import gleam/bit_array
 import gleam/dynamic/decode
 import gleam/json
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
@@ -302,7 +302,7 @@ pub fn decode_permission_denial_test() {
     Ok(denial) -> {
       should.equal(denial.tool_name, "Bash")
       should.equal(denial.tool_use_id, "toolu_01XyZ789AbCdEfGhIjKlMnOp")
-      // tool_input is Dynamic, just verify it's present (not None/nil)
+      // tool_input is Dynamic - decoder success implies it's present
       Nil
     }
     Error(_) -> panic as "Expected successful decode for permission_denial.json"
@@ -323,7 +323,7 @@ pub fn decode_nested_content_blocks_test() {
           case inner.content {
             Some(blocks) -> {
               // Should have 4 blocks: text, tool_use, text, tool_use
-              should.equal(4, list_length(blocks))
+              should.equal(4, list.length(blocks))
             }
             None -> panic as "Expected content in assistant message"
           }
@@ -334,13 +334,5 @@ pub fn decode_nested_content_blocks_test() {
     Ok(_) -> panic as "Expected Assistant message type"
     Error(_) ->
       panic as "Expected successful decode for nested_content_blocks.json"
-  }
-}
-
-/// Helper to count list length
-fn list_length(lst: List(content.ContentBlock)) -> Int {
-  case lst {
-    [] -> 0
-    [_, ..rest] -> 1 + list_length(rest)
   }
 }
