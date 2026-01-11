@@ -76,6 +76,7 @@ pub opaque type Runner {
 ///     Ok(ref)
 ///   },
 ///   on_read: fn(handle) {
+///     // Requires: import gleam/option.{Some, None}
 ///     case ets_helpers.lookup(table, handle) {
 ///       Some(state) -> // return next ReadResult based on state
 ///       None -> ReadError("Handle not found")

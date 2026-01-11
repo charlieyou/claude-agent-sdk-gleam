@@ -40,6 +40,7 @@ import claude_agent_sdk/internal/stream as internal_stream
 // =============================================================================
 
 import claude_agent_sdk/options
+import claude_agent_sdk/runner
 
 pub type QueryOptions =
   options.QueryOptions
@@ -47,8 +48,21 @@ pub type QueryOptions =
 pub type PermissionMode =
   options.PermissionMode
 
-pub type TestRunner =
-  options.TestRunner
+/// Runner type for process execution abstraction.
+/// Use `test_runner()` to create a mock runner for testing.
+pub type Runner =
+  runner.Runner
+
+/// Handle type for process references (opaque).
+pub type Handle =
+  runner.Handle
+
+/// Result of reading from a process handle.
+pub type ReadResult =
+  runner.ReadResult
+
+/// Create a test runner with user-provided callbacks.
+pub const test_runner = runner.test_runner
 
 /// Create default query options with all fields unset.
 pub const default_options = options.default_options

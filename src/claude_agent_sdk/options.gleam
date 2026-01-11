@@ -3,6 +3,7 @@
 /// This module provides the QueryOptions type and builder functions for
 /// constructing CLI arguments. All option fields default to None (or False
 /// for boolean fields), meaning the CLI uses its own defaults.
+import claude_agent_sdk/runner.{type Runner}
 import gleam/option.{type Option, None, Some}
 
 /// Permission mode for controlling tool execution behavior.
@@ -15,12 +16,6 @@ pub type PermissionMode {
   BypassPermissions
   /// Plan mode - read-only exploration
   Plan
-}
-
-/// Opaque placeholder for TestRunner type.
-/// The actual implementation will be in runner.gleam (future task).
-pub opaque type TestRunner {
-  TestRunner
 }
 
 /// Query options for configuring Claude CLI invocations.
@@ -49,7 +44,7 @@ pub type QueryOptions {
     cwd: Option(String),
     // --- SDK options (not passed to CLI) ---
     test_mode: Bool,
-    test_runner: Option(TestRunner),
+    test_runner: Option(Runner),
     skip_version_check: Bool,
     permissive_version_check: Bool,
   )
@@ -165,9 +160,9 @@ pub fn with_cwd(options: QueryOptions, path: String) -> QueryOptions {
 // =============================================================================
 
 /// Enable test mode with a mock runner.
-/// When test_mode is True, the SDK uses the provided TestRunner
+/// When test_mode is True, the SDK uses the provided Runner
 /// instead of spawning the actual Claude CLI.
-pub fn with_test_mode(options: QueryOptions, runner: TestRunner) -> QueryOptions {
+pub fn with_test_mode(options: QueryOptions, runner: Runner) -> QueryOptions {
   QueryOptions(..options, test_mode: True, test_runner: Some(runner))
 }
 
