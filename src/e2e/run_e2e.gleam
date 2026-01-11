@@ -8,16 +8,28 @@ import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 import gleam/string
 import simplifile
 
 pub fn main() -> Nil {
   let args = get_plain_arguments()
-  case parse_args(args) {
+  case run(args) {
+    Ok(summary) ->
+      case failed(summary) > 0 {
+        True -> halt(1)
+        False -> halt(0)
+      }
     Error(message) -> {
       io.println(message)
       halt(1)
     }
+  }
+}
+
+pub fn run(args: List(String)) -> Result(Summary, String) {
+  case parse_args(args) {
+    Error(message) -> Error(message)
     Ok(config) -> run_with_config(config)
   }
 }
@@ -27,34 +39,49 @@ pub fn main() -> Nil {
 // ============================================================================
 
 type Config {
-  Config(
-    scenarios: List(String),
-    output_dir: Option(String),
-    list_only: Bool,
-  )
+  Config(scenarios: List(String), output_dir: Option(String), list_only: Bool)
 }
 
 fn parse_args(args: List(String)) -> Result(Config, String) {
   parse_args_loop(args, Config([], None, False))
 }
 
-fn parse_args_loop(
-  args: List(String),
-  config: Config,
-) -> Result(Config, String) {
+fn parse_args_loop(args: List(String), config: Config) -> Result(Config, String) {
   case args {
     [] -> Ok(config)
-    ["--list", ..rest] -> parse_args_loop(rest, Config(config.scenarios, config.output_dir, True))
-    ["-l", ..rest] -> parse_args_loop(rest, Config(config.scenarios, config.output_dir, True))
+    ["--list", ..rest] ->
+      parse_args_loop(rest, Config(config.scenarios, config.output_dir, True))
+    ["-l", ..rest] ->
+      parse_args_loop(rest, Config(config.scenarios, config.output_dir, True))
     ["--scenario", scenario, ..rest] ->
-      parse_args_loop(rest, Config([scenario, ..config.scenarios], config.output_dir, config.list_only))
+      parse_args_loop(
+        rest,
+        Config(
+          [scenario, ..config.scenarios],
+          config.output_dir,
+          config.list_only,
+        ),
+      )
     ["-s", scenario, ..rest] ->
-      parse_args_loop(rest, Config([scenario, ..config.scenarios], config.output_dir, config.list_only))
+      parse_args_loop(
+        rest,
+        Config(
+          [scenario, ..config.scenarios],
+          config.output_dir,
+          config.list_only,
+        ),
+      )
     ["--output-dir", dir, ..rest] ->
-      parse_args_loop(rest, Config(config.scenarios, Some(dir), config.list_only))
+      parse_args_loop(
+        rest,
+        Config(config.scenarios, Some(dir), config.list_only),
+      )
     ["-o", dir, ..rest] ->
-      parse_args_loop(rest, Config(config.scenarios, Some(dir), config.list_only))
-    [unknown, .._] -> Error("Unknown argument: " <> unknown)
+      parse_args_loop(
+        rest,
+        Config(config.scenarios, Some(dir), config.list_only),
+      )
+    [unknown, ..] -> Error("Unknown argument: " <> unknown)
   }
 }
 
@@ -98,165 +125,152 @@ type Scenario {
   Scenario(id: String, run: fn(ScenarioContext) -> ScenarioResult)
 }
 
-fn run_with_config(config: Config) -> Nil {
+fn run_with_config(config: Config) -> Result(Summary, String) {
   case config.list_only {
     True -> {
       list_scenarios()
-      halt(0)
+      Ok(Summary(0, 0, 0))
     }
-    False -> Nil
-  }
+    False -> {
+      use _ <- result.try(require_integration_env())
+      use cli_path <- result.try(resolve_cli_path())
+      use #(cli_version_raw, cli_version_parsed) <-
+        result.try(resolve_cli_version(cli_path))
 
-  case get_env("CLAUDE_INTEGRATION_TEST") {
-    Some("1") -> Nil
-    _ -> {
-      io.println("E2E tests require CLAUDE_INTEGRATION_TEST=1")
-      io.println("Set this environment variable to enable E2E scenarios.")
-      halt(1)
-    }
-  }
-
-  let cli_path = case port_ffi.find_cli_path("claude") {
-    Ok(path) -> path
-    Error(_) -> {
-      io.println("[SKIP] claude CLI not found in PATH")
-      io.println("Install: https://claude.ai/code")
-      halt(1)
-      ""
-    }
-  }
-
-  let #(cli_version_raw, cli_version_parsed) =
-    case get_cli_version(cli_path) {
-      Ok(result) -> result
-      Error(err) -> {
-        io.println("[SKIP] Failed to get claude --version: " <> err)
-        halt(1)
-        #("", None)
+      let run_id = generate_run_id()
+      let output_dir = case config.output_dir {
+        Some(dir) -> dir
+        None -> "artifacts/e2e/" <> run_id
       }
-    }
 
-  let run_id = generate_run_id()
-  let output_dir = case config.output_dir {
-    Some(dir) -> dir
-    None -> "artifacts/e2e/" <> run_id
+      let logger = new_logger(output_dir, run_id)
+      let start_ts = utc_now_string()
+
+      let metadata =
+        build_metadata(run_id, start_ts, cli_version_raw, cli_version_parsed)
+
+      logger
+      |> log_event("run_start", "INFO", None, None, [
+        #("env", json.object(redacted_env_as_json())),
+        #("start_ts", json.string(start_ts)),
+        #("cli_version_raw", json.string(cli_version_raw)),
+        #("cli_version_parsed", json.string(option_string(cli_version_parsed))),
+        #("gleam_version", json.string(metadata.gleam_version)),
+        #("repo_sha", json.string(metadata.repo_sha)),
+        #("os", json.string(metadata.os)),
+        #("arch", json.string(metadata.arch)),
+      ])
+
+      io.println("E2E Run: " <> run_id)
+      io.println("Output:  " <> output_dir)
+      io.println("CLI:     " <> cli_version_raw)
+      io.println("")
+
+      let ctx =
+        ScenarioContext(
+          logger: logger,
+          cli_path: cli_path,
+          cli_version_raw: cli_version_raw,
+          cli_version_parsed: cli_version_parsed,
+        )
+
+      let scenarios = all_scenarios()
+      let selected = case config.scenarios {
+        [] -> scenarios
+        _ ->
+          scenarios
+          |> list.filter(fn(s) { list.contains(config.scenarios, s.id) })
+      }
+
+      let invalid = case config.scenarios {
+        [] -> []
+        _ ->
+          config.scenarios
+          |> list.filter(fn(id) {
+            list.contains(all_scenario_ids(), id) == False
+          })
+      }
+
+      use _ <- result.try(ensure_valid_scenarios(invalid))
+
+      let results = run_scenarios(ctx, selected)
+      let summary = summarize(results)
+
+      let duration_ms = logger |> elapsed_ms
+      write_metadata(output_dir, metadata, duration_ms)
+      write_summary(output_dir, run_id, metadata, results, duration_ms)
+
+      logger
+      |> log_event("run_end", "INFO", None, None, [
+        #("duration_ms", json.int(duration_ms)),
+        #("passed", json.int(summary.passed)),
+        #("failed", json.int(summary.failed)),
+        #("skipped", json.int(summary.skipped)),
+      ])
+
+      io.println("")
+      io.println(
+        "Results: "
+        <> int.to_string(summary.passed)
+        <> " passed, "
+        <> int.to_string(summary.failed)
+        <> " failed, "
+        <> int.to_string(summary.skipped)
+        <> " skipped",
+      )
+      io.println("Artifacts: " <> output_dir)
+      io.println("  events.jsonl: " <> output_dir <> "/events.jsonl")
+      io.println("  summary.txt:  " <> output_dir <> "/summary.txt")
+      io.println("  metadata.json: " <> output_dir <> "/metadata.json")
+
+      Ok(summary)
+    }
   }
+}
 
-  let logger = new_logger(output_dir, run_id)
-  let start_ts = utc_now_string()
+fn require_integration_env() -> Result(Nil, String) {
+  case get_env("CLAUDE_INTEGRATION_TEST") {
+    Some("1") -> Ok(Nil)
+    _ ->
+      Error(
+        "E2E tests require CLAUDE_INTEGRATION_TEST=1\n"
+        <> "Set this environment variable to enable E2E scenarios.",
+      )
+  }
+}
 
-  let metadata = build_metadata(
-    run_id,
-    start_ts,
-    cli_version_raw,
-    cli_version_parsed,
-  )
+fn resolve_cli_path() -> Result(String, String) {
+  case port_ffi.find_cli_path("claude") {
+    Ok(path) -> Ok(path)
+    Error(_) ->
+      Error(
+        "[SKIP] claude CLI not found in PATH\nInstall: https://claude.ai/code",
+      )
+  }
+}
 
-  logger
-  |> log_event(
-    "run_start",
-    "INFO",
-    None,
-    None,
-    [
-      #("env", json.object(redacted_env_as_json())),
-      #("start_ts", json.string(start_ts)),
-      #("cli_version_raw", json.string(cli_version_raw)),
-      #("cli_version_parsed", json.string(option_string(cli_version_parsed))),
-      #("gleam_version", json.string(metadata.gleam_version)),
-      #("repo_sha", json.string(metadata.repo_sha)),
-      #("os", json.string(metadata.os)),
-      #("arch", json.string(metadata.arch)),
-    ],
-  )
+fn resolve_cli_version(
+  cli_path: String,
+) -> Result(#(String, Option(#(Int, Int, Int))), String) {
+  case get_cli_version(cli_path) {
+    Ok(result) -> Ok(result)
+    Error(err) -> Error("[SKIP] Failed to get claude --version: " <> err)
+  }
+}
 
-  io.println("E2E Run: " <> run_id)
-  io.println("Output:  " <> output_dir)
-  io.println("CLI:     " <> cli_version_raw)
-  io.println("")
-
-  let ctx = ScenarioContext(
-    logger: logger,
-    cli_path: cli_path,
-    cli_version_raw: cli_version_raw,
-    cli_version_parsed: cli_version_parsed,
-  )
-
-  let scenarios = all_scenarios()
-  let selected =
-    case config.scenarios {
-      [] -> scenarios
-      _ ->
-        scenarios
-        |> list.filter(fn(s) { list.contains(config.scenarios, s.id) })
-    }
-
-  let invalid =
-    case config.scenarios {
-      [] -> []
-      _ ->
-        config.scenarios
-        |> list.filter(fn(id) { list.contains(all_scenario_ids(), id) == False })
-    }
-
+fn ensure_valid_scenarios(invalid: List(String)) -> Result(Nil, String) {
   case invalid {
-    [] -> Nil
-    _ -> {
-      io.println("Unknown scenario(s): " <> string.join(invalid, ", "))
-      halt(1)
-    }
-  }
-
-  let results = run_scenarios(ctx, selected)
-  let summary = summarize(results)
-
-  let duration_ms = logger |> elapsed_ms
-  write_metadata(
-    output_dir,
-    metadata,
-    duration_ms,
-  )
-  write_summary(output_dir, run_id, metadata, results, duration_ms)
-
-  logger
-  |> log_event(
-    "run_end",
-    "INFO",
-    None,
-    None,
-    [
-      #("duration_ms", json.int(duration_ms)),
-      #("passed", json.int(summary.passed)),
-      #("failed", json.int(summary.failed)),
-      #("skipped", json.int(summary.skipped)),
-    ],
-  )
-
-  io.println("")
-  io.println(
-    "Results: "
-      <> int.to_string(summary.passed)
-      <> " passed, "
-      <> int.to_string(summary.failed)
-      <> " failed, "
-      <> int.to_string(summary.skipped)
-      <> " skipped",
-  )
-  io.println("Artifacts: " <> output_dir)
-  io.println("  events.jsonl: " <> output_dir <> "/events.jsonl")
-  io.println("  summary.txt:  " <> output_dir <> "/summary.txt")
-  io.println("  metadata.json: " <> output_dir <> "/metadata.json")
-
-  case summary.failed > 0 {
-    True -> halt(1)
-    False -> halt(0)
+    [] -> Ok(Nil)
+    _ -> Error("Unknown scenario(s): " <> string.join(invalid, ", "))
   }
 }
 
 fn list_scenarios() -> Nil {
   io.println("Available E2E Scenarios:")
   all_scenarios()
-  |> list.each(fn(s) { io.println("  " <> s.id <> ": " <> scenario_title(s.id)) })
+  |> list.each(fn(s) {
+    io.println("  " <> s.id <> ": " <> scenario_title(s.id))
+  })
 }
 
 fn scenario_title(id: String) -> String {
@@ -291,7 +305,10 @@ fn all_scenario_ids() -> List(String) {
   |> list.map(fn(s) { s.id })
 }
 
-fn run_scenarios(ctx: ScenarioContext, scenarios: List(Scenario)) -> List(ScenarioResult) {
+fn run_scenarios(
+  ctx: ScenarioContext,
+  scenarios: List(Scenario),
+) -> List(ScenarioResult) {
   scenarios
   |> list.map(fn(s) {
     io.print("Running " <> s.id <> "... ")
@@ -317,79 +334,108 @@ fn status_to_text(result: ScenarioResult) -> String {
 fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-01"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("preflight"), [])
-
-  ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("cli_resolve"), [])
   ctx.logger
   |> log_event(
-    "step_end",
+    "scenario_start",
     "INFO",
     Some(scenario_id),
-    Some("cli_resolve"),
-    [#("result", json.string("pass")), #("notes", json.string("CLI at " <> ctx.cli_path))],
+    Some("preflight"),
+    [],
   )
 
-  ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("version_check"), [])
-  let version_failure =
-    case ctx.cli_version_parsed {
-      Some(parsed) ->
-        case version_at_least(parsed, minimum_version_tuple()) {
-          True -> {
-            ctx.logger
-            |> log_event(
-              "step_end",
-              "INFO",
-              Some(scenario_id),
-              Some("version_check"),
-              [
-                #("result", json.string("pass")),
-                #("notes", json.string("Version " <> ctx.cli_version_raw <> " >= 1.0.0")),
-              ],
-            )
-            None
-          }
-          False -> {
-            ctx.logger
-            |> log_event(
-              "step_end",
-              "WARN",
-              Some(scenario_id),
-              Some("version_check"),
-              [
-                #("result", json.string("fail")),
-                #("notes", json.string("Version " <> ctx.cli_version_raw <> " < 1.0.0")),
-              ],
-            )
-            Some(ScenarioResult(
-              scenario_id: scenario_id,
-              status: Fail,
-              duration_ms: elapsed_ms(ctx.logger) - start_ms,
-              error_kind: Some("version_too_old"),
-              error_message: Some("CLI version " <> ctx.cli_version_raw <> " is below minimum 1.0.0"),
-              notes: Some("Upgrade Claude CLI"),
-            ))
-          }
+  ctx.logger
+  |> log_event("step_start", "INFO", Some(scenario_id), Some("cli_resolve"), [])
+  ctx.logger
+  |> log_event("step_end", "INFO", Some(scenario_id), Some("cli_resolve"), [
+    #("result", json.string("pass")),
+    #("notes", json.string("CLI at " <> ctx.cli_path)),
+  ])
+
+  ctx.logger
+  |> log_event(
+    "step_start",
+    "INFO",
+    Some(scenario_id),
+    Some("version_check"),
+    [],
+  )
+  let version_failure = case ctx.cli_version_parsed {
+    Some(parsed) ->
+      case version_at_least(parsed, minimum_version_tuple()) {
+        True -> {
+          ctx.logger
+          |> log_event(
+            "step_end",
+            "INFO",
+            Some(scenario_id),
+            Some("version_check"),
+            [
+              #("result", json.string("pass")),
+              #(
+                "notes",
+                json.string("Version " <> ctx.cli_version_raw <> " >= 1.0.0"),
+              ),
+            ],
+          )
+          None
         }
-      None -> {
-        ctx.logger
-        |> log_event(
-          "step_end",
-          "WARN",
-          Some(scenario_id),
-          Some("version_check"),
-          [
-            #("result", json.string("pass")),
-            #("notes", json.string("Unparseable version: " <> ctx.cli_version_raw)),
-          ],
-        )
-        None
+        False -> {
+          ctx.logger
+          |> log_event(
+            "step_end",
+            "WARN",
+            Some(scenario_id),
+            Some("version_check"),
+            [
+              #("result", json.string("fail")),
+              #(
+                "notes",
+                json.string("Version " <> ctx.cli_version_raw <> " < 1.0.0"),
+              ),
+            ],
+          )
+          Some(ScenarioResult(
+            scenario_id: scenario_id,
+            status: Fail,
+            duration_ms: elapsed_ms(ctx.logger) - start_ms,
+            error_kind: Some("version_too_old"),
+            error_message: Some(
+              "CLI version " <> ctx.cli_version_raw <> " is below minimum 1.0.0",
+            ),
+            notes: Some("Upgrade Claude CLI"),
+          ))
+        }
       }
+    None -> {
+      ctx.logger
+      |> log_event(
+        "step_end",
+        "WARN",
+        Some(scenario_id),
+        Some("version_check"),
+        [
+          #("result", json.string("pass")),
+          #(
+            "notes",
+            json.string("Unparseable version: " <> ctx.cli_version_raw),
+          ),
+        ],
+      )
+      None
     }
+  }
 
   case version_failure {
     Some(result) -> result
     None -> {
-      ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("auth_check"), [])
+      ctx.logger
+      |> log_event(
+        "step_start",
+        "INFO",
+        Some(scenario_id),
+        Some("auth_check"),
+        [],
+      )
       case get_env("ANTHROPIC_API_KEY") {
         Some(_) ->
           ctx.logger
@@ -398,12 +444,24 @@ fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
             "INFO",
             Some(scenario_id),
             Some("auth_check"),
-            [#("result", json.string("pass")), #("notes", json.string("ANTHROPIC_API_KEY present"))],
+            [
+              #("result", json.string("pass")),
+              #("notes", json.string("ANTHROPIC_API_KEY present")),
+            ],
           )
         None -> {
           let #(exit_code, stdout, _stderr) =
-            run_command(ctx, ["auth", "status"], scenario_id, "auth_check", 10000)
-          case exit_code == 0 && string.contains(string.lowercase(stdout), "authenticated") {
+            run_command(
+              ctx,
+              ["auth", "status"],
+              scenario_id,
+              "auth_check",
+              10_000,
+            )
+          case
+            exit_code == 0
+            && string.contains(string.lowercase(stdout), "authenticated")
+          {
             True ->
               ctx.logger
               |> log_event(
@@ -411,7 +469,10 @@ fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
                 "INFO",
                 Some(scenario_id),
                 Some("auth_check"),
-                [#("result", json.string("pass")), #("notes", json.string("Authenticated via CLI session"))],
+                [
+                  #("result", json.string("pass")),
+                  #("notes", json.string("Authenticated via CLI session")),
+                ],
               )
             False ->
               ctx.logger
@@ -420,13 +481,19 @@ fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
                 "WARN",
                 Some(scenario_id),
                 Some("auth_check"),
-                [#("result", json.string("warn")), #("notes", json.string("Auth not detected; continuing"))],
+                [
+                  #("result", json.string("warn")),
+                  #("notes", json.string("Auth not detected; continuing")),
+                ],
               )
           }
         }
       }
 
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("pass")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Pass,
@@ -442,21 +509,39 @@ fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_02_simple_query(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-02"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("simple_query"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("simple_query"),
+    [],
+  )
 
-  ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("run_query"), [])
+  ctx.logger
+  |> log_event("step_start", "INFO", Some(scenario_id), Some("run_query"), [])
   let #(exit_code, stdout, stderr) =
     run_command(
       ctx,
-      ["--print", "--output-format", "stream-json", "--max-turns", "1", "Say hello"],
+      [
+        "--print",
+        "--output-format",
+        "stream-json",
+        "--max-turns",
+        "1",
+        "Say hello",
+      ],
       scenario_id,
       "run_query",
-      30000,
+      30_000,
     )
 
   case exit_code != 0 {
     True -> {
-      ctx.logger |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [#("result", json.string("fail"))])
+      ctx.logger
+      |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
+        #("result", json.string("fail")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Fail,
@@ -485,7 +570,10 @@ fn run_e2e_02_simple_query(ctx: ScenarioContext) -> ScenarioResult {
 
       case has_result {
         False -> {
-          ctx.logger |> log_event("scenario_end", "WARN", Some(scenario_id), None, [#("result", json.string("fail"))])
+          ctx.logger
+          |> log_event("scenario_end", "WARN", Some(scenario_id), None, [
+            #("result", json.string("fail")),
+          ])
           ScenarioResult(
             scenario_id: scenario_id,
             status: Fail,
@@ -496,14 +584,19 @@ fn run_e2e_02_simple_query(ctx: ScenarioContext) -> ScenarioResult {
           )
         }
         True -> {
-          ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+          ctx.logger
+          |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+            #("result", json.string("pass")),
+          ])
           ScenarioResult(
             scenario_id: scenario_id,
             status: Pass,
             duration_ms: elapsed_ms(ctx.logger) - start_ms,
             error_kind: None,
             error_message: None,
-            notes: Some("Received " <> int.to_string(list.length(lines)) <> " messages"),
+            notes: Some(
+              "Received " <> int.to_string(list.length(lines)) <> " messages",
+            ),
           )
         }
       }
@@ -514,21 +607,32 @@ fn run_e2e_02_simple_query(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-03"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("ndjson_check"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("ndjson_check"),
+    [],
+  )
 
-  ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("run_query"), [])
+  ctx.logger
+  |> log_event("step_start", "INFO", Some(scenario_id), Some("run_query"), [])
   let #(exit_code, stdout, _stderr) =
     run_command(
       ctx,
       ["--print", "--output-format", "stream-json", "test"],
       scenario_id,
       "run_query",
-      30000,
+      30_000,
     )
 
   case exit_code != 0 {
     True -> {
-      ctx.logger |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [#("result", json.string("fail"))])
+      ctx.logger
+      |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
+        #("result", json.string("fail")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Fail,
@@ -559,7 +663,10 @@ fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
 
       case non_json_lines {
         [] -> {
-          ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+          ctx.logger
+          |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+            #("result", json.string("pass")),
+          ])
           ScenarioResult(
             scenario_id: scenario_id,
             status: Pass,
@@ -569,7 +676,7 @@ fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
             notes: Some("All lines valid JSON"),
           )
         }
-        [#(line_no, line), .._] -> {
+        [#(line_no, line), ..] -> {
           case allow_nonjson {
             True -> {
               ctx.logger
@@ -578,27 +685,52 @@ fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
                 "WARN",
                 Some(scenario_id),
                 Some("ndjson_check"),
-                [#("notes", json.string(int.to_string(list.length(non_json_lines)) <> " non-JSON lines (allowed via env)"))],
+                [
+                  #(
+                    "notes",
+                    json.string(
+                      int.to_string(list.length(non_json_lines))
+                      <> " non-JSON lines (allowed via env)",
+                    ),
+                  ),
+                ],
               )
-              ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+              ctx.logger
+              |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+                #("result", json.string("pass")),
+              ])
               ScenarioResult(
                 scenario_id: scenario_id,
                 status: Pass,
                 duration_ms: elapsed_ms(ctx.logger) - start_ms,
                 error_kind: None,
                 error_message: None,
-                notes: Some(int.to_string(list.length(non_json_lines)) <> " non-JSON lines (allowed)"),
+                notes: Some(
+                  int.to_string(list.length(non_json_lines))
+                  <> " non-JSON lines (allowed)",
+                ),
               )
             }
             False -> {
-              ctx.logger |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [#("result", json.string("fail"))])
+              ctx.logger
+              |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
+                #("result", json.string("fail")),
+              ])
               ScenarioResult(
                 scenario_id: scenario_id,
                 status: Fail,
                 duration_ms: elapsed_ms(ctx.logger) - start_ms,
                 error_kind: Some("ndjson_impure"),
-                error_message: Some(int.to_string(list.length(non_json_lines)) <> " non-JSON line(s) in output"),
-                notes: Some("Line " <> int.to_string(line_no) <> ": " <> redact_and_truncate(line)),
+                error_message: Some(
+                  int.to_string(list.length(non_json_lines))
+                  <> " non-JSON line(s) in output",
+                ),
+                notes: Some(
+                  "Line "
+                  <> int.to_string(line_no)
+                  <> ": "
+                  <> redact_and_truncate(line),
+                ),
               )
             }
           }
@@ -611,27 +743,53 @@ fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_04_session_resume(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-04"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("session_resume"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("session_resume"),
+    [],
+  )
 
-  ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("initial_query"), [])
+  ctx.logger
+  |> log_event(
+    "step_start",
+    "INFO",
+    Some(scenario_id),
+    Some("initial_query"),
+    [],
+  )
   let #(exit_code, stdout, _stderr) =
     run_command(
       ctx,
-      ["--print", "--output-format", "stream-json", "--max-turns", "1", "Remember 42"],
+      [
+        "--print",
+        "--output-format",
+        "stream-json",
+        "--max-turns",
+        "1",
+        "Remember 42",
+      ],
       scenario_id,
       "initial_query",
-      30000,
+      30_000,
     )
 
   case exit_code != 0 {
     True -> {
-      ctx.logger |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [#("result", json.string("fail"))])
+      ctx.logger
+      |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
+        #("result", json.string("fail")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Fail,
         duration_ms: elapsed_ms(ctx.logger) - start_ms,
         error_kind: Some("initial_query_failed"),
-        error_message: Some("Initial query failed with exit code " <> int.to_string(exit_code)),
+        error_message: Some(
+          "Initial query failed with exit code " <> int.to_string(exit_code),
+        ),
         notes: None,
       )
     }
@@ -639,7 +797,10 @@ fn run_e2e_04_session_resume(ctx: ScenarioContext) -> ScenarioResult {
       let session_id = extract_session_id(stdout)
       case session_id {
         None -> {
-          ctx.logger |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [#("result", json.string("fail"))])
+          ctx.logger
+          |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
+            #("result", json.string("fail")),
+          ])
           ScenarioResult(
             scenario_id: scenario_id,
             status: Fail,
@@ -650,7 +811,14 @@ fn run_e2e_04_session_resume(ctx: ScenarioContext) -> ScenarioResult {
           )
         }
         Some(id) -> {
-          ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("resume_query"), [])
+          ctx.logger
+          |> log_event(
+            "step_start",
+            "INFO",
+            Some(scenario_id),
+            Some("resume_query"),
+            [],
+          )
           let #(resume_exit, _resume_stdout, _resume_stderr) =
             run_command(
               ctx,
@@ -666,30 +834,41 @@ fn run_e2e_04_session_resume(ctx: ScenarioContext) -> ScenarioResult {
               ],
               scenario_id,
               "resume_query",
-              30000,
+              30_000,
             )
 
           case resume_exit != 0 {
             True -> {
-              ctx.logger |> log_event("scenario_end", "WARN", Some(scenario_id), None, [#("result", json.string("fail"))])
+              ctx.logger
+              |> log_event("scenario_end", "WARN", Some(scenario_id), None, [
+                #("result", json.string("fail")),
+              ])
               ScenarioResult(
                 scenario_id: scenario_id,
                 status: Fail,
                 duration_ms: elapsed_ms(ctx.logger) - start_ms,
                 error_kind: Some("resume_failed"),
-                error_message: Some("Resume query failed with exit code " <> int.to_string(resume_exit)),
+                error_message: Some(
+                  "Resume query failed with exit code "
+                  <> int.to_string(resume_exit),
+                ),
                 notes: None,
               )
             }
             False -> {
-              ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+              ctx.logger
+              |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+                #("result", json.string("pass")),
+              ])
               ScenarioResult(
                 scenario_id: scenario_id,
                 status: Pass,
                 duration_ms: elapsed_ms(ctx.logger) - start_ms,
                 error_kind: None,
                 error_message: None,
-                notes: Some("Session " <> string.slice(id, 0, 16) <> "... resumed"),
+                notes: Some(
+                  "Session " <> string.slice(id, 0, 16) <> "... resumed",
+                ),
               )
             }
           }
@@ -702,11 +881,21 @@ fn run_e2e_04_session_resume(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_05_version_edge_cases(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-05"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("version_edge"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("version_edge"),
+    [],
+  )
 
   case ctx.cli_version_parsed {
     Some(_) -> {
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("pass")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Pass,
@@ -717,7 +906,10 @@ fn run_e2e_05_version_edge_cases(ctx: ScenarioContext) -> ScenarioResult {
       )
     }
     None -> {
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("pass")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Pass,
@@ -733,11 +925,21 @@ fn run_e2e_05_version_edge_cases(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_06_auth_missing(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-06"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("auth_missing"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("auth_missing"),
+    [],
+  )
 
   case get_env("ANTHROPIC_API_KEY") {
     Some(_) -> {
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("skip"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("skip")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Skip,
@@ -748,7 +950,10 @@ fn run_e2e_06_auth_missing(ctx: ScenarioContext) -> ScenarioResult {
       )
     }
     None -> {
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("pass")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Pass,
@@ -764,9 +969,19 @@ fn run_e2e_06_auth_missing(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_07_cli_missing(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-07"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("cli_missing"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("cli_missing"),
+    [],
+  )
 
-  ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("skip"))])
+  ctx.logger
+  |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+    #("result", json.string("skip")),
+  ])
   ScenarioResult(
     scenario_id: scenario_id,
     status: Skip,
@@ -780,9 +995,23 @@ fn run_e2e_07_cli_missing(ctx: ScenarioContext) -> ScenarioResult {
 fn run_e2e_08_timeout(ctx: ScenarioContext) -> ScenarioResult {
   let scenario_id = "E2E-08"
   let start_ms = ctx.logger |> elapsed_ms
-  ctx.logger |> log_event("scenario_start", "INFO", Some(scenario_id), Some("timeout_test"), [])
+  ctx.logger
+  |> log_event(
+    "scenario_start",
+    "INFO",
+    Some(scenario_id),
+    Some("timeout_test"),
+    [],
+  )
 
-  ctx.logger |> log_event("step_start", "INFO", Some(scenario_id), Some("timeout_query"), [])
+  ctx.logger
+  |> log_event(
+    "step_start",
+    "INFO",
+    Some(scenario_id),
+    Some("timeout_query"),
+    [],
+  )
   let #(exit_code, _stdout, _stderr) =
     run_command(
       ctx,
@@ -801,7 +1030,10 @@ fn run_e2e_08_timeout(ctx: ScenarioContext) -> ScenarioResult {
 
   case exit_code == -1 {
     True -> {
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("pass")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Pass,
@@ -812,7 +1044,10 @@ fn run_e2e_08_timeout(ctx: ScenarioContext) -> ScenarioResult {
       )
     }
     False -> {
-      ctx.logger |> log_event("scenario_end", "INFO", Some(scenario_id), None, [#("result", json.string("pass"))])
+      ctx.logger
+      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+        #("result", json.string("pass")),
+      ])
       ScenarioResult(
         scenario_id: scenario_id,
         status: Pass,
@@ -847,29 +1082,29 @@ fn run_command(
   let cwd = current_directory()
 
   ctx.logger
-  |> log_event(
-    "command_start",
-    "INFO",
-    Some(scenario_id),
-    Some(step),
-    [
-      #("command", json.string(string.join(cmd, " "))),
-      #("cwd", json.string(cwd)),
-      #("env", json.object(redacted_env_as_json())),
-    ],
-  )
+  |> log_event("command_start", "INFO", Some(scenario_id), Some(step), [
+    #("command", json.string(string.join(cmd, " "))),
+    #("cwd", json.string(cwd)),
+    #("env", json.object(redacted_env_as_json())),
+  ])
 
   case run_shell_command(ctx.cli_path, adjusted_args, timeout_ms) {
     CommandOk(exit_code, stdout, stdout_bytes) -> {
-      let _ =
-        case stdout != "" {
-          True -> ctx.logger |> log_stdout("[" <> scenario_id <> "/" <> step <> "]\n" <> stdout <> "\n")
-          False -> ctx.logger
-        }
+      let _ = case stdout != "" {
+        True ->
+          ctx.logger
+          |> log_stdout(
+            "[" <> scenario_id <> "/" <> step <> "]\n" <> stdout <> "\n",
+          )
+        False -> ctx.logger
+      }
       ctx.logger
       |> log_event(
         "command_end",
-        case exit_code == 0 { True -> "INFO" False -> "WARN" },
+        case exit_code == 0 {
+          True -> "INFO"
+          False -> "WARN"
+        },
         Some(scenario_id),
         Some(step),
         [
@@ -881,38 +1116,41 @@ fn run_command(
       #(exit_code, stdout, "")
     }
     CommandTimeout(stdout, stdout_bytes) -> {
-      let _ =
-        case stdout != "" {
-          True -> ctx.logger |> log_stdout("[" <> scenario_id <> "/" <> step <> "]\n" <> stdout <> "\n")
-          False -> ctx.logger
-        }
+      let _ = case stdout != "" {
+        True ->
+          ctx.logger
+          |> log_stdout(
+            "[" <> scenario_id <> "/" <> step <> "]\n" <> stdout <> "\n",
+          )
+        False -> ctx.logger
+      }
       ctx.logger
-      |> log_event(
-        "command_end",
-        "ERROR",
-        Some(scenario_id),
-        Some(step),
-        [
-          #("error", json.object([#("kind", json.string("timeout")), #("message", json.string("Command timed out"))])),
-          #("stdout_bytes", json.int(stdout_bytes)),
-          #("stderr_bytes", json.int(0)),
-        ],
-      )
+      |> log_event("command_end", "ERROR", Some(scenario_id), Some(step), [
+        #(
+          "error",
+          json.object([
+            #("kind", json.string("timeout")),
+            #("message", json.string("Command timed out")),
+          ]),
+        ),
+        #("stdout_bytes", json.int(stdout_bytes)),
+        #("stderr_bytes", json.int(0)),
+      ])
       #(-1, stdout, "")
     }
     CommandSpawnError(reason) -> {
       ctx.logger
-      |> log_event(
-        "command_end",
-        "ERROR",
-        Some(scenario_id),
-        Some(step),
-        [
-          #("error", json.object([#("kind", json.string("spawn_failed")), #("message", json.string(reason))])),
-          #("stdout_bytes", json.int(0)),
-          #("stderr_bytes", json.int(0)),
-        ],
-      )
+      |> log_event("command_end", "ERROR", Some(scenario_id), Some(step), [
+        #(
+          "error",
+          json.object([
+            #("kind", json.string("spawn_failed")),
+            #("message", json.string(reason)),
+          ]),
+        ),
+        #("stdout_bytes", json.int(0)),
+        #("stderr_bytes", json.int(0)),
+      ])
       #(-1, "", "")
     }
   }
@@ -944,7 +1182,11 @@ fn build_shell_command(
   let timeout_seconds = int.max(1, { timeout_ms + 999 } / 1000)
   let parts = [path, ..args] |> list.map(shell_escape)
   let cmd = string.join(parts, " ")
-  "timeout " <> int.to_string(timeout_seconds) <> "s " <> cmd <> " 2>&1; echo __EXIT_CODE:$?"
+  "timeout "
+  <> int.to_string(timeout_seconds)
+  <> "s "
+  <> cmd
+  <> " 2>&1; echo __EXIT_CODE:$?"
 }
 
 fn shell_escape(arg: String) -> String {
@@ -997,8 +1239,12 @@ fn ensure_verbose_for_stream_json(args: List(String)) -> List(String) {
 fn insert_verbose_after_output_format(args: List(String)) -> List(String) {
   case args {
     [] -> ["--verbose"]
-    ["--output-format", "stream-json", ..rest] ->
-      ["--output-format", "stream-json", "--verbose", ..rest]
+    ["--output-format", "stream-json", ..rest] -> [
+      "--output-format",
+      "stream-json",
+      "--verbose",
+      ..rest
+    ]
     [head, ..tail] -> [head, ..insert_verbose_after_output_format(tail)]
   }
 }
@@ -1037,7 +1283,9 @@ fn extract_session_id(stdout: String) -> Option(String) {
   })
 }
 
-fn decode_session_fields(line: String) -> Result(#(String, String), json.DecodeError) {
+fn decode_session_fields(
+  line: String,
+) -> Result(#(String, String), json.DecodeError) {
   let decoder = {
     use t <- decode.field("type", decode.string)
     use session_id <- decode.optional_field("session_id", "", decode.string)
@@ -1046,7 +1294,10 @@ fn decode_session_fields(line: String) -> Result(#(String, String), json.DecodeE
   json.parse(line, decoder)
 }
 
-fn version_at_least(current: #(Int, Int, Int), minimum: #(Int, Int, Int)) -> Bool {
+fn version_at_least(
+  current: #(Int, Int, Int),
+  minimum: #(Int, Int, Int),
+) -> Bool {
   let #(cmaj, cmin, cpatch) = current
   let #(mmaj, mmin, mpatch) = minimum
   case cmaj > mmaj {
@@ -1074,7 +1325,11 @@ fn minimum_version_tuple() -> #(Int, Int, Int) {
   }
 }
 
-fn command_output(path: String, args: List(String), timeout_ms: Int) -> Result(String, String) {
+fn command_output(
+  path: String,
+  args: List(String),
+  timeout_ms: Int,
+) -> Result(String, String) {
   case run_shell_command(path, args, timeout_ms) {
     CommandOk(0, stdout, _) -> Ok(stdout)
     CommandOk(code, _stdout, _) -> Error("exit_" <> int.to_string(code))
@@ -1089,12 +1344,12 @@ fn get_cli_version(
   case command_output(cli_path, ["--version"], 5000) {
     Ok(output) -> {
       let raw = string.trim(output)
-      let parsed =
-        case cli.parse_version_string(raw) {
-          Ok(cli.CliVersion(major, minor, patch, _raw)) -> Some(#(major, minor, patch))
-          Ok(cli.UnknownVersion(_)) -> None
-          Error(_) -> None
-        }
+      let parsed = case cli.parse_version_string(raw) {
+        Ok(cli.CliVersion(major, minor, patch, _raw)) ->
+          Some(#(major, minor, patch))
+        Ok(cli.UnknownVersion(_)) -> None
+        Error(_) -> None
+      }
       Ok(#(raw, parsed))
     }
     Error(reason) -> Error(reason)
@@ -1121,7 +1376,11 @@ fn new_logger(output_dir: String, run_id: String) -> EventLogger {
   let _ = simplifile.write(to: output_dir <> "/events.jsonl", contents: "")
   let _ = simplifile.write(to: output_dir <> "/stdout.txt", contents: "")
   let _ = simplifile.write(to: output_dir <> "/stderr.txt", contents: "")
-  EventLogger(run_id: run_id, output_dir: output_dir, start_ms: port_ffi.monotonic_time_ms())
+  EventLogger(
+    run_id: run_id,
+    output_dir: output_dir,
+    start_ms: port_ffi.monotonic_time_ms(),
+  )
 }
 
 fn elapsed_ms(logger: EventLogger) -> Int {
@@ -1153,13 +1412,18 @@ fn log_event(
   }
   let payload = json.object(list.append(with_step, extra))
   let line = json.to_string(payload) <> "\n"
-  let _ = simplifile.append(to: logger.output_dir <> "/events.jsonl", contents: line)
+  let _ =
+    simplifile.append(to: logger.output_dir <> "/events.jsonl", contents: line)
   logger
 }
 
 fn log_stdout(logger: EventLogger, text: String) -> EventLogger {
   let processed = redact_and_truncate(text)
-  let _ = simplifile.append(to: logger.output_dir <> "/stdout.txt", contents: processed)
+  let _ =
+    simplifile.append(
+      to: logger.output_dir <> "/stdout.txt",
+      contents: processed,
+    )
   logger
 }
 
@@ -1195,8 +1459,7 @@ fn truncate_line(line: String) -> String {
   let max_len = 4096
   case string.length(line) <= max_len {
     True -> line
-    False ->
-      string.slice(line, 0, max_len - 20) <> "... [TRUNCATED]"
+    False -> string.slice(line, 0, max_len - 20) <> "... [TRUNCATED]"
   }
 }
 
@@ -1279,7 +1542,10 @@ fn write_metadata(
       #("run_id", json.string(metadata.run_id)),
       #("start_ts", json.string(metadata.start_ts)),
       #("cli_version_raw", json.string(metadata.cli_version_raw)),
-      #("cli_version_parsed", json.string(option_string(metadata.cli_version_parsed))),
+      #(
+        "cli_version_parsed",
+        json.string(option_string(metadata.cli_version_parsed)),
+      ),
       #("gleam_version", json.string(metadata.gleam_version)),
       #("repo_sha", json.string(metadata.repo_sha)),
       #("os", json.string(metadata.os)),
@@ -1287,18 +1553,32 @@ fn write_metadata(
       #("duration_ms", json.int(duration_ms)),
     ])
     |> json.to_string
-  let _ = simplifile.write(to: output_dir <> "/metadata.json", contents: json_payload)
+  let _ =
+    simplifile.write(to: output_dir <> "/metadata.json", contents: json_payload)
   Nil
 }
 
-type Summary {
+pub type Summary {
   Summary(passed: Int, failed: Int, skipped: Int)
+}
+
+pub fn passed(summary: Summary) -> Int {
+  summary.passed
+}
+
+pub fn failed(summary: Summary) -> Int {
+  summary.failed
+}
+
+pub fn skipped(summary: Summary) -> Int {
+  summary.skipped
 }
 
 fn summarize(results: List(ScenarioResult)) -> Summary {
   let passed = results |> list.filter(fn(r) { r.status == Pass }) |> list.length
   let failed = results |> list.filter(fn(r) { r.status == Fail }) |> list.length
-  let skipped = results |> list.filter(fn(r) { r.status == Skip }) |> list.length
+  let skipped =
+    results |> list.filter(fn(r) { r.status == Skip }) |> list.length
   Summary(passed: passed, failed: failed, skipped: skipped)
 }
 
@@ -1332,62 +1612,69 @@ fn write_summary(
     |> list.append(
       results
       |> list.map(fn(r) {
-        let notes = case r.notes { Some(n) -> n None -> "" }
+        let notes = case r.notes {
+          Some(n) -> n
+          None -> ""
+        }
         r.scenario_id
-          <> pad_to(10 - string.length(r.scenario_id))
-          <> " "
-          <> status_label(r.status)
-          <> pad_to(10 - string.length(status_label(r.status)))
-          <> " "
-          <> int.to_string(r.duration_ms)
-          <> "ms   "
-          <> notes
+        <> pad_to(10 - string.length(r.scenario_id))
+        <> " "
+        <> status_label(r.status)
+        <> pad_to(10 - string.length(status_label(r.status)))
+        <> " "
+        <> int.to_string(r.duration_ms)
+        <> "ms   "
+        <> notes
       }),
     )
 
   let failures = results |> list.filter(fn(r) { r.status == Fail })
   let skips = results |> list.filter(fn(r) { r.status == Skip })
 
-  let lines =
-    case failures {
-      [] -> lines
-      _ ->
-        lines
-        |> list.append([
-          "",
-          "------------------------------------------------------------",
-          "Failures",
-          "------------------------------------------------------------",
-        ])
-        |> list.append(failures |> list.flat_map(fn(r) {
+  let lines = case failures {
+    [] -> lines
+    _ ->
+      lines
+      |> list.append([
+        "",
+        "------------------------------------------------------------",
+        "Failures",
+        "------------------------------------------------------------",
+      ])
+      |> list.append(
+        failures
+        |> list.flat_map(fn(r) {
           [
             "",
             r.scenario_id <> ":",
             "  Error: " <> option_default(r.error_kind, "unknown"),
             "  Message: " <> option_default(r.error_message, "no message"),
           ]
-        }))
-    }
+        }),
+      )
+  }
 
-  let lines =
-    case skips {
-      [] -> lines
-      _ ->
-        lines
-        |> list.append([
-          "",
-          "------------------------------------------------------------",
-          "Skipped",
-          "------------------------------------------------------------",
-        ])
-        |> list.append(skips |> list.flat_map(fn(r) {
+  let lines = case skips {
+    [] -> lines
+    _ ->
+      lines
+      |> list.append([
+        "",
+        "------------------------------------------------------------",
+        "Skipped",
+        "------------------------------------------------------------",
+      ])
+      |> list.append(
+        skips
+        |> list.flat_map(fn(r) {
           [
             "",
             r.scenario_id <> ":",
             "  Reason: " <> option_default(r.notes, "no reason provided"),
           ]
-        }))
-    }
+        }),
+      )
+  }
 
   let summary = summarize(results)
   let lines =
@@ -1406,7 +1693,11 @@ fn write_summary(
       "============================================================",
     ])
 
-  let _ = simplifile.write(to: output_dir <> "/summary.txt", contents: string.join(lines, "\n"))
+  let _ =
+    simplifile.write(
+      to: output_dir <> "/summary.txt",
+      contents: string.join(lines, "\n"),
+    )
   Nil
 }
 
@@ -1434,15 +1725,13 @@ fn option_default(value: Option(String), fallback: String) -> String {
 
 fn option_string(value: Option(#(Int, Int, Int))) -> String {
   case value {
-    Some(#(a, b, c)) -> int.to_string(a) <> "." <> int.to_string(b) <> "." <> int.to_string(c)
+    Some(#(a, b, c)) ->
+      int.to_string(a) <> "." <> int.to_string(b) <> "." <> int.to_string(c)
     None -> "unknown"
   }
 }
 
-fn indexed_filter_map(
-  items: List(a),
-  f: fn(Int, a) -> Option(b),
-) -> List(b) {
+fn indexed_filter_map(items: List(a), f: fn(Int, a) -> Option(b)) -> List(b) {
   indexed_filter_map_loop(items, 0, f, [])
 }
 
@@ -1456,7 +1745,8 @@ fn indexed_filter_map_loop(
     [] -> list.reverse(acc)
     [item, ..rest] ->
       case f(index, item) {
-        Some(value) -> indexed_filter_map_loop(rest, index + 1, f, [value, ..acc])
+        Some(value) ->
+          indexed_filter_map_loop(rest, index + 1, f, [value, ..acc])
         None -> indexed_filter_map_loop(rest, index + 1, f, acc)
       }
   }
@@ -1504,35 +1794,35 @@ fn universal_time() -> #(#(Int, Int, Int), #(Int, Int, Int))
 
 fn generate_run_id() -> String {
   let ts = utc_timestamp_compact()
-  let suffix = unique_integer() % 100000000
+  let suffix = unique_integer() % 100_000_000
   ts <> "-" <> pad_left(int.to_string(suffix), 8, "0")
 }
 
 fn utc_timestamp_compact() -> String {
   let #(#(year, month, day), #(hour, minute, second)) = universal_time()
   int.to_string(year)
-    <> pad_left(int.to_string(month), 2, "0")
-    <> pad_left(int.to_string(day), 2, "0")
-    <> "-"
-    <> pad_left(int.to_string(hour), 2, "0")
-    <> pad_left(int.to_string(minute), 2, "0")
-    <> pad_left(int.to_string(second), 2, "0")
+  <> pad_left(int.to_string(month), 2, "0")
+  <> pad_left(int.to_string(day), 2, "0")
+  <> "-"
+  <> pad_left(int.to_string(hour), 2, "0")
+  <> pad_left(int.to_string(minute), 2, "0")
+  <> pad_left(int.to_string(second), 2, "0")
 }
 
 fn utc_now_string() -> String {
   let #(#(year, month, day), #(hour, minute, second)) = universal_time()
   pad_left(int.to_string(year), 4, "0")
-    <> "-"
-    <> pad_left(int.to_string(month), 2, "0")
-    <> "-"
-    <> pad_left(int.to_string(day), 2, "0")
-    <> "T"
-    <> pad_left(int.to_string(hour), 2, "0")
-    <> ":"
-    <> pad_left(int.to_string(minute), 2, "0")
-    <> ":"
-    <> pad_left(int.to_string(second), 2, "0")
-    <> "Z"
+  <> "-"
+  <> pad_left(int.to_string(month), 2, "0")
+  <> "-"
+  <> pad_left(int.to_string(day), 2, "0")
+  <> "T"
+  <> pad_left(int.to_string(hour), 2, "0")
+  <> ":"
+  <> pad_left(int.to_string(minute), 2, "0")
+  <> ":"
+  <> pad_left(int.to_string(second), 2, "0")
+  <> "Z"
 }
 
 fn pad_left(value: String, width: Int, pad: String) -> String {
