@@ -8,6 +8,8 @@
 import gleam/int
 import gleam/option.{type Option, None}
 
+import claude_agent_sdk/message.{type MessageEnvelope}
+
 // ============================================================================
 // StreamError Type (Runtime Errors)
 // ============================================================================
@@ -160,12 +162,6 @@ pub type StreamItem {
   WarningEvent(Warning)
   /// Normal end of stream (terminal - no more items)
   EndOfStream
-}
-
-/// Placeholder for MessageEnvelope until messages.gleam is implemented.
-/// This will be replaced with proper import when messages module exists.
-pub type MessageEnvelope {
-  MessageEnvelope
 }
 
 // ============================================================================
