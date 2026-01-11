@@ -1662,7 +1662,6 @@ pub fn new_with_warnings_yields_warnings_first_test() {
 
   // Cleanup
   let _ = close(s1)
-  port_ffi.ffi_close_port(port)
 }
 
 pub fn new_with_warnings_empty_list_works_like_new_test() {
@@ -1714,5 +1713,4 @@ pub fn new_with_warnings_multiple_warnings_test() {
 
   // Cleanup
   let _ = close(s2)
-  port_ffi.ffi_close_port(port)
 }
