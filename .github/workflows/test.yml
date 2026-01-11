@@ -14,6 +14,8 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
+    # Skip on schedule/workflow_dispatch - those are for E2E only
+    if: github.event_name != 'schedule' && github.event_name != 'workflow_dispatch'
     steps:
       - uses: actions/checkout@v4
       - uses: erlef/setup-beam@v1
@@ -54,6 +56,10 @@ jobs:
           fi
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+      - uses: actions/setup-node@v4
+        if: steps.prereq.outputs.skip != 'true'
+        with:
+          node-version: '20'
       - name: Install Claude CLI
         if: steps.prereq.outputs.skip != 'true'
         run: npm install -g @anthropic-ai/claude-code
