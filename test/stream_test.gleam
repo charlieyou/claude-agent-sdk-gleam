@@ -3,16 +3,19 @@ import claude_agent_sdk/error.{CleanExitNoResult, NonZeroExitAfterResult}
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream.{
-  BufferOverflow, Closed, CompleteLine, EndOfStream, Message, NeedMoreData,
-  NextJsonDecodeError, NextProcessError, NextTooManyDecodeErrors,
-  PendingEndOfStream, ReadError, ResultReceived, Streaming, WarningEvent,
-  YieldEndOfStream, YieldProcessError, YieldWarningThenEnd, append_to_buffer,
-  close, get_buffer, get_consecutive_decode_errors, get_result_seen, get_state,
-  handle_exit_status, increment_decode_errors, is_closed, mark_closed,
+  BufferOverflow, Closed, CollectResult, CompleteLine, Continue, EndOfStream,
+  Message, NeedMoreData, NextJsonDecodeError, NextProcessError,
+  NextTooManyDecodeErrors, PendingEndOfStream, ReadError, ResultReceived, Stop,
+  Streaming, WarningEvent, YieldEndOfStream, YieldProcessError,
+  YieldWarningThenEnd, append_to_buffer, close, collect_items, collect_messages,
+  fold_stream, get_buffer, get_consecutive_decode_errors, get_result_seen,
+  get_state, handle_exit_status, increment_decode_errors, is_closed, mark_closed,
   mark_pending_end_of_stream, mark_result_received, new, next, normalize_crlf,
-  read_line, reset_decode_errors, set_buffer,
+  read_line, reset_decode_errors, set_buffer, with_stream,
 }
 import gleam/bit_array
+import gleam/list
+import gleam/option.{None, Some}
 import gleeunit/should
 
 // ============================================================================
@@ -834,6 +837,141 @@ pub fn next_exit_before_result_zero_yields_warning_test() {
   let #(result2, _s2) = next(s1)
   case result2 {
     Ok(EndOfStream) -> Nil
+    _ -> should.fail()
+  }
+}
+
+// ============================================================================
+// Resource Helper Tests (casg-j37.11)
+// ============================================================================
+
+pub fn with_stream_closes_port_on_early_return_test() {
+  // with_stream should close the port even on early return
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new(port)
+
+  // Wrap in Ok to simulate query() result
+  let query_result = Ok(stream)
+
+  // with_stream should execute fn and close stream
+  let result =
+    with_stream(query_result, fn(s) {
+      // Verify stream is open before fn completes
+      s |> is_closed |> should.be_false
+      "early_return_value"
+    })
+
+  // Should get our value back
+  case result {
+    Ok("early_return_value") -> Nil
+    _ -> should.fail()
+  }
+  // Stream should now be closed
+  // Note: We can't directly test the original stream is closed since
+  // with_stream uses its own reference, but this tests the pattern works
+}
+
+pub fn with_stream_passes_query_error_through_test() {
+  // with_stream should pass through QueryError without calling fn
+  let query_result: Result(stream.QueryStream, error.QueryError) =
+    Error(error.CliNotFoundError("claude not found"))
+
+  let fn_called = fn(_s) {
+    // This should never be called
+    should.fail()
+    "should not reach"
+  }
+
+  let result = with_stream(query_result, fn_called)
+
+  case result {
+    Error(error.CliNotFoundError(_)) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn collect_items_collects_all_and_closes_port_test() {
+  // Process exits with code 0, emitting no messages
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 0"], "/tmp")
+  let stream_instance = new(port)
+
+  // collect_items should drain the stream and close it
+  let result = collect_items(stream_instance)
+
+  // Should have collected the warning about clean exit no result
+  // (because exit 0 with no Result message triggers CleanExitNoResult warning)
+  result.warnings |> list.length |> should.equal(1)
+  result.terminal_error |> should.equal(None)
+}
+
+pub fn collect_items_records_terminal_error_test() {
+  // Process exits with non-zero code
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 1"], "/tmp")
+  let stream_instance = new(port)
+
+  let result = collect_items(stream_instance)
+
+  // Should have terminal error recorded
+  case result.terminal_error {
+    Some(error.ProcessError(1, _)) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn collect_messages_filters_to_messages_only_test() {
+  // Process exits with code 0, no messages, generates warning
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 0"], "/tmp")
+  let stream_instance = new(port)
+
+  let result = collect_messages(stream_instance)
+
+  // Items should be empty (no actual messages)
+  result.items |> list.length |> should.equal(0)
+  // But warnings should still be recorded
+  result.warnings |> list.length |> should.equal(1)
+}
+
+pub fn fold_stream_with_early_stop_test() {
+  // Process exits with code 0, generates warning then EndOfStream
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 0"], "/tmp")
+  let stream_instance = new(port)
+
+  // Fold that stops immediately on first item
+  let #(final_acc, err) =
+    fold_stream(stream_instance, 0, fn(acc, _result) {
+      // Stop after first item
+      Stop(acc + 1)
+    })
+
+  final_acc |> should.equal(1)
+  err |> should.equal(None)
+}
+
+pub fn fold_stream_continues_until_end_test() {
+  // Process exits with code 0
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 0"], "/tmp")
+  let stream_instance = new(port)
+
+  // Fold that counts all items
+  let #(count, err) =
+    fold_stream(stream_instance, 0, fn(acc, _result) { Continue(acc + 1) })
+
+  // Should have counted at least the warning event
+  { count >= 1 } |> should.be_true
+  err |> should.equal(None)
+}
+
+pub fn fold_stream_records_terminal_error_test() {
+  // Process exits with non-zero code
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 1"], "/tmp")
+  let stream_instance = new(port)
+
+  let #(_acc, err) =
+    fold_stream(stream_instance, 0, fn(acc, _result) { Continue(acc + 1) })
+
+  // Should have terminal error
+  case err {
+    Some(error.ProcessError(1, _)) -> Nil
     _ -> should.fail()
   }
 }

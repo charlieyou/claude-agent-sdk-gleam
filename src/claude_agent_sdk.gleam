@@ -203,6 +203,37 @@ pub type WarningCode =
 pub const is_terminal = error.is_terminal
 
 // =============================================================================
+// Stream Helpers (from internal/stream.gleam)
+// =============================================================================
+
+import claude_agent_sdk/internal/stream
+
+pub type QueryStream =
+  stream.QueryStream
+
+pub type CollectResult(a) =
+  stream.CollectResult(a)
+
+pub type FoldAction(a) =
+  stream.FoldAction(a)
+
+/// Execute a function with a stream, ensuring cleanup on any exit path.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const with_stream = stream.with_stream
+
+/// Collect all items from a stream.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const collect_items = stream.collect_items
+
+/// Collect only messages from a stream (filtering out warnings).
+/// **STABLE API**: Breaking changes require major version bump.
+pub const collect_messages = stream.collect_messages
+
+/// Fold over stream items with custom accumulation logic.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const fold_stream = stream.fold_stream
+
+// =============================================================================
 // SDK Version
 // =============================================================================
 

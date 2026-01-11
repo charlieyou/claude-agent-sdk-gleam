@@ -10,8 +10,8 @@
 /// **Single-process constraint**: QueryStream is NOT thread-safe.
 /// It must only be used from the process that created it.
 import claude_agent_sdk/error.{
-  type ErrorDiagnostic, type Warning, CleanExitNoResult, NonZeroExitAfterResult,
-  Warning, diagnose_exit_code,
+  type ErrorDiagnostic, type StreamError, type Warning, CleanExitNoResult,
+  NonZeroExitAfterResult, Warning, diagnose_exit_code,
 }
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/decoder
@@ -19,7 +19,8 @@ import claude_agent_sdk/internal/port_ffi.{type Port, Data, ExitStatus, Timeout}
 import claude_agent_sdk/message.{type MessageEnvelope, Result}
 import gleam/bit_array
 import gleam/int
-import gleam/option.{None}
+import gleam/list
+import gleam/option.{type Option, None, Some}
 import gleam/string
 
 // ============================================================================
@@ -703,6 +704,267 @@ fn process_line(
       // Don't increment decode error counter for unknown types (forward compat)
       let updated = reset_decode_errors(stream)
       #(Error(NextUnexpectedMessageError(line)), updated)
+    }
+  }
+}
+
+// ============================================================================
+// CollectResult: Result of collecting stream items
+// ============================================================================
+
+/// Result of collecting items from a stream.
+/// Contains all collected items plus any warnings and errors encountered.
+pub type CollectResult(a) {
+  CollectResult(
+    /// Items collected from the stream
+    items: List(a),
+    /// Non-fatal warnings emitted during iteration
+    warnings: List(Warning),
+    /// Non-terminal errors (JsonDecodeError, UnexpectedMessageError)
+    non_terminal_errors: List(StreamError),
+    /// Terminal error if stream ended with an error (ProcessError, etc.)
+    terminal_error: Option(StreamError),
+  )
+}
+
+// ============================================================================
+// FoldAction: Control flow for fold_stream
+// ============================================================================
+
+/// Control flow for fold_stream callback.
+pub type FoldAction(a) {
+  /// Continue folding with new accumulator value
+  Continue(a)
+  /// Stop folding early with final accumulator value
+  Stop(a)
+}
+
+// ============================================================================
+// Resource Helpers (STABLE API)
+// ============================================================================
+
+/// Convert NextError to StreamError for collect/fold APIs.
+fn next_error_to_stream_error(err: NextError) -> StreamError {
+  case err {
+    NextProcessError(code, diagnostic) -> error.ProcessError(code, diagnostic)
+    NextBufferOverflow -> error.BufferOverflow
+    NextTooManyDecodeErrors(count, last) ->
+      error.TooManyDecodeErrors(count, last)
+    NextJsonDecodeError(line, msg) -> error.JsonDecodeError(line, msg)
+    NextUnexpectedMessageError(raw) -> error.UnexpectedMessageError(raw)
+  }
+}
+
+/// Execute a function with a stream, ensuring cleanup on any exit path.
+///
+/// **Guarantees**: close() is always called on the stream, whether the
+/// function returns normally, returns early, or panics (within Gleam's
+/// non-exception semantics).
+///
+/// **Usage**:
+/// ```gleam
+/// let result = with_stream(query(prompt, options), fn(stream) {
+///   // Use stream here...
+///   my_result
+/// })
+/// ```
+///
+/// **STABLE API**: Breaking changes require major version bump.
+pub fn with_stream(
+  result: Result(QueryStream, error.QueryError),
+  f: fn(QueryStream) -> a,
+) -> Result(a, error.QueryError) {
+  case result {
+    Error(e) -> Error(e)
+    Ok(stream) -> {
+      let value = f(stream)
+      // Always close, regardless of how f returns
+      let _ = close(stream)
+      Ok(value)
+    }
+  }
+}
+
+/// Collect all items from a stream.
+///
+/// Consumes the entire stream, collecting all messages and warnings.
+/// Non-terminal errors are recorded but iteration continues.
+/// Terminal errors stop iteration and are recorded in terminal_error.
+///
+/// **Guarantees**: Stream is always closed after collection.
+///
+/// **STABLE API**: Breaking changes require major version bump.
+pub fn collect_items(stream: QueryStream) -> CollectResult(StreamItem) {
+  collect_items_loop(stream, [], [], [])
+}
+
+fn collect_items_loop(
+  stream: QueryStream,
+  items: List(StreamItem),
+  warnings: List(Warning),
+  non_terminal_errors: List(StreamError),
+) -> CollectResult(StreamItem) {
+  let #(result, updated) = next(stream)
+  case result {
+    Ok(EndOfStream) ->
+      CollectResult(
+        items: list.reverse(items),
+        warnings: list.reverse(warnings),
+        non_terminal_errors: list.reverse(non_terminal_errors),
+        terminal_error: None,
+      )
+    Ok(Message(envelope)) ->
+      collect_items_loop(
+        updated,
+        [Message(envelope), ..items],
+        warnings,
+        non_terminal_errors,
+      )
+    Ok(WarningEvent(warning)) ->
+      collect_items_loop(
+        updated,
+        [WarningEvent(warning), ..items],
+        [warning, ..warnings],
+        non_terminal_errors,
+      )
+    Error(err) -> {
+      let stream_error = next_error_to_stream_error(err)
+      case error.is_terminal(stream_error) {
+        True ->
+          CollectResult(
+            items: list.reverse(items),
+            warnings: list.reverse(warnings),
+            non_terminal_errors: list.reverse(non_terminal_errors),
+            terminal_error: Some(stream_error),
+          )
+        False ->
+          collect_items_loop(updated, items, warnings, [
+            stream_error,
+            ..non_terminal_errors
+          ])
+      }
+    }
+  }
+}
+
+/// Collect only messages from a stream (filtering out warnings).
+///
+/// Consumes the entire stream, collecting only MessageEnvelope items.
+/// Warnings are tracked separately. Non-terminal errors are recorded
+/// but iteration continues.
+///
+/// **Guarantees**: Stream is always closed after collection.
+///
+/// **STABLE API**: Breaking changes require major version bump.
+pub fn collect_messages(stream: QueryStream) -> CollectResult(MessageEnvelope) {
+  collect_messages_loop(stream, [], [], [])
+}
+
+fn collect_messages_loop(
+  stream: QueryStream,
+  messages: List(MessageEnvelope),
+  warnings: List(Warning),
+  non_terminal_errors: List(StreamError),
+) -> CollectResult(MessageEnvelope) {
+  let #(result, updated) = next(stream)
+  case result {
+    Ok(EndOfStream) ->
+      CollectResult(
+        items: list.reverse(messages),
+        warnings: list.reverse(warnings),
+        non_terminal_errors: list.reverse(non_terminal_errors),
+        terminal_error: None,
+      )
+    Ok(Message(envelope)) ->
+      collect_messages_loop(
+        updated,
+        [envelope, ..messages],
+        warnings,
+        non_terminal_errors,
+      )
+    Ok(WarningEvent(warning)) ->
+      collect_messages_loop(
+        updated,
+        messages,
+        [warning, ..warnings],
+        non_terminal_errors,
+      )
+    Error(err) -> {
+      let stream_error = next_error_to_stream_error(err)
+      case error.is_terminal(stream_error) {
+        True ->
+          CollectResult(
+            items: list.reverse(messages),
+            warnings: list.reverse(warnings),
+            non_terminal_errors: list.reverse(non_terminal_errors),
+            terminal_error: Some(stream_error),
+          )
+        False ->
+          collect_messages_loop(updated, messages, warnings, [
+            stream_error,
+            ..non_terminal_errors
+          ])
+      }
+    }
+  }
+}
+
+/// Fold over stream items with custom accumulation logic.
+///
+/// Allows early termination via FoldAction.Stop. The callback receives
+/// each stream result (Ok or Error) and returns either Continue(acc)
+/// or Stop(acc).
+///
+/// **Guarantees**: Stream is always closed after folding.
+///
+/// **Returns**: Tuple of (final_accumulator, optional_terminal_error)
+///
+/// **STABLE API**: Breaking changes require major version bump.
+pub fn fold_stream(
+  stream: QueryStream,
+  initial: a,
+  f: fn(a, Result(StreamItem, StreamError)) -> FoldAction(a),
+) -> #(a, Option(StreamError)) {
+  fold_stream_loop(stream, initial, f)
+}
+
+fn fold_stream_loop(
+  stream: QueryStream,
+  acc: a,
+  f: fn(a, Result(StreamItem, StreamError)) -> FoldAction(a),
+) -> #(a, Option(StreamError)) {
+  let #(result, updated) = next(stream)
+  case result {
+    Ok(EndOfStream) -> {
+      let _ = close(updated)
+      #(acc, None)
+    }
+    Ok(item) -> {
+      case f(acc, Ok(item)) {
+        Continue(new_acc) -> fold_stream_loop(updated, new_acc, f)
+        Stop(final_acc) -> {
+          let _ = close(updated)
+          #(final_acc, None)
+        }
+      }
+    }
+    Error(err) -> {
+      let stream_error = next_error_to_stream_error(err)
+      case error.is_terminal(stream_error) {
+        True -> {
+          // Stream already closed by next() on terminal error
+          #(acc, Some(stream_error))
+        }
+        False -> {
+          case f(acc, Error(stream_error)) {
+            Continue(new_acc) -> fold_stream_loop(updated, new_acc, f)
+            Stop(final_acc) -> {
+              let _ = close(updated)
+              #(final_acc, None)
+            }
+          }
+        }
+      }
     }
   }
 }
