@@ -385,9 +385,14 @@ pub fn mark_pending_end_of_stream(stream: QueryStream) -> QueryStream {
 }
 
 /// Transition to Closed state (terminal).
+/// Idempotent: returns unchanged stream if already closed.
 pub fn mark_closed(stream: QueryStream) -> QueryStream {
   let QueryStream(internal) = stream
-  QueryStream(QueryStreamInternal(..internal, state: Closed, closed: True))
+  case internal.closed {
+    True -> stream
+    False ->
+      QueryStream(QueryStreamInternal(..internal, state: Closed, closed: True))
+  }
 }
 // ============================================================================
 // Placeholder API (to be implemented in later issues)
