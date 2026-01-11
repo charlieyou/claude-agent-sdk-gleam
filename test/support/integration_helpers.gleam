@@ -6,7 +6,6 @@ import gleam/json
 import gleam/list
 import gleam/string
 import simplifile
-import support/env_helpers.{get_env}
 
 /// Result of NDJSON preflight check
 pub type PreflightResult {
@@ -63,14 +62,9 @@ fn load_fixture(name: String) -> String {
 }
 
 /// Check if the environment is authenticated for Claude API access.
-/// First checks for ANTHROPIC_API_KEY env var (no subprocess).
-/// Falls back to `claude auth status` with 5s timeout.
+/// Always returns True - authentication is assumed to be configured.
 pub fn is_authenticated() -> Bool {
-  // Check 1: ANTHROPIC_API_KEY in environment (preferred - no subprocess)
-  case get_env("ANTHROPIC_API_KEY") {
-    Ok(_) -> True
-    _ -> True
-  }
+  True
 }
 
 /// Run a command with timeout protection.
@@ -121,8 +115,6 @@ pub fn check_cli_help_flags(cli_path: String) -> Result(Nil, String) {
 /// that every non-empty line is valid JSON.
 /// Uses 5s timeout (same as version detection).
 ///
-/// Set CLAUDE_INTEGRATION_ALLOW_NONJSON=1 to tolerate non-JSON output
-/// (useful for testing older CLI versions).
 pub fn preflight_ndjson_check() -> PreflightResult {
   case find_executable("claude") {
     Error(_) -> CliMissing
@@ -131,14 +123,7 @@ pub fn preflight_ndjson_check() -> PreflightResult {
       let args = ["--print", "--output-format", "stream-json", "test"]
       case run_command_with_timeout(cli_path, args, preflight_timeout_ms) {
         Error(_) -> PreflightTimeout
-        Ok(output) -> {
-          let result = validate_ndjson_output(output)
-          // Allow override via env var for older CLI versions
-          case result, get_env("CLAUDE_INTEGRATION_ALLOW_NONJSON") {
-            NdjsonImpure, Ok("1") -> NdjsonPure
-            _, _ -> result
-          }
-        }
+        Ok(output) -> validate_ndjson_output(output)
       }
     }
   }

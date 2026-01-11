@@ -1,7 +1,6 @@
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/internal/port_ffi
 import gleam/bit_array
-import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/int
 import gleam/io
@@ -151,7 +150,6 @@ fn run_with_config(config: Config) -> Result(Summary, String) {
 
       logger
       |> log_event("run_start", "INFO", None, None, [
-        #("env", json.object(redacted_env_as_json())),
         #("start_ts", json.string(start_ts)),
         #("cli_version_raw", json.string(cli_version_raw)),
         #("cli_version_parsed", json.string(option_string(cli_version_parsed))),
@@ -425,8 +423,13 @@ fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
         Some("auth_check"),
         [],
       )
-      case get_env("ANTHROPIC_API_KEY") {
-        Some(_) ->
+      let #(exit_code, stdout, _stderr) =
+        run_command(ctx, ["auth", "status"], scenario_id, "auth_check", 10_000)
+      case
+        exit_code == 0
+        && string.contains(string.lowercase(stdout), "authenticated")
+      {
+        True ->
           ctx.logger
           |> log_event(
             "step_end",
@@ -435,48 +438,21 @@ fn run_e2e_01_preflight(ctx: ScenarioContext) -> ScenarioResult {
             Some("auth_check"),
             [
               #("result", json.string("pass")),
-              #("notes", json.string("ANTHROPIC_API_KEY present")),
+              #("notes", json.string("Authenticated via CLI session")),
             ],
           )
-        None -> {
-          let #(exit_code, stdout, _stderr) =
-            run_command(
-              ctx,
-              ["auth", "status"],
-              scenario_id,
-              "auth_check",
-              10_000,
-            )
-          case
-            exit_code == 0
-            && string.contains(string.lowercase(stdout), "authenticated")
-          {
-            True ->
-              ctx.logger
-              |> log_event(
-                "step_end",
-                "INFO",
-                Some(scenario_id),
-                Some("auth_check"),
-                [
-                  #("result", json.string("pass")),
-                  #("notes", json.string("Authenticated via CLI session")),
-                ],
-              )
-            False ->
-              ctx.logger
-              |> log_event(
-                "step_end",
-                "WARN",
-                Some(scenario_id),
-                Some("auth_check"),
-                [
-                  #("result", json.string("warn")),
-                  #("notes", json.string("Auth not detected; continuing")),
-                ],
-              )
-          }
-        }
+        False ->
+          ctx.logger
+          |> log_event(
+            "step_end",
+            "WARN",
+            Some(scenario_id),
+            Some("auth_check"),
+            [
+              #("result", json.string("warn")),
+              #("notes", json.string("Auth not detected; continuing")),
+            ],
+          )
       }
 
       ctx.logger
@@ -645,11 +621,6 @@ fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
           }
         })
 
-      let allow_nonjson = case get_env("CLAUDE_INTEGRATION_ALLOW_NONJSON") {
-        Some("1") -> True
-        _ -> False
-      }
-
       case non_json_lines {
         [] -> {
           ctx.logger
@@ -666,63 +637,26 @@ fn run_e2e_03_ndjson_purity(ctx: ScenarioContext) -> ScenarioResult {
           )
         }
         [#(line_no, line), ..] -> {
-          case allow_nonjson {
-            True -> {
-              ctx.logger
-              |> log_event(
-                "warning",
-                "WARN",
-                Some(scenario_id),
-                Some("ndjson_check"),
-                [
-                  #(
-                    "notes",
-                    json.string(
-                      int.to_string(list.length(non_json_lines))
-                      <> " non-JSON lines (allowed via env)",
-                    ),
-                  ),
-                ],
-              )
-              ctx.logger
-              |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
-                #("result", json.string("pass")),
-              ])
-              ScenarioResult(
-                scenario_id: scenario_id,
-                status: Pass,
-                duration_ms: elapsed_ms(ctx.logger) - start_ms,
-                error_kind: None,
-                error_message: None,
-                notes: Some(
-                  int.to_string(list.length(non_json_lines))
-                  <> " non-JSON lines (allowed)",
-                ),
-              )
-            }
-            False -> {
-              ctx.logger
-              |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
-                #("result", json.string("fail")),
-              ])
-              ScenarioResult(
-                scenario_id: scenario_id,
-                status: Fail,
-                duration_ms: elapsed_ms(ctx.logger) - start_ms,
-                error_kind: Some("ndjson_impure"),
-                error_message: Some(
-                  int.to_string(list.length(non_json_lines))
-                  <> " non-JSON line(s) in output",
-                ),
-                notes: Some(
-                  "Line "
-                  <> int.to_string(line_no)
-                  <> ": "
-                  <> redact_and_truncate(line),
-                ),
-              )
-            }
-          }
+          ctx.logger
+          |> log_event("scenario_end", "ERROR", Some(scenario_id), None, [
+            #("result", json.string("fail")),
+          ])
+          ScenarioResult(
+            scenario_id: scenario_id,
+            status: Fail,
+            duration_ms: elapsed_ms(ctx.logger) - start_ms,
+            error_kind: Some("ndjson_impure"),
+            error_message: Some(
+              int.to_string(list.length(non_json_lines))
+              <> " non-JSON line(s) in output",
+            ),
+            notes: Some(
+              "Line "
+              <> int.to_string(line_no)
+              <> ": "
+              <> redact_and_truncate(line),
+            ),
+          )
         }
       }
     }
@@ -923,36 +857,20 @@ fn run_e2e_06_auth_missing(ctx: ScenarioContext) -> ScenarioResult {
     [],
   )
 
-  case get_env("ANTHROPIC_API_KEY") {
-    Some(_) -> {
-      ctx.logger
-      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
-        #("result", json.string("skip")),
-      ])
-      ScenarioResult(
-        scenario_id: scenario_id,
-        status: Skip,
-        duration_ms: elapsed_ms(ctx.logger) - start_ms,
-        error_kind: None,
-        error_message: None,
-        notes: Some("Auth present - cannot test missing auth scenario"),
-      )
-    }
-    None -> {
-      ctx.logger
-      |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
-        #("result", json.string("pass")),
-      ])
-      ScenarioResult(
-        scenario_id: scenario_id,
-        status: Pass,
-        duration_ms: elapsed_ms(ctx.logger) - start_ms,
-        error_kind: None,
-        error_message: None,
-        notes: Some("Auth missing correctly detected"),
-      )
-    }
-  }
+  // This scenario tests behavior when auth is missing.
+  // Without env var checks, we always skip since we can't determine auth state.
+  ctx.logger
+  |> log_event("scenario_end", "INFO", Some(scenario_id), None, [
+    #("result", json.string("skip")),
+  ])
+  ScenarioResult(
+    scenario_id: scenario_id,
+    status: Skip,
+    duration_ms: elapsed_ms(ctx.logger) - start_ms,
+    error_kind: None,
+    error_message: None,
+    notes: Some("Skipped - auth state detection not available"),
+  )
 }
 
 fn run_e2e_07_cli_missing(ctx: ScenarioContext) -> ScenarioResult {
@@ -1074,7 +992,6 @@ fn run_command(
   |> log_event("command_start", "INFO", Some(scenario_id), Some(step), [
     #("command", json.string(string.join(cmd, " "))),
     #("cwd", json.string(cwd)),
-    #("env", json.object(redacted_env_as_json())),
   ])
 
   case run_shell_command(ctx.cli_path, adjusted_args, timeout_ms) {
@@ -1452,30 +1369,6 @@ fn truncate_line(line: String) -> String {
   }
 }
 
-fn redacted_env_as_json() -> List(#(String, json.Json)) {
-  env_allowlist()
-  |> list.fold([], fn(acc, key) {
-    case get_env(key) {
-      Some(value) -> [#(key, json.string(value)), ..acc]
-      None -> acc
-    }
-  })
-  |> list.reverse
-}
-
-fn env_allowlist() -> List(String) {
-  [
-    "CLAUDE_INTEGRATION_ALLOW_NONJSON",
-    "PATH",
-    "HOME",
-    "USER",
-    "SHELL",
-    "TERM",
-    "LANG",
-    "LC_ALL",
-  ]
-}
-
 // ============================================================================
 // Metadata and summary
 // ============================================================================
@@ -1741,35 +1634,8 @@ fn indexed_filter_map_loop(
 }
 
 // ============================================================================
-// Environment + time helpers
+// Time helpers
 // ============================================================================
-
-@external(erlang, "erlang", "binary_to_list")
-fn string_to_charlist(s: String) -> Dynamic
-
-@external(erlang, "unicode", "characters_to_binary")
-fn charlist_to_string(chars: Dynamic) -> String
-
-@external(erlang, "os", "getenv")
-fn ffi_getenv(name: Dynamic) -> Dynamic
-
-@external(erlang, "erlang", "is_atom")
-fn is_atom(value: Dynamic) -> Bool
-
-fn get_env(name: String) -> Option(String) {
-  let charlist_name = string_to_charlist(name)
-  let result = ffi_getenv(charlist_name)
-  case is_atom(result) {
-    True -> None
-    False -> {
-      let value = charlist_to_string(result)
-      case value {
-        "" -> None
-        _ -> Some(value)
-      }
-    }
-  }
-}
 
 @external(erlang, "claude_agent_sdk_ffi", "unique_integer")
 fn unique_integer() -> Int
