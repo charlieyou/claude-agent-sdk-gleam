@@ -6,6 +6,7 @@
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/message
 import gleam/bit_array
+import gleam/string
 import gleeunit/should
 import simplifile
 
@@ -102,6 +103,58 @@ pub fn decode_unknown_content_block_test() {
   let result = decoder.decode_message(json)
   let _ = should.be_ok(result)
   Nil
+}
+
+// =============================================================================
+// Known Type Missing Required Fields Tests
+// =============================================================================
+
+pub fn decode_text_block_missing_text_field_test() {
+  let json = load_fixture("text_block_missing_text.json")
+  let result = decoder.decode_message(json)
+  // Known type "text" missing required "text" field must error
+  case result {
+    Error(decoder.JsonDecodeError(msg)) -> {
+      // Verify error message mentions TextBlock and missing field
+      let has_textblock = string.contains(msg, "TextBlock")
+      let has_missing = string.contains(msg, "missing")
+      case has_textblock && has_missing {
+        True -> Nil
+        False ->
+          panic as {
+            "Expected error mentioning TextBlock missing field, got: " <> msg
+          }
+      }
+    }
+    Ok(_) -> panic as "Expected error for text block missing text field"
+    Error(other) ->
+      panic as {
+        "Expected JsonDecodeError for missing field, got different error type"
+      }
+  }
+}
+
+pub fn decode_tool_use_block_missing_id_field_test() {
+  let json = load_fixture("tool_use_block_missing_id.json")
+  let result = decoder.decode_message(json)
+  // Known type "tool_use" missing required "id" field must error
+  case result {
+    Error(decoder.JsonDecodeError(msg)) -> {
+      // Verify error message mentions ToolUseBlock and missing field
+      let has_tooluse = string.contains(msg, "ToolUseBlock")
+      let has_missing = string.contains(msg, "missing")
+      case has_tooluse && has_missing {
+        True -> Nil
+        False ->
+          panic as {
+            "Expected error mentioning ToolUseBlock missing field, got: " <> msg
+          }
+      }
+    }
+    Ok(_) -> panic as "Expected error for tool_use block missing id field"
+    Error(_) ->
+      panic as "Expected JsonDecodeError for missing field, got different error type"
+  }
 }
 
 // =============================================================================

@@ -38,6 +38,17 @@ These fixtures test forward compatibility and edge cases:
 | `unknown_message_type.json` | Message with unknown type (forward-compat test) |
 | `unknown_content_block.json` | Content block with unknown type |
 
+## Negative Test Fixtures (Known Types Missing Required Fields)
+
+These fixtures verify that known content block types with missing required fields
+produce errors (not UnknownBlock). This is critical for catching schema violations
+rather than silently treating malformed known types as unknown.
+
+| File | Description |
+|------|-------------|
+| `text_block_missing_text.json` | TextBlock with type="text" but no "text" field |
+| `tool_use_block_missing_id.json` | ToolUseBlock with type="tool_use" but no "id" field |
+
 ## Field Verification Status
 
 Per plan section "Schema Source and Forward Compatibility":

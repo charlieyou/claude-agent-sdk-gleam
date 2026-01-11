@@ -502,6 +502,7 @@ fn content_block_decoder() -> decode.Decoder(ContentBlock) {
 }
 
 /// Decoder for TextBlock (inner)
+/// Fails if required "text" field is missing (known type must validate).
 fn text_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
   let decoder = {
     use text <- decode.field("text", decode.string)
@@ -509,11 +510,16 @@ fn text_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
   }
   case decode.run(raw, decoder) {
     Ok(block) -> decode.success(block)
-    Error(_) -> decode.success(UnknownBlock(raw))
+    Error(errors) ->
+      decode.failure(
+        TextBlock(""),
+        "TextBlock missing required field: " <> format_decode_errors(errors),
+      )
   }
 }
 
 /// Decoder for ToolUseBlock (inner)
+/// Fails if required "id", "name", or "input" fields are missing (known type must validate).
 fn tool_use_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
   let decoder = {
     use id <- decode.field("id", decode.string)
@@ -523,7 +529,11 @@ fn tool_use_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
   }
   case decode.run(raw, decoder) {
     Ok(block) -> decode.success(block)
-    Error(_) -> decode.success(UnknownBlock(raw))
+    Error(errors) ->
+      decode.failure(
+        ToolUseBlock(id: "", name: "", input: raw),
+        "ToolUseBlock missing required field: " <> format_decode_errors(errors),
+      )
   }
 }
 
