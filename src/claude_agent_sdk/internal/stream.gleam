@@ -142,11 +142,17 @@ pub fn is_closed(stream: QueryStream) -> Bool {
 ///
 /// **Note**: close() performs a user-initiated abort and does NOT parse/emit
 /// any remaining messages in the mailbox.
-pub fn close(stream: QueryStream) -> Nil {
+///
+/// Returns an updated QueryStream with closed=True. Always use the returned
+/// stream for subsequent operations to maintain correct state.
+pub fn close(stream: QueryStream) -> QueryStream {
   let QueryStream(internal) = stream
   case internal.closed {
-    True -> Nil
-    False -> port_ffi.ffi_close_port(internal.port)
+    True -> stream
+    False -> {
+      port_ffi.ffi_close_port(internal.port)
+      QueryStream(QueryStreamInternal(..internal, closed: True))
+    }
   }
 }
 

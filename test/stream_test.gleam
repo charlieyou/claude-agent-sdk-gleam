@@ -58,30 +58,28 @@ pub fn close_is_idempotent_test() {
   let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
   let stream = new(port)
 
-  // First close should succeed
-  close(stream)
+  // First close should succeed and return updated stream with closed=True
+  let stream1 = close(stream)
+  stream1 |> is_closed |> should.be_true
 
-  // Second close should also succeed (idempotent)
-  // Note: This tests that calling close() multiple times doesn't crash
-  close(stream)
-  // The function returns Nil, so we just verify it doesn't crash
+  // Second close on already-closed stream should be a no-op
+  let stream2 = close(stream1)
+  stream2 |> is_closed |> should.be_true
 }
 
-pub fn close_calls_port_close_test() {
+pub fn close_sets_closed_flag_test() {
   // Create a real port and close it via stream
   let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
   let stream = new(port)
 
-  // Close the stream - should close the port
-  close(stream)
+  // Verify stream starts as not closed
+  stream |> is_closed |> should.be_false
 
-  // Verify stream was in correct initial state
-  stream
-  |> is_closed
-  |> should.be_false
-  // Note: is_closed returns the internal closed flag which is not updated
-  // by close() in this implementation. The port is closed, but the flag
-  // remains False because we don't return an updated stream.
+  // Close the stream - should close the port and set closed=True
+  let closed_stream = close(stream)
+
+  // Verify the returned stream has closed=True
+  closed_stream |> is_closed |> should.be_true
 }
 
 // ============================================================================
