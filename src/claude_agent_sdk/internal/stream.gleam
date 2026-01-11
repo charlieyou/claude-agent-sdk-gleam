@@ -151,7 +151,7 @@ pub fn close(stream: QueryStream) -> QueryStream {
     True -> stream
     False -> {
       port_ffi.ffi_close_port(internal.port)
-      QueryStream(QueryStreamInternal(..internal, closed: True))
+      QueryStream(QueryStreamInternal(..internal, closed: True, state: Closed))
     }
   }
 }

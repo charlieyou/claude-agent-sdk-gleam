@@ -67,19 +67,21 @@ pub fn close_is_idempotent_test() {
   stream2 |> is_closed |> should.be_true
 }
 
-pub fn close_sets_closed_flag_test() {
+pub fn close_sets_closed_flag_and_state_test() {
   // Create a real port and close it via stream
   let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
   let stream = new(port)
 
-  // Verify stream starts as not closed
+  // Verify stream starts as not closed and in Streaming state
   stream |> is_closed |> should.be_false
+  stream |> get_state |> should.equal(Streaming)
 
-  // Close the stream - should close the port and set closed=True
+  // Close the stream - should close the port, set closed=True, and state=Closed
   let closed_stream = close(stream)
 
-  // Verify the returned stream has closed=True
+  // Verify the returned stream has closed=True and state=Closed
   closed_stream |> is_closed |> should.be_true
+  closed_stream |> get_state |> should.equal(Closed)
 }
 
 // ============================================================================
