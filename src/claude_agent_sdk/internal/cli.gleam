@@ -56,21 +56,24 @@ pub fn default_version_timeout_ms() -> Int {
 pub fn detect_cli_version(
   cli_path: String,
 ) -> Result(CliVersion, VersionCheckError) {
-  // Spawn the CLI with --version
-  let port = port_ffi.ffi_open_port(cli_path, ["--version"], ".")
-
-  // Collect output with timeout
-  case collect_version_output(port, <<>>) {
-    Ok(output) -> {
-      port_ffi.ffi_close_port(port)
-      case parse_version_string(output) {
-        Ok(version) -> Ok(version)
-        Error(Nil) -> Error(ParseFailed(output))
+  // Spawn the CLI with --version (using safe version to handle spawn failures)
+  case port_ffi.ffi_open_port_safe(cli_path, ["--version"], ".") {
+    Error(reason) -> Error(SpawnFailed(reason))
+    Ok(port) -> {
+      // Collect output with timeout
+      case collect_version_output(port, <<>>) {
+        Ok(output) -> {
+          port_ffi.ffi_close_port(port)
+          case parse_version_string(output) {
+            Ok(version) -> Ok(version)
+            Error(Nil) -> Error(ParseFailed(output))
+          }
+        }
+        Error(err) -> {
+          port_ffi.ffi_close_port(port)
+          Error(err)
+        }
       }
-    }
-    Error(err) -> {
-      port_ffi.ffi_close_port(port)
-      Error(err)
     }
   }
 }

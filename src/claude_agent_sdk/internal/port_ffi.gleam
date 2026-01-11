@@ -27,6 +27,40 @@ pub fn ffi_open_port(path: String, args: List(String), cwd: String) -> Port {
   Port(ffi_open_port_raw(path, args, cwd))
 }
 
+/// FFI binding for safe open - returns {ok, Port} | {error, Reason}
+@external(erlang, "claude_agent_sdk_ffi", "open_port_safe")
+fn ffi_open_port_safe_raw(
+  path: String,
+  args: List(String),
+  cwd: String,
+) -> Dynamic
+
+/// Open port safely - returns Result instead of crashing on spawn failure.
+/// Use this for version detection where spawn failures should be handled gracefully.
+pub fn ffi_open_port_safe(
+  path: String,
+  args: List(String),
+  cwd: String,
+) -> Result(Port, String) {
+  let result = ffi_open_port_safe_raw(path, args, cwd)
+  // Decode the tuple: element 0 is tag atom (ok/error), element 1 is payload
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    use payload <- decode.field(1, decode.dynamic)
+    decode.success(#(tag, payload))
+  }
+  case decode.run(result, result_decoder) {
+    Ok(#("ok", port_dynamic)) -> Ok(Port(port_dynamic))
+    Ok(#("error", reason_dynamic)) ->
+      case decode.run(reason_dynamic, decode.string) {
+        Ok(reason) -> Error(reason)
+        Error(_) -> Error("unknown spawn error")
+      }
+    Ok(_) -> Error("invalid FFI response tag")
+    Error(_) -> Error("invalid FFI response format")
+  }
+}
+
 /// Extract inner Dynamic for FFI calls
 fn port_to_dynamic(port: Port) -> Dynamic {
   let Port(inner) = port

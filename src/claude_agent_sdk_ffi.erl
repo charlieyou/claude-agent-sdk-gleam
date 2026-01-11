@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -18,6 +18,28 @@ open_port(Executable, Args, WorkingDir) ->
         exit_status,
         use_stdio
     ] ++ Opts).
+
+%% Safe version of open_port that catches exceptions and returns {ok, Port} | {error, Reason}.
+%% Use this for version detection where spawn failure should be a Result, not a crash.
+open_port_safe(Executable, Args, WorkingDir) ->
+    ExecStr = binary_to_list(Executable),
+    ArgsStr = [binary_to_list(A) || A <- Args],
+    Opts = case WorkingDir of
+        <<>> -> [];
+        _ -> [{cd, binary_to_list(WorkingDir)}]
+    end,
+    try
+        Port = erlang:open_port({spawn_executable, ExecStr}, [
+            {args, ArgsStr},
+            stream,
+            binary,
+            exit_status,
+            use_stdio
+        ] ++ Opts),
+        {ok, Port}
+    catch
+        error:Reason -> {error, atom_to_binary(Reason, utf8)}
+    end.
 
 %% Blocking receive for port messages.
 %% Returns {<<"data">>, Bytes} | {<<"exit_status">>, Code} | {<<"eof">>, nil}
