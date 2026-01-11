@@ -10,12 +10,29 @@
 %%   --threshold  Fail if total coverage below N% (default: no threshold)
 
 main(Args) ->
-    {JsonOutput, Threshold} = parse_args(Args, {false, none}),
+    case parse_args(Args, {false, none}) of
+        {error, Msg} ->
+            io:format(standard_error, "Error: ~s~n", [Msg]),
+            halt(1);
+        {JsonOutput, Threshold} ->
+            run_coverage(JsonOutput, Threshold)
+    end.
+
+run_coverage(JsonOutput, Threshold) ->
     BeamDir = "build/dev/erlang/claude_agent_sdk/ebin",
 
-    cover:start(),
+    Files = case file:list_dir(BeamDir) of
+        {ok, F} -> F;
+        {error, enoent} ->
+            io:format(standard_error, "Error: Build directory not found: ~s~n", [BeamDir]),
+            io:format(standard_error, "Run 'gleam build --target=erlang' first.~n", []),
+            halt(1);
+        {error, Reason} ->
+            io:format(standard_error, "Error reading build directory: ~p~n", [Reason]),
+            halt(1)
+    end,
 
-    {ok, Files} = file:list_dir(BeamDir),
+    cover:start(),
 
     IsSourceMod = fun(F) ->
         Ext = filename:extension(F),
@@ -34,12 +51,22 @@ main(Args) ->
         true -> ok
     end,
 
-    lists:foreach(fun(F) ->
-        case cover:compile_beam(F) of
-            {ok, _} -> ok;
-            {error, _} -> ok
+    FailedMods = lists:filtermap(fun(BeamFile) ->
+        ModName = list_to_atom(filename:basename(BeamFile, ".beam")),
+        case cover:compile_beam(BeamFile) of
+            {ok, _} -> false;
+            {error, R} -> {true, {ModName, R}}
         end
     end, SourceBeams),
+
+    case {JsonOutput, FailedMods} of
+        {false, [_|_]} ->
+            io:format(standard_error, "Warning: ~p module(s) failed to instrument:~n", [length(FailedMods)]),
+            lists:foreach(fun({M, R}) ->
+                io:format(standard_error, "  ~p: ~p~n", [M, R])
+            end, FailedMods);
+        _ -> ok
+    end,
 
     case JsonOutput of
         false -> io:format("Running tests...~n~n");
@@ -82,33 +109,66 @@ parse_args([], Acc) -> Acc;
 parse_args(["--json" | Rest], {_, Thresh}) ->
     parse_args(Rest, {true, Thresh});
 parse_args(["--threshold", N | Rest], {Json, _}) ->
-    parse_args(Rest, {Json, list_to_float(N)});
+    case parse_threshold(N) of
+        {ok, Val} -> parse_args(Rest, {Json, Val});
+        error -> {error, io_lib:format("--threshold requires a numeric value, got: ~s", [N])}
+    end;
 parse_args([_ | Rest], Acc) ->
     parse_args(Rest, Acc).
 
+parse_threshold(S) ->
+    case string:to_float(S) of
+        {F, []} -> {ok, F};
+        {F, ".0"} -> {ok, F};
+        _ ->
+            case string:to_integer(S) of
+                {I, []} -> {ok, float(I)};
+                _ -> error
+            end
+    end.
+
 run_tests(TestBeams, Quiet) ->
-    lists:foreach(fun(F) ->
-        Mod = list_to_atom(filename:basename(F, ".beam")),
-        try
-            Exports = Mod:module_info(exports),
-            TestFuns = [Name || {Name, 0} <- Exports,
-                        lists:suffix("_test", atom_to_list(Name))],
-            lists:foreach(fun(Test) ->
-                try
-                    Mod:Test(),
-                    case Quiet of
-                        false -> io:format("  ✓ ~p:~p~n", [Mod, Test]);
-                        true -> ok
+    % When in JSON mode, redirect stdout to suppress test output that would pollute JSON
+    SavedGL = erlang:group_leader(),
+    NullHandle = case Quiet of
+        true ->
+            {ok, ND} = file:open("/dev/null", [write]),
+            erlang:group_leader(ND, self()),
+            ND;
+        false ->
+            undefined
+    end,
+    try
+        lists:foreach(fun(TestFile) ->
+            Mod = list_to_atom(filename:basename(TestFile, ".beam")),
+            try
+                Exports = Mod:module_info(exports),
+                TestFuns = [Name || {Name, 0} <- Exports,
+                            lists:suffix("_test", atom_to_list(Name))],
+                lists:foreach(fun(Test) ->
+                    try
+                        Mod:Test(),
+                        case Quiet of
+                            false -> io:format("  ✓ ~p:~p~n", [Mod, Test]);
+                            true -> ok
+                        end
+                    catch
+                        C:E:_St ->
+                            io:format(standard_error, "  ✗ ~p:~p: ~p:~p~n", [Mod, Test, C, E])
                     end
-                catch
-                    C:E:_St ->
-                        io:format(standard_error, "  ✗ ~p:~p: ~p:~p~n", [Mod, Test, C, E])
-                end
-            end, TestFuns)
-        catch
-            _:_:_ -> ok
+                end, TestFuns)
+            catch
+                _:_:_ -> ok
+            end
+        end, TestBeams)
+    after
+        % Restore stdout for JSON output
+        erlang:group_leader(SavedGL, self()),
+        case NullHandle of
+            undefined -> ok;
+            Handle -> file:close(Handle)
         end
-    end, TestBeams).
+    end.
 
 collect_results() ->
     Modules = cover:modules(),
