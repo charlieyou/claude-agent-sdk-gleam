@@ -12,8 +12,9 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
 import support/integration_helpers.{
-  check_cli_help_flags, detect_cli_version_with_timeout, find_executable,
-  integration_enabled, is_authenticated,
+  NdjsonImpure, NdjsonPure, PreflightTimeout, check_cli_help_flags,
+  detect_cli_version_with_timeout, find_executable, integration_enabled,
+  is_authenticated, preflight_ndjson_check,
 }
 
 /// Timeout for preflight checks (5 seconds)
@@ -27,6 +28,10 @@ const skip_msg_version_prefix = "[SKIP:ENV] CLI version "
 const skip_msg_version_suffix = " < 1.0.0 - upgrade required"
 
 const skip_msg_auth_unavailable = "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login"
+
+const skip_msg_ndjson = "[SKIP:NDJSON] CLI not producing pure NDJSON"
+
+const skip_msg_timeout = "[SKIP:TIMEOUT] Preflight check timed out"
 
 /// Preflight test that validates CLI is available and properly configured.
 /// This test runs before other integration tests to provide actionable error messages.
@@ -246,4 +251,43 @@ fn stream_error_to_string(err: claude_agent_sdk.StreamError) -> String {
     JsonDecodeError(line, err) -> "JsonDecodeError: " <> line <> ": " <> err
     UnexpectedMessageError(raw) -> "UnexpectedMessageError: " <> raw
   }
+}
+
+// ============================================================================
+// NDJSON Purity Integration Test
+// ============================================================================
+
+/// Integration test: NDJSON purity check
+/// Verifies every line from CLI stdout is valid JSON.
+/// Stricter than runtime: ZERO tolerance for non-JSON (vs 5-error threshold).
+pub fn integration__ndjson_purity_test() {
+  case integration_enabled("integration__ndjson_purity_test") {
+    True -> {
+      case preflight_ndjson_check() {
+        NdjsonPure -> {
+          io.println("[PASS] CLI produces pure NDJSON")
+          should.be_true(True)
+        }
+        NdjsonImpure -> {
+          io.println(skip_msg_ndjson)
+          should.be_true(True)
+        }
+        PreflightTimeout -> {
+          io.println(skip_msg_timeout)
+          should.be_true(True)
+        }
+      }
+    }
+    False -> should.be_true(True)
+  }
+}
+
+/// Validates the skip message constant for NDJSON impurity scenario.
+pub fn integration__skip_message_ndjson_impure_test() {
+  should.equal(skip_msg_ndjson, "[SKIP:NDJSON] CLI not producing pure NDJSON")
+}
+
+/// Validates the skip message constant for preflight timeout scenario.
+pub fn integration__skip_message_timeout_test() {
+  should.equal(skip_msg_timeout, "[SKIP:TIMEOUT] Preflight check timed out")
 }

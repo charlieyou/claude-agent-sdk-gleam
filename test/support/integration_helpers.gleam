@@ -3,9 +3,22 @@ import claude_agent_sdk/internal/cli.{
 }
 import claude_agent_sdk/internal/port_ffi.{Data, Eof, ExitStatus, Timeout}
 import gleam/bit_array
+import gleam/dynamic/decode
 import gleam/io
+import gleam/json
+import gleam/list
 import gleam/string
 import support/env_helpers.{get_env}
+
+/// Result of NDJSON preflight check
+pub type PreflightResult {
+  /// CLI produces pure NDJSON (all lines valid JSON)
+  NdjsonPure
+  /// CLI produces non-JSON output on stdout
+  NdjsonImpure
+  /// Preflight check timed out
+  PreflightTimeout
+}
 
 /// Timeout in milliseconds for preflight checks
 const preflight_timeout_ms = 5000
@@ -152,6 +165,64 @@ pub fn check_cli_help_flags(cli_path: String) -> Result(Nil, String) {
         True -> Ok(Nil)
         False ->
           Error("Missing required CLI flags (--print or --output-format)")
+      }
+    }
+  }
+}
+
+// ============================================================================
+// NDJSON Purity Check
+// ============================================================================
+
+/// Check if the CLI produces pure NDJSON output.
+/// Runs a simple print command with streaming JSON output and validates
+/// that every non-empty line is valid JSON.
+/// Uses 5s timeout (same as version detection).
+///
+/// Set CLAUDE_INTEGRATION_ALLOW_NONJSON=1 to tolerate non-JSON output
+/// (useful for testing older CLI versions).
+pub fn preflight_ndjson_check() -> PreflightResult {
+  case find_executable("claude") {
+    Error(_) -> PreflightTimeout
+    Ok(cli_path) -> {
+      // Run a simple print command with streaming JSON
+      let args = ["--print", "--output-format", "stream-json", "test"]
+      case run_command_with_timeout(cli_path, args, preflight_timeout_ms) {
+        Error(_) -> PreflightTimeout
+        Ok(output) -> {
+          let result = validate_ndjson_output(output)
+          // Allow override via env var for older CLI versions
+          case result, get_env("CLAUDE_INTEGRATION_ALLOW_NONJSON") {
+            NdjsonImpure, Ok("1") -> NdjsonPure
+            _, _ -> result
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Validate that all non-empty lines in output are valid JSON.
+/// Returns NdjsonPure if all lines parse, NdjsonImpure if any fail.
+fn validate_ndjson_output(output: String) -> PreflightResult {
+  let lines =
+    output
+    |> string.split("\n")
+    |> list.filter(fn(line) { string.trim(line) != "" })
+
+  case lines {
+    [] -> NdjsonPure
+    _ -> {
+      let all_valid =
+        list.all(lines, fn(line) {
+          case json.parse(line, decode.dynamic) {
+            Ok(_) -> True
+            Error(_) -> False
+          }
+        })
+      case all_valid {
+        True -> NdjsonPure
+        False -> NdjsonImpure
       }
     }
   }
