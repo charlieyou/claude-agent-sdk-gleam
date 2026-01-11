@@ -3,8 +3,19 @@
 /// This module provides decoders for parsing NDJSON messages from the Claude CLI.
 /// All decoders follow the forward-compatibility policy:
 /// - Unknown message types yield UnexpectedMessageError
-/// - Unknown content block types yield UnknownBlock(raw)
+/// - Unknown content block types yield UnknownBlock(raw) for forward compatibility
+/// - Known block types with missing required fields yield decode error
 /// - Unknown JSON fields are silently ignored
+///
+/// ## Content Block Decoding
+/// Use `decode_content_block` for general content block decoding. It returns:
+/// - Ok(ContentBlock) for valid known types (TextBlock, ToolUseBlock, etc.)
+/// - Ok(UnknownBlock(raw)) for unknown type values (forward compatibility)
+/// - Error for known types missing required fields
+///
+/// For type-specific decoding with explicit errors, use:
+/// - `decode_text_block` - validates type is "text" and text field exists
+/// - `decode_tool_use_block` - validates type is "tool_use" and id/name/input exist
 import claude_agent_sdk/content.{
   type ContentBlock, type ToolResultBlock, TextBlock, ToolResultBlock,
   ToolUseBlock, UnknownBlock,
@@ -58,23 +69,38 @@ pub fn decode_result_message(_raw: Dynamic) -> Result(Dynamic, DecodeError) {
 
 /// Decode content blocks from an assistant message.
 /// Returns a list of ContentBlocks, with unknown types preserved as UnknownBlock.
+/// Known types with missing required fields yield decode error.
 pub fn decode_content_blocks(
   raw: Dynamic,
 ) -> Result(List(ContentBlock), DecodeError) {
   let list_decoder = decode.list(decode.dynamic)
   case decode.run(raw, list_decoder) {
-    Ok(dynamics) -> {
-      let blocks = list.map(dynamics, decode_content_block)
-      Ok(blocks)
-    }
+    Ok(dynamics) -> decode_content_block_list(dynamics, [])
     Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+  }
+}
+
+/// Helper to decode a list of content blocks, collecting results.
+fn decode_content_block_list(
+  dynamics: List(Dynamic),
+  acc: List(ContentBlock),
+) -> Result(List(ContentBlock), DecodeError) {
+  case dynamics {
+    [] -> Ok(list.reverse(acc))
+    [first, ..rest] -> {
+      case decode_content_block(first) {
+        Ok(block) -> decode_content_block_list(rest, [block, ..acc])
+        Error(e) -> Error(e)
+      }
+    }
   }
 }
 
 /// Decode a single content block from Dynamic.
 /// Routes to appropriate decoder based on "type" field.
-/// Unknown types yield UnknownBlock(raw) for forward compatibility.
-pub fn decode_content_block(raw: Dynamic) -> ContentBlock {
+/// Unknown types yield Ok(UnknownBlock(raw)) for forward compatibility.
+/// Known types with missing required fields yield Error.
+pub fn decode_content_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) {
   // First, try to get the type field
   let type_decoder = {
     use block_type <- decode.field("type", decode.string)
@@ -85,29 +111,36 @@ pub fn decode_content_block(raw: Dynamic) -> ContentBlock {
       case block_type {
         "text" -> decode_text_block_inner(raw)
         "tool_use" -> decode_tool_use_block_inner(raw)
-        _ -> UnknownBlock(raw)
+        // Unknown types yield UnknownBlock for forward compatibility
+        _ -> Ok(UnknownBlock(raw))
       }
     }
-    Error(_) -> UnknownBlock(raw)
+    // Missing type field - treat as unknown block
+    Error(_) -> Ok(UnknownBlock(raw))
   }
 }
 
-/// Decode a TextBlock from Dynamic.
-/// Returns UnknownBlock if required fields are missing.
-fn decode_text_block_inner(raw: Dynamic) -> ContentBlock {
+/// Decode a TextBlock from Dynamic (internal helper).
+/// Returns Error if required "text" field is missing.
+fn decode_text_block_inner(raw: Dynamic) -> Result(ContentBlock, DecodeError) {
   let decoder = {
     use text <- decode.field("text", decode.string)
     decode.success(text)
   }
   case decode.run(raw, decoder) {
-    Ok(text) -> TextBlock(text)
-    Error(_) -> UnknownBlock(raw)
+    Ok(text) -> Ok(TextBlock(text))
+    Error(errors) ->
+      Error(JsonDecodeError(
+        "TextBlock missing required field: " <> format_decode_errors(errors),
+      ))
   }
 }
 
-/// Decode a ToolUseBlock from Dynamic.
-/// Returns UnknownBlock if required fields are missing.
-fn decode_tool_use_block_inner(raw: Dynamic) -> ContentBlock {
+/// Decode a ToolUseBlock from Dynamic (internal helper).
+/// Returns Error if required id/name/input fields are missing.
+fn decode_tool_use_block_inner(
+  raw: Dynamic,
+) -> Result(ContentBlock, DecodeError) {
   let decoder = {
     use id <- decode.field("id", decode.string)
     use name <- decode.field("name", decode.string)
@@ -115,8 +148,11 @@ fn decode_tool_use_block_inner(raw: Dynamic) -> ContentBlock {
     decode.success(#(id, name, input))
   }
   case decode.run(raw, decoder) {
-    Ok(#(id, name, input)) -> ToolUseBlock(id:, name:, input:)
-    Error(_) -> UnknownBlock(raw)
+    Ok(#(id, name, input)) -> Ok(ToolUseBlock(id:, name:, input:))
+    Error(errors) ->
+      Error(JsonDecodeError(
+        "ToolUseBlock missing required field: " <> format_decode_errors(errors),
+      ))
   }
 }
 
