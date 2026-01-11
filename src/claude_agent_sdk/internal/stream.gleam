@@ -10,10 +10,13 @@
 /// **Single-process constraint**: QueryStream is NOT thread-safe.
 /// It must only be used from the process that created it.
 import claude_agent_sdk/error.{
-  type Warning, CleanExitNoResult, NonZeroExitAfterResult, Warning,
+  type ErrorDiagnostic, type Warning, CleanExitNoResult, NonZeroExitAfterResult,
+  Warning, diagnose_exit_code,
 }
 import claude_agent_sdk/internal/constants
-import claude_agent_sdk/internal/port_ffi.{type Port}
+import claude_agent_sdk/internal/decoder
+import claude_agent_sdk/internal/port_ffi.{type Port, Data, ExitStatus, Timeout}
+import claude_agent_sdk/message.{type MessageEnvelope, Result}
 import gleam/bit_array
 import gleam/int
 import gleam/option.{None}
@@ -394,8 +397,314 @@ pub fn mark_closed(stream: QueryStream) -> QueryStream {
       QueryStream(QueryStreamInternal(..internal, state: Closed, closed: True))
   }
 }
+
 // ============================================================================
-// Placeholder API (to be implemented in later issues)
+// StreamItem: What next() yields on success
 // ============================================================================
 
-// TODO(casg-j37.8): Implement next() iterator
+/// What the stream can yield on success.
+pub type StreamItem {
+  /// A parsed message from the CLI
+  Message(MessageEnvelope)
+  /// A non-fatal warning (stream continues)
+  WarningEvent(Warning)
+  /// Normal end of stream (terminal - no more items)
+  EndOfStream
+}
+
+// ============================================================================
+// NextError: Errors from next()
+// ============================================================================
+
+/// Errors that next() can return.
+/// These mirror error.StreamError but are defined here to avoid circular deps.
+pub type NextError {
+  /// CLI process exited with non-zero code (terminal)
+  NextProcessError(exit_code: Int, diagnostic: ErrorDiagnostic)
+  /// Single line exceeded buffer limit (terminal)
+  NextBufferOverflow
+  /// Too many consecutive JSON decode failures (terminal)
+  NextTooManyDecodeErrors(count: Int, last_error: String)
+  /// Line was not valid JSON (non-terminal)
+  NextJsonDecodeError(line: String, error: String)
+  /// Valid JSON but unknown message type (non-terminal)
+  NextUnexpectedMessageError(raw_json: String)
+}
+
+// ============================================================================
+// next(): Core iteration function
+// ============================================================================
+
+/// Advance the stream by one item.
+///
+/// **Timeout Behavior by State**:
+/// | Stream State           | Timeout Behavior       | Notes                        |
+/// |------------------------|------------------------|------------------------------|
+/// | Streaming (before Res) | Blocks indefinitely    | User controls via max_turns  |
+/// | ResultReceived         | 100ms timeout per call | Drain behavior               |
+/// | PendingEndOfStream     | Returns immediately    | Yield EndOfStream            |
+/// | Closed                 | Returns immediately    | No I/O needed                |
+///
+/// **Return Value Classification**:
+/// - Ok(Message(envelope)) -> call next() again
+/// - Ok(WarningEvent(warning)) -> call next() again
+/// - Ok(EndOfStream) -> stop iteration
+/// - Error(NextJsonDecodeError(_)) -> Non-terminal, call next() again
+/// - Error(NextUnexpectedMessageError(_)) -> Non-terminal, call next() again
+/// - Error(NextProcessError(_)) -> Terminal, stop iteration
+/// - Error(NextBufferOverflow) -> Terminal, stop iteration
+/// - Error(NextTooManyDecodeErrors(_)) -> Terminal, stop iteration
+///
+/// **Critical Contract**: Always use returned QueryStream - old copies have stale state.
+pub fn next(
+  stream: QueryStream,
+) -> #(Result(StreamItem, NextError), QueryStream) {
+  let QueryStream(internal) = stream
+
+  // Fast path: already closed
+  case internal.closed {
+    True -> #(Ok(EndOfStream), stream)
+    False -> next_impl(stream)
+  }
+}
+
+/// Internal implementation of next() after closed check.
+fn next_impl(
+  stream: QueryStream,
+) -> #(Result(StreamItem, NextError), QueryStream) {
+  let QueryStream(internal) = stream
+
+  // Check for PendingEndOfStream state - yield EndOfStream and close
+  case internal.state {
+    PendingEndOfStream -> {
+      let closed = mark_closed(stream)
+      #(Ok(EndOfStream), closed)
+    }
+    _ -> next_receive(stream)
+  }
+}
+
+/// Receive data from port and process it.
+fn next_receive(
+  stream: QueryStream,
+) -> #(Result(StreamItem, NextError), QueryStream) {
+  let QueryStream(internal) = stream
+
+  // First, check if we have a complete line in the buffer
+  let #(line_result, new_buffer) = read_line(internal.buffer)
+  case line_result {
+    CompleteLine(line) -> {
+      // Update stream with new buffer and process the line
+      let updated = set_buffer(stream, new_buffer)
+      process_line(updated, line)
+    }
+    BufferOverflow -> {
+      // Terminal error
+      let closed = mark_closed(stream)
+      #(Error(NextBufferOverflow), closed)
+    }
+    ReadError(msg) -> {
+      // Treat as decode error
+      let #(updated, exceeded) = increment_decode_errors(stream, msg)
+      case exceeded {
+        True -> {
+          let closed = mark_closed(updated)
+          #(
+            Error(NextTooManyDecodeErrors(
+              constants.max_consecutive_decode_errors,
+              msg,
+            )),
+            closed,
+          )
+        }
+        False -> #(Error(NextJsonDecodeError("", msg)), updated)
+      }
+    }
+    NeedMoreData -> {
+      // Need to receive more data from port
+      let updated = set_buffer(stream, new_buffer)
+      receive_from_port(updated)
+    }
+    // These shouldn't occur from read_line, but handle gracefully
+    PortClosed | ExitReceived(_) -> {
+      let closed = mark_closed(stream)
+      #(Ok(EndOfStream), closed)
+    }
+  }
+}
+
+/// Receive data from the port based on current state's timeout behavior.
+fn receive_from_port(
+  stream: QueryStream,
+) -> #(Result(StreamItem, NextError), QueryStream) {
+  let QueryStream(internal) = stream
+
+  // Determine timeout based on state
+  let port_result = case internal.state {
+    // Streaming: block indefinitely
+    Streaming -> port_ffi.receive_blocking(internal.port)
+    // ResultReceived: use drain timeout (100ms)
+    ResultReceived ->
+      port_ffi.receive_timeout(
+        internal.port,
+        constants.post_result_drain_timeout_ms,
+      )
+    // PendingEndOfStream/Closed: shouldn't get here, but use minimal timeout
+    PendingEndOfStream | Closed -> port_ffi.receive_timeout(internal.port, 0)
+  }
+
+  case port_result {
+    Ok(Data(bytes)) -> {
+      // Append to buffer and try to read a line
+      case append_to_buffer(internal.buffer, bytes) {
+        Ok(new_buffer) -> {
+          let updated = set_buffer(stream, new_buffer)
+          next_receive(updated)
+        }
+        Error(BufferOverflow) -> {
+          let closed = mark_closed(stream)
+          #(Error(NextBufferOverflow), closed)
+        }
+        Error(_) -> {
+          // Other ReadLineResult errors shouldn't come from append_to_buffer
+          let closed = mark_closed(stream)
+          #(Error(NextBufferOverflow), closed)
+        }
+      }
+    }
+    Ok(ExitStatus(code)) -> {
+      // Handle exit status via state machine
+      handle_exit_and_yield(stream, code)
+    }
+    Ok(Timeout) -> {
+      // Timeout during drain - treat as end of stream
+      case internal.state {
+        ResultReceived -> {
+          // After result, timeout means nothing more to drain
+          let updated = mark_pending_end_of_stream(stream)
+          let closed = mark_closed(updated)
+          #(Ok(EndOfStream), closed)
+        }
+        _ -> {
+          // In other states, shouldn't timeout (blocking)
+          // But if it happens, treat as end
+          let closed = mark_closed(stream)
+          #(Ok(EndOfStream), closed)
+        }
+      }
+    }
+    Ok(port_ffi.Eof) -> {
+      // EOF without exit status - unusual but handle gracefully
+      let closed = mark_closed(stream)
+      #(Ok(EndOfStream), closed)
+    }
+    Error(msg) -> {
+      // Port error - treat as process error with unknown code
+      let diagnostic = diagnose_exit_code(-1, True)
+      let closed = mark_closed(stream)
+      #(
+        Error(NextProcessError(
+          -1,
+          error.ErrorDiagnostic(
+            ..diagnostic,
+            exit_code_hint: "Port error: " <> msg,
+          ),
+        )),
+        closed,
+      )
+    }
+  }
+}
+
+/// Handle exit status and yield appropriate result.
+fn handle_exit_and_yield(
+  stream: QueryStream,
+  exit_code: Int,
+) -> #(Result(StreamItem, NextError), QueryStream) {
+  let QueryStream(internal) = stream
+  let #(transition, updated_stream) = handle_exit_status(stream, exit_code)
+
+  case transition {
+    YieldEndOfStream -> {
+      let closed = mark_closed(updated_stream)
+      #(Ok(EndOfStream), closed)
+    }
+    YieldWarningThenEnd(warning) -> {
+      // Yield warning, stream stays in PendingEndOfStream
+      // Next call will yield EndOfStream
+      #(Ok(WarningEvent(warning)), updated_stream)
+    }
+    YieldProcessError(code) -> {
+      // Determine if stdout was empty (buffer is empty and no messages seen)
+      let stdout_was_empty = bit_array.byte_size(internal.buffer) == 0
+      let diagnostic = diagnose_exit_code(code, stdout_was_empty)
+      let closed = mark_closed(updated_stream)
+      #(Error(NextProcessError(code, diagnostic)), closed)
+    }
+  }
+}
+
+/// Process a complete line (parse JSON and update state).
+fn process_line(
+  stream: QueryStream,
+  line: String,
+) -> #(Result(StreamItem, NextError), QueryStream) {
+  let QueryStream(internal) = stream
+
+  // Try to decode the line as a message
+  let raw_bytes = bit_array.from_string(line)
+  case decoder.decode_message_envelope(line, raw_bytes) {
+    Ok(envelope) -> {
+      // Reset decode error counter on success
+      let updated = reset_decode_errors(stream)
+
+      // Check if this is a Result message -> transition state
+      let final_stream = case envelope.message {
+        Result(_) -> mark_result_received(updated)
+        _ -> updated
+      }
+
+      #(Ok(Message(envelope)), final_stream)
+    }
+    Error(decoder.JsonSyntaxError(msg)) -> {
+      // Invalid JSON - increment error counter
+      let #(updated, exceeded) = increment_decode_errors(stream, msg)
+      case exceeded {
+        True -> {
+          let closed = mark_closed(updated)
+          #(
+            Error(NextTooManyDecodeErrors(
+              internal.consecutive_decode_errors + 1,
+              msg,
+            )),
+            closed,
+          )
+        }
+        False -> #(Error(NextJsonDecodeError(line, msg)), updated)
+      }
+    }
+    Error(decoder.JsonDecodeError(msg)) -> {
+      // Valid JSON but missing/invalid fields
+      let #(updated, exceeded) = increment_decode_errors(stream, msg)
+      case exceeded {
+        True -> {
+          let closed = mark_closed(updated)
+          #(
+            Error(NextTooManyDecodeErrors(
+              internal.consecutive_decode_errors + 1,
+              msg,
+            )),
+            closed,
+          )
+        }
+        False -> #(Error(NextJsonDecodeError(line, msg)), updated)
+      }
+    }
+    Error(decoder.UnexpectedMessageType(_type_str)) -> {
+      // Valid JSON but unknown message type - non-terminal
+      // Don't increment decode error counter for unknown types (forward compat)
+      let updated = reset_decode_errors(stream)
+      #(Error(NextUnexpectedMessageError(line)), updated)
+    }
+  }
+}
