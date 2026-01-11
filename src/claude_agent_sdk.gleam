@@ -226,7 +226,7 @@ pub const close = stream.close
 
 /// Check if the stream is closed.
 /// **STABLE API**: Breaking changes require major version bump.
-pub const stream_is_closed = stream.is_closed
+pub const is_closed = stream.is_closed
 
 pub type CollectResult(a) =
   internal_stream.CollectResult(a)
