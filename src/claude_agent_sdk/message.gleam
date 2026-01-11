@@ -163,6 +163,8 @@ pub type ToolResultBlock {
     tool_use_id: String,
     /// Result content
     content: String,
+    /// Whether the tool execution failed
+    is_error: Option(Bool),
   )
 }
 
