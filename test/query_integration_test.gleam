@@ -19,6 +19,15 @@ import support/integration_helpers.{
 /// Timeout for preflight checks (5 seconds)
 const preflight_timeout_ms = 5000
 
+// Skip message constants - used by both preflight check and documentation tests
+const skip_msg_cli_missing = "[SKIP:ENV] claude not in PATH - install CLI first"
+
+const skip_msg_version_prefix = "[SKIP:ENV] CLI version "
+
+const skip_msg_version_suffix = " < 1.0.0 - upgrade required"
+
+const skip_msg_auth_unavailable = "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login"
+
 /// Preflight test that validates CLI is available and properly configured.
 /// This test runs before other integration tests to provide actionable error messages.
 pub fn integration__preflight_check_test() {
@@ -27,7 +36,7 @@ pub fn integration__preflight_check_test() {
       // 1. CLI exists and is in PATH
       case find_executable("claude") {
         Error(_) -> {
-          io.println("[SKIP:ENV] claude not in PATH - install CLI first")
+          io.println(skip_msg_cli_missing)
           should.be_true(True)
         }
         Ok(cli_path) -> {
@@ -48,9 +57,7 @@ pub fn integration__preflight_check_test() {
               case maj < 1 {
                 True -> {
                   io.println(
-                    "[SKIP:ENV] CLI version "
-                    <> raw
-                    <> " < 1.0.0 - upgrade required",
+                    skip_msg_version_prefix <> raw <> skip_msg_version_suffix,
                   )
                   should.be_true(True)
                 }
@@ -79,9 +86,7 @@ fn check_help_and_finish(cli_path: String) {
       // 4. Auth check
       case is_authenticated() {
         False -> {
-          io.println(
-            "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login",
-          )
+          io.println(skip_msg_auth_unavailable)
           should.be_true(True)
         }
         True -> {
@@ -103,41 +108,31 @@ fn check_help_and_finish(cli_path: String) {
 // The preflight test above exercises the actual skip logic; these tests
 // serve as documentation of the expected behavior.
 
-/// Documents the skip message for CLI not in PATH scenario.
-/// Actual behavior: [SKIP:ENV] claude not in PATH - install CLI first
+/// Validates the skip message constant for CLI not in PATH scenario.
+/// Uses the same constant as integration__preflight_check_test to prevent drift.
 pub fn integration__skip_message_cli_missing_test() {
-  // This test documents the expected skip message when claude is not in PATH.
-  // The actual skip logic is in integration__preflight_check_test.
-  let expected_message = "[SKIP:ENV] claude not in PATH - install CLI first"
+  // Validates that the constant has the expected format
   should.equal(
-    expected_message,
+    skip_msg_cli_missing,
     "[SKIP:ENV] claude not in PATH - install CLI first",
   )
 }
 
-/// Documents the skip message for CLI version too old scenario.
-/// Actual behavior: [SKIP:ENV] CLI version <version> < 1.0.0 - upgrade required
+/// Validates the skip message constants for CLI version too old scenario.
+/// Uses the same constants as integration__preflight_check_test to prevent drift.
 pub fn integration__skip_message_version_too_old_test() {
-  // This test documents the expected skip message when CLI version is < 1.0.0.
-  // The actual skip logic is in integration__preflight_check_test.
+  // Validates that the prefix/suffix constants have the expected format
   // The message includes the actual version, e.g. "0.9.5"
-  let expected_pattern = "[SKIP:ENV] CLI version "
-  let expected_suffix = " < 1.0.0 - upgrade required"
-  should.be_true(
-    expected_pattern == "[SKIP:ENV] CLI version "
-    && expected_suffix == " < 1.0.0 - upgrade required",
-  )
+  should.equal(skip_msg_version_prefix, "[SKIP:ENV] CLI version ")
+  should.equal(skip_msg_version_suffix, " < 1.0.0 - upgrade required")
 }
 
-/// Documents the skip message for auth unavailable scenario.
-/// Actual behavior: [SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login
+/// Validates the skip message constant for auth unavailable scenario.
+/// Uses the same constant as integration__preflight_check_test to prevent drift.
 pub fn integration__skip_message_auth_unavailable_test() {
-  // This test documents the expected skip message when auth is not available.
-  // The actual skip logic is in integration__preflight_check_test.
-  let expected_message =
-    "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login"
+  // Validates that the constant has the expected format
   should.equal(
-    expected_message,
+    skip_msg_auth_unavailable,
     "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login",
   )
 }
@@ -205,9 +200,7 @@ pub fn integration__real_cli_query_test() {
           }
         }
         False -> {
-          io.println(
-            "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or run claude login",
-          )
+          io.println(skip_msg_auth_unavailable)
           should.be_true(True)
         }
       }
