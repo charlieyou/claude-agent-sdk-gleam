@@ -18,8 +18,19 @@ import claude_agent_sdk/internal/stream.{
 }
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 import support/ets_helpers
+
+// ============================================================================
+// Shell escaping helper
+// ============================================================================
+
+/// Escapes a string for safe use inside single quotes in shell commands.
+/// Replaces single quotes with the sequence '\'' (end quote, escaped quote, start quote).
+fn shell_escape(s: String) -> String {
+  string.replace(s, "'", "'\\''")
+}
 
 // ============================================================================
 // Valid JSON fixtures
@@ -42,7 +53,11 @@ pub fn with_stream_closes_port_on_normal_return_test() {
       "/bin/sh",
       [
         "-c",
-        "echo '" <> valid_system_json <> "'; echo '" <> valid_result_json <> "'",
+        "echo '"
+          <> shell_escape(valid_system_json)
+          <> "'; echo '"
+          <> shell_escape(valid_result_json)
+          <> "'",
       ],
       "/tmp",
     )
@@ -78,11 +93,11 @@ pub fn with_stream_closes_port_on_early_return_test() {
       [
         "-c",
         "echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'; echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'; echo '"
-          <> valid_result_json
+          <> shell_escape(valid_result_json)
           <> "'",
       ],
       "/tmp",
@@ -136,7 +151,11 @@ pub fn with_stream_closes_port_on_panic_test() {
       "/bin/sh",
       [
         "-c",
-        "echo '" <> valid_system_json <> "'; echo '" <> valid_result_json <> "'",
+        "echo '"
+          <> shell_escape(valid_system_json)
+          <> "'; echo '"
+          <> shell_escape(valid_result_json)
+          <> "'",
       ],
       "/tmp",
     )
@@ -202,9 +221,9 @@ pub fn collect_items_handles_multiple_messages_test() {
       [
         "-c",
         "echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'; echo '"
-          <> valid_result_json
+          <> shell_escape(valid_result_json)
           <> "'",
       ],
       "/tmp",
@@ -240,7 +259,7 @@ pub fn collect_messages_extracts_only_message_envelopes_test() {
   let port =
     port_ffi.ffi_open_port(
       "/bin/sh",
-      ["-c", "echo '" <> valid_assistant_json <> "'"],
+      ["-c", "echo '" <> shell_escape(valid_assistant_json) <> "'"],
       "/tmp",
     )
   let stream = new(port)
@@ -324,9 +343,9 @@ pub fn fold_stream_accumulates_correctly_test() {
       [
         "-c",
         "echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'; echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'",
       ],
       "/tmp",
@@ -354,11 +373,11 @@ pub fn fold_stream_stops_mid_stream_test() {
       [
         "-c",
         "echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'; echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'; echo '"
-          <> valid_assistant_json
+          <> shell_escape(valid_assistant_json)
           <> "'",
       ],
       "/tmp",
@@ -416,7 +435,11 @@ pub fn resource_safety_with_stream_after_iterate_then_early_return_test() {
       "/bin/sh",
       [
         "-c",
-        "echo '" <> valid_system_json <> "'; echo '" <> valid_result_json <> "'",
+        "echo '"
+          <> shell_escape(valid_system_json)
+          <> "'; echo '"
+          <> shell_escape(valid_result_json)
+          <> "'",
       ],
       "/tmp",
     )
