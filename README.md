@@ -214,13 +214,15 @@ fn consume_with_cancellation(
 
 ```gleam
 import gleam/erlang/process
+import gleam/io
 import gleam/otp/task
+import claude_agent_sdk.{default_options}
 
 pub fn main() {
   let result_subject = process.new_subject()
   let cancel_subject = process.new_subject()
 
-  // Start the cancellable query
+  // Start the cancellable query (using query_with_cancellation from above)
   let _task = query_with_cancellation(
     "What is 2 + 2?",
     default_options(),
@@ -233,9 +235,9 @@ pub fn main() {
 
   // Receive results with a timeout
   case process.receive(result_subject, 30_000) {
-    Ok(Ok(item)) -> handle_item(item)
-    Ok(Error(e)) -> handle_error(e)
-    Error(Nil) -> handle_timeout()
+    Ok(Ok(item)) -> io.println("Received: " <> item.text)
+    Ok(Error(e)) -> io.println("Error: " <> e.message)
+    Error(Nil) -> io.println("Timeout waiting for response")
   }
 }
 ```
