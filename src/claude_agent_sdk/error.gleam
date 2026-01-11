@@ -5,6 +5,7 @@
 /// - QueryError: Startup errors that prevent query from starting
 /// - StreamError: Runtime errors during stream iteration
 /// - Warning: Non-fatal warnings that can be yielded from the stream
+import gleam/int
 import gleam/option.{type Option, None}
 
 // ============================================================================
@@ -194,27 +195,15 @@ pub fn stream_error_to_string(error: StreamError) -> String {
   case error {
     ProcessError(exit_code, diagnostic) ->
       "Process exited with code "
-      <> int_to_string(exit_code)
+      <> int.to_string(exit_code)
       <> ": "
       <> diagnostic.exit_code_hint
     BufferOverflow -> "Buffer overflow: single line exceeded 10MB limit"
     TooManyDecodeErrors(count, last_error) ->
-      "Too many decode errors (" <> int_to_string(count) <> "): " <> last_error
+      "Too many decode errors (" <> int.to_string(count) <> "): " <> last_error
     JsonDecodeError(line, err) ->
       "JSON decode error: " <> err <> " in line: " <> line
     UnexpectedMessageError(raw_json) ->
       "Unexpected message type in: " <> raw_json
-  }
-}
-
-/// Simple int to string helper (avoiding gleam/int import for minimal dependencies)
-fn int_to_string(n: Int) -> String {
-  case n {
-    0 -> "0"
-    1 -> "1"
-    2 -> "2"
-    126 -> "126"
-    127 -> "127"
-    _ -> "<int>"
   }
 }
