@@ -1,7 +1,7 @@
 /// Tests for stream module - QueryStream and StreamState.
 import claude_agent_sdk/error.{
-  CleanExitNoResult, IncompleteLastLine, NonZeroExitAfterResult,
-  UnexpectedMessageAfterResult,
+  type Warning, CleanExitNoResult, IncompleteLastLine, NonZeroExitAfterResult,
+  UnexpectedMessageAfterResult, UnparseableCliVersion, Warning,
 }
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
@@ -13,7 +13,7 @@ import claude_agent_sdk/internal/stream.{
   close, collect_items, collect_messages, fold_stream, get_buffer,
   get_consecutive_decode_errors, get_result_seen, get_state, handle_exit_status,
   increment_decode_errors, is_closed, mark_closed, mark_pending_end_of_stream,
-  mark_result_received, new, next, normalize_crlf, read_line,
+  mark_result_received, new, new_with_warnings, next, normalize_crlf, read_line,
   reset_decode_errors, set_buffer, to_yielder, with_stream,
 }
 import gleam/bit_array
@@ -1625,4 +1625,94 @@ pub fn malformed_json_terminal_subsequent_next_returns_end_of_stream_test() {
     _ -> should.fail()
   }
   s6 |> is_closed |> should.be_true
+}
+
+// ============================================================================
+// Pending Warnings Tests
+// ============================================================================
+
+pub fn new_with_warnings_yields_warnings_first_test() {
+  // Create a stream with a pending warning (e.g., UnparseableCliVersion)
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let warning: Warning =
+    Warning(
+      code: UnparseableCliVersion,
+      message: "CLI version string could not be parsed; proceeding in permissive mode",
+      context: Some("weird-version-string"),
+    )
+  let stream = new_with_warnings(port, [warning])
+
+  // First call to next() should yield the pending warning
+  let #(result1, s1) = next(stream)
+  case result1 {
+    Ok(WarningEvent(w)) -> {
+      w.code |> should.equal(UnparseableCliVersion)
+      w.message
+      |> should.equal(
+        "CLI version string could not be parsed; proceeding in permissive mode",
+      )
+      w.context |> should.equal(Some("weird-version-string"))
+    }
+    _ -> should.fail()
+  }
+
+  // Stream should still be in Streaming state (not closed)
+  s1 |> is_closed |> should.be_false
+  s1 |> get_state |> should.equal(Streaming)
+
+  // Cleanup
+  let _ = close(s1)
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn new_with_warnings_empty_list_works_like_new_test() {
+  // Create a stream with no pending warnings
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let stream = new_with_warnings(port, [])
+
+  // Stream should be in Streaming state
+  stream |> get_state |> should.equal(Streaming)
+  stream |> is_closed |> should.be_false
+
+  // Cleanup
+  port_ffi.ffi_close_port(port)
+}
+
+pub fn new_with_warnings_multiple_warnings_test() {
+  // Create a stream with multiple pending warnings
+  let port = port_ffi.ffi_open_port("/bin/echo", ["test"], "/tmp")
+  let warning1: Warning =
+    Warning(
+      code: UnparseableCliVersion,
+      message: "First warning",
+      context: None,
+    )
+  let warning2: Warning =
+    Warning(
+      code: UnparseableCliVersion,
+      message: "Second warning",
+      context: None,
+    )
+  let stream = new_with_warnings(port, [warning1, warning2])
+
+  // First call to next() should yield first warning
+  let #(result1, s1) = next(stream)
+  case result1 {
+    Ok(WarningEvent(w)) -> w.message |> should.equal("First warning")
+    _ -> should.fail()
+  }
+
+  // Second call to next() should yield second warning
+  let #(result2, s2) = next(s1)
+  case result2 {
+    Ok(WarningEvent(w)) -> w.message |> should.equal("Second warning")
+    _ -> should.fail()
+  }
+
+  // Stream should still be streaming after warnings are consumed
+  s2 |> is_closed |> should.be_false
+
+  // Cleanup
+  let _ = close(s2)
+  port_ffi.ffi_close_port(port)
 }

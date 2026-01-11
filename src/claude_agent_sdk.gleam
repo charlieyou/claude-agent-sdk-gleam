@@ -366,9 +366,16 @@ fn query_with_cli_path(
         Error(cli.ParseFailed(raw)) ->
           // Handle parse failure based on permissive mode
           case options.permissive_version_check {
-            True ->
+            True -> {
               // Permissive: allow unknown versions with warning (proceed)
-              spawn_query(prompt, options, cli_path)
+              let warning =
+                error.Warning(
+                  code: error.UnparseableCliVersion,
+                  message: "CLI version string could not be parsed; proceeding in permissive mode",
+                  context: Some(raw),
+                )
+              spawn_query_with_warnings(prompt, options, cli_path, [warning])
+            }
             False ->
               Error(error.UnknownVersionError(
                 raw,
@@ -393,9 +400,16 @@ fn check_version_and_spawn(
     cli.UnknownVersion(raw) ->
       // Unknown version format
       case options.permissive_version_check {
-        True ->
+        True -> {
           // Permissive: allow with warning (proceed)
-          spawn_query(prompt, options, cli_path)
+          let warning =
+            error.Warning(
+              code: error.UnparseableCliVersion,
+              message: "CLI version string could not be parsed; proceeding in permissive mode",
+              context: Some(raw),
+            )
+          spawn_query_with_warnings(prompt, options, cli_path, [warning])
+        }
         False ->
           Error(error.UnknownVersionError(
             raw,
@@ -432,6 +446,16 @@ fn spawn_query(
   options: QueryOptions,
   cli_path: String,
 ) -> Result(QueryStream, QueryError) {
+  spawn_query_with_warnings(prompt, options, cli_path, [])
+}
+
+/// Internal: Build args, spawn port, return QueryStream with initial warnings.
+fn spawn_query_with_warnings(
+  prompt: String,
+  options: QueryOptions,
+  cli_path: String,
+  warnings: List(error.Warning),
+) -> Result(QueryStream, QueryError) {
   // Build CLI arguments
   let args = cli.build_cli_args(options, prompt)
 
@@ -452,7 +476,11 @@ fn spawn_query(
           case runner.spawn(test_runner, cli_path, args, cwd) {
             Error(reason) -> Error(error.SpawnError(reason))
             Ok(handle) ->
-              Ok(internal_stream.new_from_runner(test_runner, handle))
+              Ok(internal_stream.new_from_runner_with_warnings(
+                test_runner,
+                handle,
+                warnings,
+              ))
           }
         }
         None ->
@@ -464,7 +492,7 @@ fn spawn_query(
     False ->
       case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
         Error(reason) -> Error(error.SpawnError(reason))
-        Ok(port) -> Ok(internal_stream.new(port))
+        Ok(port) -> Ok(internal_stream.new_with_warnings(port, warnings))
       }
   }
 }

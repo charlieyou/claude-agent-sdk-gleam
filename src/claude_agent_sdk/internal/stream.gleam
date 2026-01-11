@@ -13,7 +13,7 @@ import claude_agent_sdk/error.{
   type ErrorDiagnostic, type StreamError, type Warning, CleanExitNoResult,
   IncompleteLastLine, NonZeroExitAfterResult, UnexpectedMessageAfterResult,
   Warning, diagnose_exit_code,
-}
+} as error_module
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/internal/port_ffi.{type Port, Data, ExitStatus, Timeout}
@@ -105,6 +105,9 @@ type QueryStreamInternal {
     /// Whether a Result message has been received.
     /// CRITICAL: If True, no exit_status can produce ProcessError.
     result_seen: Bool,
+    /// Pending warnings to emit before normal stream processing.
+    /// Used for initial warnings (e.g., UnparseableCliVersion in permissive mode).
+    pending_warnings: List(Warning),
   )
 }
 
@@ -130,6 +133,12 @@ pub opaque type QueryStream {
 /// Create a new QueryStream from a port.
 /// Internal only - called by query() after successful spawn.
 pub fn new(port: Port) -> QueryStream {
+  new_with_warnings(port, [])
+}
+
+/// Create a new QueryStream from a port with initial warnings.
+/// Used when permissive mode allows unknown CLI versions.
+pub fn new_with_warnings(port: Port, warnings: List(Warning)) -> QueryStream {
   QueryStream(QueryStreamInternal(
     source: PortSource(port),
     buffer: <<>>,
@@ -138,12 +147,23 @@ pub fn new(port: Port) -> QueryStream {
     drain_count: 0,
     closed: False,
     result_seen: False,
+    pending_warnings: warnings,
   ))
 }
 
 /// Create a new QueryStream from a Runner and Handle.
 /// Used for testing with test_runner() to avoid spawning real subprocesses.
 pub fn new_from_runner(runner: Runner, handle: Handle) -> QueryStream {
+  new_from_runner_with_warnings(runner, handle, [])
+}
+
+/// Create a new QueryStream from a Runner and Handle with initial warnings.
+/// Used for testing when permissive mode allows unknown CLI versions.
+pub fn new_from_runner_with_warnings(
+  runner: Runner,
+  handle: Handle,
+  warnings: List(Warning),
+) -> QueryStream {
   QueryStream(QueryStreamInternal(
     source: RunnerSource(runner:, handle:),
     buffer: <<>>,
@@ -152,6 +172,7 @@ pub fn new_from_runner(runner: Runner, handle: Handle) -> QueryStream {
     drain_count: 0,
     closed: False,
     result_seen: False,
+    pending_warnings: warnings,
   ))
 }
 
@@ -517,13 +538,22 @@ fn next_impl(
 ) -> #(Result(StreamItem, NextError), QueryStream) {
   let QueryStream(internal) = stream
 
-  // Check for PendingEndOfStream state - yield EndOfStream and close
-  case internal.state {
-    PendingEndOfStream -> {
-      let closed = mark_closed(stream)
-      #(Ok(EndOfStream), closed)
+  // First, check for pending warnings - yield them before normal processing
+  case internal.pending_warnings {
+    [warning, ..rest] -> {
+      let updated =
+        QueryStream(QueryStreamInternal(..internal, pending_warnings: rest))
+      #(Ok(WarningEvent(warning)), updated)
     }
-    _ -> next_receive(stream)
+    [] ->
+      // No pending warnings, check for PendingEndOfStream state
+      case internal.state {
+        PendingEndOfStream -> {
+          let closed = mark_closed(stream)
+          #(Ok(EndOfStream), closed)
+        }
+        _ -> next_receive(stream)
+      }
   }
 }
 
@@ -668,7 +698,7 @@ fn receive_from_source(
       #(
         Error(NextProcessError(
           -1,
-          error.ErrorDiagnostic(
+          error_module.ErrorDiagnostic(
             ..diagnostic,
             exit_code_hint: "Source error: " <> msg,
           ),
@@ -739,7 +769,7 @@ fn handle_exit_and_yield(
             Ok(s) -> Some(s)
             Error(_) -> Some("<invalid utf-8>")
           }
-          error.ErrorDiagnostic(
+          error_module.ErrorDiagnostic(
             ..base_diagnostic,
             last_non_json_line: last_line,
           )
@@ -881,12 +911,13 @@ pub type FoldAction(a) {
 /// Convert NextError to StreamError for collect/fold APIs.
 fn next_error_to_stream_error(err: NextError) -> StreamError {
   case err {
-    NextProcessError(code, diagnostic) -> error.ProcessError(code, diagnostic)
-    NextBufferOverflow -> error.BufferOverflow
+    NextProcessError(code, diagnostic) ->
+      error_module.ProcessError(code, diagnostic)
+    NextBufferOverflow -> error_module.BufferOverflow
     NextTooManyDecodeErrors(count, last) ->
-      error.TooManyDecodeErrors(count, last)
-    NextJsonDecodeError(line, msg) -> error.JsonDecodeError(line, msg)
-    NextUnexpectedMessageError(raw) -> error.UnexpectedMessageError(raw)
+      error_module.TooManyDecodeErrors(count, last)
+    NextJsonDecodeError(line, msg) -> error_module.JsonDecodeError(line, msg)
+    NextUnexpectedMessageError(raw) -> error_module.UnexpectedMessageError(raw)
   }
 }
 
@@ -906,9 +937,9 @@ fn next_error_to_stream_error(err: NextError) -> StreamError {
 ///
 /// **STABLE API**: Breaking changes require major version bump.
 pub fn with_stream(
-  result: Result(QueryStream, error.QueryError),
+  result: Result(QueryStream, error_module.QueryError),
   f: fn(QueryStream) -> a,
-) -> Result(a, error.QueryError) {
+) -> Result(a, error_module.QueryError) {
   case result {
     Error(e) -> Error(e)
     Ok(stream) -> {
@@ -969,7 +1000,7 @@ fn collect_items_loop(
       )
     Error(err) -> {
       let stream_error = next_error_to_stream_error(err)
-      case error.is_terminal(stream_error) {
+      case error_module.is_terminal(stream_error) {
         True ->
           CollectResult(
             items: list.reverse(items),
@@ -1031,7 +1062,7 @@ fn collect_messages_loop(
       )
     Error(err) -> {
       let stream_error = next_error_to_stream_error(err)
-      case error.is_terminal(stream_error) {
+      case error_module.is_terminal(stream_error) {
         True ->
           CollectResult(
             items: list.reverse(messages),
@@ -1090,7 +1121,7 @@ fn fold_stream_loop(
     }
     Error(err) -> {
       let stream_error = next_error_to_stream_error(err)
-      case error.is_terminal(stream_error) {
+      case error_module.is_terminal(stream_error) {
         True -> {
           // Stream already closed by next() on terminal error
           #(acc, Some(stream_error))
