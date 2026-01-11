@@ -151,6 +151,7 @@ pub fn read_line_single_line_test() {
 }
 
 pub fn read_line_with_crlf_test() {
+  // read_line normalizes CRLF -> LF internally
   let #(result, remaining) = read_line(<<"hello\r\n":utf8>>)
   result |> should.equal(CompleteLine("hello"))
   remaining |> should.equal(<<>>)
@@ -219,10 +220,23 @@ pub fn chunk_reassembly_crlf_split_across_chunks_test() {
   let #(result1, remaining1) = read_line(chunk1)
   result1 |> should.equal(NeedMoreData)
 
-  // Append second chunk
+  // Append second chunk - read_line normalizes the combined buffer
   let buffer2 = bit_array.append(remaining1, chunk2)
   let #(result2, remaining2) = read_line(buffer2)
   result2 |> should.equal(CompleteLine("hello"))
+  remaining2 |> should.equal(<<>>)
+}
+
+pub fn chunk_reassembly_mixed_crlf_test() {
+  // Test CRLF in middle of chunk plus partial line
+  let #(result1, remaining1) = read_line(<<"hello\r\nwo":utf8>>)
+  result1 |> should.equal(CompleteLine("hello"))
+  remaining1 |> should.equal(<<"wo":utf8>>)
+
+  // Complete the second line
+  let buffer2 = bit_array.append(remaining1, <<"rld\n":utf8>>)
+  let #(result2, remaining2) = read_line(buffer2)
+  result2 |> should.equal(CompleteLine("world"))
   remaining2 |> should.equal(<<>>)
 }
 

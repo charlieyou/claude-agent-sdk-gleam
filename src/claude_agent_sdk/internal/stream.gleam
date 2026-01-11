@@ -181,67 +181,51 @@ fn normalize_crlf_loop(input: BitArray, acc: BitArray) -> BitArray {
 
 /// Append data to the buffer, checking for overflow.
 /// Returns updated buffer or BufferOverflow error.
+/// Note: CRLF normalization is deferred to read_line() to handle sequences
+/// that span chunk boundaries correctly.
 pub fn append_to_buffer(
   buffer: BitArray,
   data: BitArray,
 ) -> Result(BitArray, ReadLineResult) {
-  let new_buffer = bit_array.append(buffer, data)
-  let size = bit_array.byte_size(new_buffer)
-  case size > constants.max_line_size_bytes {
+  // Check sizes BEFORE allocation to fail fast
+  let buffer_size = bit_array.byte_size(buffer)
+  let data_size = bit_array.byte_size(data)
+  case buffer_size + data_size > constants.max_line_size_bytes {
     True -> Error(BufferOverflow)
-    False -> Ok(new_buffer)
+    False -> Ok(bit_array.append(buffer, data))
   }
 }
 
 /// Try to extract a complete line from the buffer.
 /// Returns the line (without newline) and remaining buffer, or NeedMoreData.
+/// Normalizes CRLF to LF before scanning to handle Windows line endings.
+/// Uses O(n) pattern matching instead of O(n²) slicing.
 pub fn read_line(buffer: BitArray) -> #(ReadLineResult, BitArray) {
-  // First normalize CRLF
+  // Normalize CRLF first to handle Windows line endings
   let normalized = normalize_crlf(buffer)
-  read_line_from_normalized(normalized, 0)
+  // Use O(n) scanning via pattern matching
+  find_newline_pattern(normalized, <<>>)
 }
 
-fn read_line_from_normalized(
-  buffer: BitArray,
-  pos: Int,
+fn find_newline_pattern(
+  remaining: BitArray,
+  acc: BitArray,
 ) -> #(ReadLineResult, BitArray) {
-  let size = bit_array.byte_size(buffer)
-  case pos >= size {
-    True -> #(NeedMoreData, buffer)
-    False -> {
-      // Check byte at position
-      case bit_array.slice(buffer, pos, 1) {
-        Ok(<<0x0A>>) -> {
-          // Found newline at pos
-          case bit_array.slice(buffer, 0, pos) {
-            Ok(line_bytes) -> {
-              // Get remaining bytes after newline
-              let remaining_start = pos + 1
-              let remaining_len = size - remaining_start
-              let remaining = case
-                bit_array.slice(buffer, remaining_start, remaining_len)
-              {
-                Ok(r) -> r
-                Error(_) -> <<>>
-              }
-              // Decode line as UTF-8
-              case bit_array.to_string(line_bytes) {
-                Ok(line) -> #(CompleteLine(line), remaining)
-                Error(_) -> #(
-                  ReadError(
-                    "Invalid UTF-8 in line: " <> string.inspect(line_bytes),
-                  ),
-                  remaining,
-                )
-              }
-            }
-            Error(_) -> #(ReadError("Failed to slice line from buffer"), buffer)
-          }
-        }
-        Ok(_) -> read_line_from_normalized(buffer, pos + 1)
-        Error(_) -> #(ReadError("Failed to read byte at position"), buffer)
+  case remaining {
+    <<>> -> #(NeedMoreData, acc)
+    <<0x0A, rest:bits>> -> {
+      // Found newline - acc contains the line bytes
+      case bit_array.to_string(acc) {
+        Ok(line) -> #(CompleteLine(line), rest)
+        Error(_) -> #(
+          ReadError("Invalid UTF-8 in line: " <> string.inspect(acc)),
+          rest,
+        )
       }
     }
+    <<byte, rest:bits>> -> find_newline_pattern(rest, <<acc:bits, byte>>)
+    // Fallback for non-byte-aligned data (shouldn't happen)
+    _ -> #(NeedMoreData, bit_array.append(acc, remaining))
   }
 }
 
