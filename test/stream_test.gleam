@@ -11,11 +11,12 @@ import claude_agent_sdk/internal/stream.{
   fold_stream, get_buffer, get_consecutive_decode_errors, get_result_seen,
   get_state, handle_exit_status, increment_decode_errors, is_closed, mark_closed,
   mark_pending_end_of_stream, mark_result_received, new, next, normalize_crlf,
-  read_line, reset_decode_errors, set_buffer, with_stream,
+  read_line, reset_decode_errors, set_buffer, to_yielder, with_stream,
 }
 import gleam/bit_array
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/yielder
 import gleeunit/should
 
 // ============================================================================
@@ -974,4 +975,111 @@ pub fn fold_stream_records_terminal_error_test() {
     Some(error.ProcessError(1, _)) -> Nil
     _ -> should.fail()
   }
+}
+
+// ============================================================================
+// to_yielder Tests
+// ============================================================================
+
+pub fn to_yielder_basic_iteration_produces_all_items_test() {
+  // Create a stream that outputs a valid JSON message then exits 0
+  let json =
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}\n"
+  let port =
+    port_ffi.ffi_open_port("/bin/sh", ["-c", "printf '" <> json <> "'"], "/tmp")
+  let stream_instance = new(port)
+
+  // Convert to yielder and collect all items
+  let items =
+    stream_instance
+    |> to_yielder
+    |> yielder.to_list
+
+  // Should have at least one message (and potentially a warning for clean exit without result)
+  { list.length(items) >= 1 } |> should.be_true
+
+  // First item should be the message
+  case list.first(items) {
+    Ok(Ok(Message(_))) -> Nil
+    _ -> should.fail()
+  }
+}
+
+pub fn to_yielder_stops_at_end_of_stream_test() {
+  // Create a stream with a result message then clean exit
+  let result_json =
+    "{\"type\":\"result\",\"result\":{\"conversation_id\":\"conv_01\",\"input_tokens\":100,\"output_tokens\":50}}\n"
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "printf '" <> result_json <> "'"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // Convert to yielder and collect
+  let items =
+    stream_instance
+    |> to_yielder
+    |> yielder.to_list
+
+  // Should complete normally (yielder stops at EndOfStream)
+  { list.length(items) >= 1 } |> should.be_true
+}
+
+pub fn to_yielder_early_termination_leaves_port_unclosed_test() {
+  // This test demonstrates the leak risk: if we take() only some items,
+  // the port remains unclosed. NOTE: This is expected behavior being documented.
+
+  // Create a stream that would output multiple lines
+  let json1 =
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_01\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}"
+  let json2 =
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_02\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[],\"model\":\"claude-3-opus-20240229\",\"stop_reason\":null,\"stop_sequence\":null}}"
+  let port =
+    port_ffi.ffi_open_port(
+      "/bin/sh",
+      ["-c", "echo '" <> json1 <> "'; sleep 0.1; echo '" <> json2 <> "'"],
+      "/tmp",
+    )
+  let stream_instance = new(port)
+
+  // Take only first item via yielder (early termination)
+  let first_items =
+    stream_instance
+    |> to_yielder
+    |> yielder.take(1)
+    |> yielder.to_list
+
+  // We got one item
+  list.length(first_items) |> should.equal(1)
+  // NOTE: The port is now leaked because we didn't consume the full stream.
+  // This is the documented risk of to_yielder() - unlike collect_items() or
+  // with_stream(), there's no automatic cleanup on early termination.
+  // This test exists to document this behavior, not to assert the port state.
+}
+
+pub fn to_yielder_propagates_errors_test() {
+  // Stream that exits with non-zero code (terminal error)
+  let port = port_ffi.ffi_open_port("/bin/sh", ["-c", "exit 1"], "/tmp")
+  let stream_instance = new(port)
+
+  // Convert to yielder and collect
+  let items =
+    stream_instance
+    |> to_yielder
+    |> yielder.to_list
+
+  // Should have at least one item (the error)
+  { list.length(items) >= 1 } |> should.be_true
+
+  // Should contain an error
+  let has_error =
+    list.any(items, fn(item) {
+      case item {
+        Error(_) -> True
+        _ -> False
+      }
+    })
+  has_error |> should.be_true
 }
