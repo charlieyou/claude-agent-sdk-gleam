@@ -38,7 +38,7 @@ gleam add claude_agent_sdk
 
 ```gleam
 import claude_agent_sdk.{query, default_options, with_max_turns, next, close}
-import claude_agent_sdk/error.{EndOfStream, Message}
+import claude_agent_sdk/error
 import gleam/io
 
 pub fn main() {
@@ -47,19 +47,19 @@ pub fn main() {
 
   case query("Hello, Claude!", options) {
     Ok(stream) -> consume_stream(stream)
-    Error(e) -> io.println("Error: " <> claude_agent_sdk/error.error_to_string(e))
+    Error(e) -> io.println("Error: " <> error.error_to_string(e))
   }
 }
 
 fn consume_stream(stream) {
   case next(stream) {
-    #(Ok(EndOfStream), _) -> io.println("Done!")
-    #(Ok(Message(envelope)), new_stream) -> {
+    #(Ok(error.EndOfStream), _) -> io.println("Done!")
+    #(Ok(error.Message(envelope)), new_stream) -> {
       io.println("Message: " <> envelope.raw_json)
       consume_stream(new_stream)
     }
     #(Ok(_), new_stream) -> consume_stream(new_stream)
-    #(Error(e), _) -> io.println("Stream error")
+    #(Error(e), _) -> io.println("Stream error: " <> error.stream_error_to_string(e))
   }
 }
 ```
@@ -92,12 +92,12 @@ Further documentation can be found at <https://hexdocs.pm/claude_agent_sdk>.
 
 ```gleam
 default_options()
-  |> with_model("claude-sonnet-4-20250514")
+  |> with_model("sonnet")
   |> with_max_turns(5)
   |> with_max_budget(1.0)
   |> with_system_prompt("You are a helpful assistant.")
   |> with_allowed_tools(["Read", "Write"])
-  |> with_permission_mode(Acceptall)
+  |> with_permission_mode(AcceptEdits)
 ```
 
 ### Stream Helpers
@@ -250,7 +250,7 @@ import claude_agent_sdk.{
   type QueryOptions, type QueryStream, type StreamError, type StreamItem,
   close, next, query,
 }
-import claude_agent_sdk/error.{EndOfStream}
+import claude_agent_sdk/error
 
 /// Message type for cancellation signal
 pub type Cancel {
@@ -295,13 +295,13 @@ fn consume_with_cancellation(
     Ok(Cancel) -> {
       // Cancellation requested - close and exit
       close(stream)
-      process.send(result_subject, Ok(EndOfStream))
+      process.send(result_subject, Ok(error.EndOfStream))
     }
     Error(Nil) -> {
       // No cancellation - proceed with blocking read
       case next(stream) {
-        #(Ok(EndOfStream), _) -> {
-          process.send(result_subject, Ok(EndOfStream))
+        #(Ok(error.EndOfStream), _) -> {
+          process.send(result_subject, Ok(error.EndOfStream))
         }
         #(Ok(item), new_stream) -> {
           process.send(result_subject, Ok(item))
@@ -364,7 +364,7 @@ For simple consumption without cancellation:
 import claude_agent_sdk.{
   type QueryStream, type StreamItem, close, next, query, default_options,
 }
-import claude_agent_sdk/error.{EndOfStream, Message}
+import claude_agent_sdk/error
 import gleam/io
 import gleam/string
 
@@ -377,10 +377,10 @@ pub fn stream_query(prompt: String) {
 
 fn consume_stream(stream: QueryStream) -> Nil {
   case next(stream) {
-    #(Ok(EndOfStream), _) -> {
+    #(Ok(error.EndOfStream), _) -> {
       io.println("Stream complete")
     }
-    #(Ok(Message(envelope)), new_stream) -> {
+    #(Ok(error.Message(envelope)), new_stream) -> {
       io.println("Received message with raw_json: " <> envelope.raw_json)
       consume_stream(new_stream)
     }
@@ -402,27 +402,24 @@ Handle recoverable vs terminal errors:
 
 ```gleam
 import claude_agent_sdk.{type StreamError}
-import claude_agent_sdk/error.{
-  BufferOverflow, JsonDecodeError, ProcessError,
-  TooManyDecodeErrors, UnexpectedMessageError,
-}
+import claude_agent_sdk/error
 
-fn handle_stream_error(error: StreamError) -> ErrorAction {
-  case error {
+fn handle_stream_error(err: StreamError) -> ErrorAction {
+  case err {
     // JSON decode errors may be recoverable (skip malformed message)
-    JsonDecodeError(_, _) -> Continue
+    error.JsonDecodeError(_, _) -> Continue
 
     // Process errors are terminal - the CLI exited
-    ProcessError(_, _) -> Stop
+    error.ProcessError(_, _) -> Stop
 
     // Unexpected messages can be logged and skipped
-    UnexpectedMessageError(_) -> Continue
+    error.UnexpectedMessageError(_) -> Continue
 
     // Buffer overflow is terminal
-    BufferOverflow -> Stop
+    error.BufferOverflow -> Stop
 
     // Too many decode errors is terminal
-    TooManyDecodeErrors(_, _) -> Stop
+    error.TooManyDecodeErrors(_, _) -> Stop
   }
 }
 
@@ -442,7 +439,7 @@ any warnings as potential failures:
 
 ```gleam
 import claude_agent_sdk.{collect_messages}
-import claude_agent_sdk/error.{NonZeroExitAfterResult}
+import claude_agent_sdk/error
 import gleam/list
 
 pub fn strict_query(stream) {
@@ -460,7 +457,7 @@ pub fn strict_query(stream) {
 
 fn is_exit_warning(w) -> Bool {
   case w.code {
-    NonZeroExitAfterResult(_) -> True
+    error.NonZeroExitAfterResult(_) -> True
     _ -> False
   }
 }
@@ -476,7 +473,7 @@ For pipelines where warnings should fail the build:
 import claude_agent_sdk.{
   type StreamItem, with_stream, next, query, default_options,
 }
-import claude_agent_sdk/error.{EndOfStream, Message, WarningEvent}
+import claude_agent_sdk/error
 import claude_agent_sdk/message.{Result as ResultMsg}
 import gleam/string
 
@@ -493,8 +490,8 @@ pub fn ci_query(prompt: String) -> Result(String, String) {
 
 fn check_for_warnings(stream, acc) {
   case next(stream) {
-    #(Ok(EndOfStream), _) -> Ok(acc)
-    #(Ok(Message(envelope)), new_stream) -> {
+    #(Ok(error.EndOfStream), _) -> Ok(acc)
+    #(Ok(error.Message(envelope)), new_stream) -> {
       // Check if this is a result message with warnings
       case envelope.message {
         ResultMsg(result_msg) -> {
@@ -506,7 +503,7 @@ fn check_for_warnings(stream, acc) {
         _ -> check_for_warnings(new_stream, acc)
       }
     }
-    #(Ok(WarningEvent(warning)), _) -> {
+    #(Ok(error.WarningEvent(warning)), _) -> {
       // Fail immediately on any warning in CI mode
       Error("Warning: " <> warning.message)
     }
