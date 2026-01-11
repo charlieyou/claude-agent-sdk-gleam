@@ -5,6 +5,8 @@
 import gleam/dynamic.{type Dynamic}
 import gleam/option.{type Option}
 
+import claude_agent_sdk/content.{type ToolResultBlock}
+
 // =============================================================================
 // Message Discriminated Union
 // =============================================================================
@@ -153,18 +155,6 @@ pub type UserMessageContent {
     role: Option(String),
     /// Content blocks (tool_result, etc.)
     content: Option(List(ToolResultBlock)),
-  )
-}
-
-/// Tool result block in user messages.
-pub type ToolResultBlock {
-  ToolResultBlock(
-    /// Tool use ID this result is for
-    tool_use_id: String,
-    /// Result content
-    content: String,
-    /// Whether the tool execution failed
-    is_error: Option(Bool),
   )
 }
 
