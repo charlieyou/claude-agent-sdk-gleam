@@ -5,7 +5,7 @@
 import gleam/dynamic.{type Dynamic}
 import gleam/option.{type Option}
 
-import claude_agent_sdk/content.{type ToolResultBlock}
+import claude_agent_sdk/content.{type ContentBlock, type ToolResultBlock}
 
 // =============================================================================
 // Message Discriminated Union
@@ -112,20 +112,6 @@ pub type AssistantMessageContent {
     /// Token usage
     usage: Option(Usage),
   )
-}
-
-// =============================================================================
-// Content Blocks
-// =============================================================================
-
-/// Content block types in assistant messages.
-pub type ContentBlock {
-  /// Text block
-  TextBlock(text: String)
-  /// Tool use block
-  ToolUseBlock(id: String, name: String, input: Dynamic)
-  /// Unknown block type (forward compatibility)
-  UnknownBlock(raw: Dynamic)
 }
 
 // =============================================================================
