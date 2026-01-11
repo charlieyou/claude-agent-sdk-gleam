@@ -1,28 +1,16 @@
-# claude_agent_sdk
+# claude_agent_sdk_gleam
 
-[![Package Version](https://img.shields.io/hexpm/v/claude_agent_sdk)](https://hex.pm/packages/claude_agent_sdk)
-[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/claude_agent_sdk/)
+[![Package Version](https://img.shields.io/hexpm/v/claude_agent_sdk_gleam)](https://hex.pm/packages/claude_agent_sdk_gleam)
+[![Hex Docs](https://img.shields.io/badge/hex-docs-ffaff3)](https://hexdocs.pm/claude_agent_sdk_gleam/)
 
-A Gleam SDK for the Claude CLI, providing streaming query support with proper resource management.
+A Gleam SDK for Claude Code.
 
-## Scope & Non-Goals
-
-This SDK wraps the **Claude CLI** (`claude` command) as a subprocess. It is designed for:
-
-- Local development and scripting
-- CLI-based automation workflows
-- Applications where Claude CLI is already installed
-
-**Out of scope** for this project:
-
-- **Direct API access**: This SDK requires the Claude CLI; it does not call Anthropic's HTTP API directly. For direct API integration without CLI dependencies, see [`plans/MALA_SDK_REQUIREMENTS.md`](plans/MALA_SDK_REQUIREMENTS.md) which outlines requirements for a future "no CLI dependence" SDK.
-- **Server-side production deployments**: The CLI subprocess model is not optimized for high-concurrency server environments.
-
-If you need a Gleam SDK that calls the Anthropic API directly (no CLI), that work is tracked separately from this project.
+Hex package: `claude_agent_sdk_gleam`  
+Gleam module namespace: `claude_agent_sdk`
 
 ## Prerequisites
 
-- **Claude CLI** installed and accessible in PATH (`claude --version` works)
+- **Claude Code** installed and accessible in PATH (`claude --version` works)
 - **Authentication** via one of:
   - Authenticated Claude CLI session
   - `ANTHROPIC_API_KEY` environment variable
@@ -31,7 +19,7 @@ If you need a Gleam SDK that calls the Anthropic API directly (no CLI), that wor
 ## Installation
 
 ```sh
-gleam add claude_agent_sdk
+gleam add claude_agent_sdk_gleam
 ```
 
 ## Quick Start
@@ -63,8 +51,6 @@ fn consume_stream(stream) {
   }
 }
 ```
-
-Further documentation can be found at <https://hexdocs.pm/claude_agent_sdk>.
 
 ## API Overview
 

@@ -1,9 +1,9 @@
-name = "claude_agent_sdk"
+name = "claude_agent_sdk_gleam"
 version = "0.1.0"
 
 # Claude Agent SDK for Gleam - FFI bindings to Anthropic's Agent SDK
-# description = "Gleam bindings for Claude Agent SDK"
-# licences = ["MIT"]
+description = "Gleam bindings for Claude Agent SDK"
+licences = ["MIT"]
 # repository = { type = "github", user = "", repo = "" }
 
 [dependencies]

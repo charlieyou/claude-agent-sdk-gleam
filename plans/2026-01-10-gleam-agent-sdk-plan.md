@@ -48,7 +48,7 @@
 
 | Item | Value | Notes |
 |------|-------|-------|
-| **Hex package name** | `claude_agent_sdk` | Published to Hex under this name |
+| **Hex package name** | `claude_agent_sdk_gleam` | Published to Hex under this name |
 | **Gleam root module namespace** | `claude_agent_sdk` | All modules use this prefix |
 | **Erlang FFI module name** | `claude_agent_sdk_ffi` | Matches Gleam namespace (not `_gleam` suffix) |
 | **FFI file path** | `src/claude_agent_sdk_ffi.erl` | Module name matches filename |
@@ -63,7 +63,7 @@ The Erlang FFI module and file are renamed in lockstep with the Gleam namespace.
 3. Clear relationship between Gleam modules and their FFI backing
 
 **Hex package vs Gleam namespace distinction**:
-In this SDK, the Hex package name and Gleam module namespace are identical (`claude_agent_sdk`). This is the common pattern for Gleam libraries. The package name appears in `gleam.toml` under `name`, while the namespace is determined by module file paths under `src/`.
+In this SDK, the Hex package name (`claude_agent_sdk_gleam`) differs from the Gleam module namespace (`claude_agent_sdk`). The package name appears in `gleam.toml` under `name`, while the namespace is determined by module file paths under `src/`.
 
 ## Key Gating Invariants (Read First)
 
@@ -4870,7 +4870,7 @@ This keeps fixtures small (for schema/forward-compat testing only) while still t
 ## Open Questions (Resolved)
 
 1. ~~**Hex package name**: `claude_agent_sdk` or `claude_agent_sdk_gleam`?~~
-   **RESOLVED**: Package name is `claude_agent_sdk` (without `_gleam` suffix). Module paths use `claude_agent_sdk/...` throughout. See [Naming & Namespace](#naming--namespace-canonical---single-source-of-truth) for the canonical naming specification.
+   **RESOLVED**: Package name is `claude_agent_sdk_gleam`. Module paths use `claude_agent_sdk/...` throughout. See [Naming & Namespace](#naming--namespace-canonical---single-source-of-truth) for the canonical naming specification.
 
 2. **Example location**: `examples/` directory or inline in README?
    - Inline in README for v1 (simple usage)
