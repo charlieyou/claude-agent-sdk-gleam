@@ -12,6 +12,10 @@ pub type TableOption {
 
 /// Create a new ETS table with the given name and options.
 /// Returns a table reference that can be used for insert/lookup/delete operations.
+///
+/// ⚠️ WARNING: Each unique name creates a permanent atom. Do not use
+/// dynamically-generated names (timestamps, random values, etc.) as this
+/// will exhaust the atom table. Use fixed, hardcoded names only.
 pub fn new(name: String) -> Table {
   ffi_new(atom_from_string(name), [Set, Public])
 }
@@ -38,7 +42,7 @@ fn ffi_insert(table: Table, tuple: #(Dynamic, Dynamic)) -> Dynamic
 pub fn lookup(table: Table, key: Dynamic) -> Option(Dynamic) {
   case ffi_lookup(table, key) {
     [] -> None
-    [tuple] -> Some(tuple_element(tuple, 1))
+    [tuple] -> Some(tuple_element(tuple, 2))
     _ -> None
   }
 }
