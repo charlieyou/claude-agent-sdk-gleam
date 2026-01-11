@@ -38,6 +38,14 @@ pub type WarningCode =
 pub type StreamError =
   error.StreamError
 
+/// Result of collecting stream items or messages.
+pub type CollectResult(a) =
+  internal_stream.CollectResult(a)
+
+/// Control flow for fold_stream callback.
+pub type FoldAction(a) =
+  internal_stream.FoldAction(a)
+
 // ============================================================================
 // Stream Operations
 // ============================================================================
@@ -107,3 +115,49 @@ pub fn close(stream: QueryStream) -> QueryStream {
 pub fn is_closed(stream: QueryStream) -> Bool {
   internal_stream.is_closed(stream)
 }
+
+// ============================================================================
+// Resource Helpers
+// ============================================================================
+
+/// Execute a function with a stream, ensuring proper cleanup.
+///
+/// The callback receives the stream and can iterate, abort early, or do any
+/// stream operations. When the callback returns, close() is called automatically.
+///
+/// Takes a Result containing either a QueryStream or QueryError (as returned
+/// by query()). If the result is an error, returns that error immediately.
+///
+/// ## Example
+///
+/// ```gleam
+/// let result = with_stream(query(prompt, options), fn(stream) {
+///   // Do something with the stream
+///   // Stream is automatically closed when this returns
+///   Ok(42)
+/// })
+/// ```
+pub const with_stream = internal_stream.with_stream
+
+/// Collect all items from the stream into a list.
+///
+/// Iterates through the entire stream, collecting all Message and WarningEvent
+/// items until EndOfStream or a terminal error. Returns all collected items
+/// along with any warnings and decode errors encountered.
+pub const collect_items = internal_stream.collect_items
+
+/// Collect all messages from the stream.
+///
+/// Similar to collect_items but extracts only MessageEnvelope values,
+/// filtering out WarningEvents and EndOfStream markers.
+pub const collect_messages = internal_stream.collect_messages
+
+/// Fold over stream items with early termination support.
+///
+/// Allows early termination via FoldAction.Stop. The callback receives
+/// the accumulator and each stream result, returning either Continue(new_acc)
+/// or Stop(final_value).
+///
+/// The stream is automatically closed when iteration ends (either by reaching
+/// EndOfStream, encountering a terminal error, or early stop).
+pub const fold_stream = internal_stream.fold_stream
