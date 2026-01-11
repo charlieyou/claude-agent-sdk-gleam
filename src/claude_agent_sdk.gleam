@@ -250,6 +250,11 @@ pub const collect_messages = internal_stream.collect_messages
 /// **STABLE API**: Breaking changes require major version bump.
 pub const fold_stream = internal_stream.fold_stream
 
+/// Convert a QueryStream to a Yielder for gleam/yielder combinator interop.
+/// **WARNING**: May leak resources if not fully consumed. See documentation.
+/// **STABLE API**: Breaking changes require major version bump.
+pub const to_yielder = internal_stream.to_yielder
+
 // =============================================================================
 // SDK Version
 // =============================================================================

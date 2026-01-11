@@ -1002,13 +1002,8 @@ pub fn to_yielder(
       #(Ok(item), updated) -> Next(element: Ok(item), accumulator: updated)
       #(Error(err), updated) -> {
         let stream_error = next_error_to_stream_error(err)
-        case error.is_terminal(stream_error) {
-          True -> {
-            let closed = close(updated)
-            Next(element: Error(stream_error), accumulator: closed)
-          }
-          False -> Next(element: Error(stream_error), accumulator: updated)
-        }
+        // Stream already closed by next() on terminal error (see fold_stream_loop pattern)
+        Next(element: Error(stream_error), accumulator: updated)
       }
     }
   })
