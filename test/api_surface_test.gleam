@@ -14,7 +14,7 @@ import claude_agent_sdk.{
   type ResultMessage, type ResultSubtype, type Runner, type StreamError,
   type StreamItem, type SystemMessage, type ToolResultBlock, type Usage,
   type UserMessage, type UserMessageContent, type Warning, type WarningCode,
-  is_terminal, test_runner, version,
+  is_terminal, version,
 }
 
 // Import message module constructors for creating test values
@@ -319,7 +319,7 @@ pub fn user_message_importable_test() {
 
 pub fn runner_types_importable_test() {
   // Verify Runner, Handle, ReadResult types and test_runner function are exported
-  // Create a test runner using the runner module directly (test_runner has labeled args)
+  // Use runner.test_runner() with qualified call since labeled args require it
   let _test_runner: Runner =
     runner.test_runner(
       on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.nil()) },
