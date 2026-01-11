@@ -22,11 +22,11 @@ import claude_agent_sdk/content.{
 }
 import claude_agent_sdk/message.{
   type AssistantMessageContent, type McpServerStatus, type Message,
-  type PermissionDenial, type ResultSubtype, type Usage, type UserMessageContent,
-  Assistant, AssistantMessage, AssistantMessageContent, ErrorDuringExecution,
-  ErrorMaxBudget, ErrorMaxTurns, McpServerStatus, PermissionDenial, Result,
-  ResultMessage, Success, System, SystemMessage, UnknownSubtype, Usage, User,
-  UserMessage, UserMessageContent,
+  type MessageEnvelope, type PermissionDenial, type ResultSubtype, type Usage,
+  type UserMessageContent, Assistant, AssistantMessage, AssistantMessageContent,
+  ErrorDuringExecution, ErrorMaxBudget, ErrorMaxTurns, McpServerStatus,
+  MessageEnvelope, PermissionDenial, Result, ResultMessage, Success, System,
+  SystemMessage, UnknownSubtype, Usage, User, UserMessage, UserMessageContent,
 }
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -69,6 +69,37 @@ pub fn decode_message(json_string: String) -> Result(Message, DecodeError) {
         }
       }
     }
+  }
+}
+
+/// Decode a JSON string into a MessageEnvelope that preserves raw_json and raw_bytes.
+///
+/// The raw_json field contains the exact input string (not re-encoded JSON).
+/// The raw_bytes field contains the exact input BitArray.
+/// This allows users to re-parse with different decoders or access fields
+/// the SDK doesn't model, while preserving byte-for-byte fidelity.
+///
+/// ## Example
+/// ```gleam
+/// let json = "{\"type\":\"system\"}"
+/// let raw = bit_array.from_string(json)
+/// case decode_message_envelope(json, raw) {
+///   Ok(envelope) -> {
+///     // envelope.raw_json == json (exact string)
+///     // envelope.raw_bytes == raw (exact bytes)
+///     // envelope.message == System(...)
+///   }
+///   Error(e) -> // handle decode error
+/// }
+/// ```
+pub fn decode_message_envelope(
+  json_string: String,
+  raw_bytes: BitArray,
+) -> Result(MessageEnvelope, DecodeError) {
+  case decode_message(json_string) {
+    Ok(message) ->
+      Ok(MessageEnvelope(message: message, raw_json: json_string, raw_bytes:))
+    Error(e) -> Error(e)
   }
 }
 

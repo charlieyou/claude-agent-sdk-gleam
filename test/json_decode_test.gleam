@@ -4,6 +4,8 @@
 /// Per TDD methodology: tests are written first and skip until decoders are
 /// implemented. Set DECODER_IMPLEMENTED=1 to run full tests.
 import claude_agent_sdk/internal/decoder
+import claude_agent_sdk/message
+import gleam/bit_array
 import gleam/io
 import gleeunit/should
 import simplifile
@@ -193,4 +195,103 @@ pub fn decode_empty_string_test() {
 
   // Should return an error (empty is not valid JSON)
   should.be_error(result)
+}
+
+// =============================================================================
+// MessageEnvelope Tests (raw_json / raw_bytes preservation)
+// =============================================================================
+
+pub fn decode_message_envelope_raw_json_preservation_test() {
+  case
+    skip_if_not_implemented(
+      "decode_message_envelope_raw_json_preservation_test",
+    )
+  {
+    True -> Nil
+    False -> {
+      // Load fixture and verify raw_json equals fixture content byte-for-byte
+      let json = load_fixture("system_message.json")
+      let raw_bytes = bit_array.from_string(json)
+
+      case decoder.decode_message_envelope(json, raw_bytes) {
+        Ok(envelope) -> {
+          // raw_json must equal exact input string
+          should.equal(envelope.raw_json, json)
+        }
+        Error(_) ->
+          panic as "Expected successful decode for system_message.json"
+      }
+    }
+  }
+}
+
+pub fn decode_message_envelope_raw_bytes_preservation_test() {
+  case
+    skip_if_not_implemented(
+      "decode_message_envelope_raw_bytes_preservation_test",
+    )
+  {
+    True -> Nil
+    False -> {
+      // Load fixture and verify raw_bytes matches bit_array.from_string(fixture)
+      let json = load_fixture("system_message.json")
+      let raw_bytes = bit_array.from_string(json)
+
+      case decoder.decode_message_envelope(json, raw_bytes) {
+        Ok(envelope) -> {
+          // raw_bytes must equal exact input BitArray
+          should.equal(envelope.raw_bytes, raw_bytes)
+        }
+        Error(_) ->
+          panic as "Expected successful decode for system_message.json"
+      }
+    }
+  }
+}
+
+pub fn decode_message_envelope_contains_decoded_message_test() {
+  case
+    skip_if_not_implemented(
+      "decode_message_envelope_contains_decoded_message_test",
+    )
+  {
+    True -> Nil
+    False -> {
+      let json = load_fixture("system_message.json")
+      let raw_bytes = bit_array.from_string(json)
+
+      case decoder.decode_message_envelope(json, raw_bytes) {
+        Ok(envelope) -> {
+          // Verify message is a System message
+          case envelope.message {
+            message.System(_) -> Nil
+            _ -> panic as "Expected System message in envelope"
+          }
+        }
+        Error(_) ->
+          panic as "Expected successful decode for system_message.json"
+      }
+    }
+  }
+}
+
+pub fn decode_message_envelope_error_returns_decode_error_test() {
+  case
+    skip_if_not_implemented(
+      "decode_message_envelope_error_returns_decode_error_test",
+    )
+  {
+    True -> Nil
+    False -> {
+      // Invalid JSON should return decode error
+      let json = "{ invalid json }"
+      let raw_bytes = bit_array.from_string(json)
+
+      case decoder.decode_message_envelope(json, raw_bytes) {
+        Error(decoder.JsonSyntaxError(_)) -> Nil
+        Error(decoder.JsonDecodeError(_)) -> Nil
+        _ -> panic as "Expected decode error for invalid JSON"
+      }
+    }
+  }
 }
