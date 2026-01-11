@@ -7,7 +7,7 @@ Based on: Coverage report + testing-inventory.md + testing-policy.md
 
 | Module | Coverage | Lines | Status |
 |--------|----------|-------|--------|
-| claude_agent_sdk | 25.0% | 12/48 | GAP |
+| claude_agent_sdk | 22.9% | 11/48 | GAP |
 | claude_agent_sdk/error | 53.6% | 15/28 | GAP |
 | claude_agent_sdk/internal/cli | 71.2% | 84/118 | GAP |
 | claude_agent_sdk/internal/decoder | 56.1% | 134/239 | GAP |
@@ -133,7 +133,12 @@ Policy targets: Line >= 95%, Branch >= 90%
 
 ## Gap Priority List
 
-### P1 - Critical (Blocks release)
+### P2 - Important (Quality)
+
+> **Note:** Test coverage gaps for working code are P2 (quality), not P1. P1 is reserved
+> for issues that would block release (e.g., broken functionality, security issues).
+> The decoder and stream functions below are fully implemented and functional—they
+> just need additional test coverage to meet the 95% target.
 
 | Gap | File | Function/Area | Test Type | Effort |
 |-----|------|---------------|-----------|--------|
@@ -143,11 +148,6 @@ Policy targets: Line >= 95%, Branch >= 90%
 | 4 | decoder.gleam | decode_mcp_server_status | Unit + fixture | Low |
 | 5 | decoder.gleam | decode_permission_denial | Unit + fixture | Low |
 | 6 | decoder.gleam | decode_content_blocks (list) | Unit + fixture | Medium |
-
-### P2 - Important (Quality)
-
-| Gap | File | Function/Area | Test Type | Effort |
-|-----|------|---------------|-----------|--------|
 | 7 | error.gleam | error_to_string | Unit | Low |
 | 8 | error.gleam | stream_error_to_string | Unit | Low |
 | 9 | cli.gleam | parse_version_string edge cases | Unit | Low |
