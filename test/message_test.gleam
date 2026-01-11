@@ -37,7 +37,6 @@ pub fn stream_item_message_variant_test() {
   let item: StreamItem = StreamMessage(envelope)
   case item {
     StreamMessage(_) -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -47,7 +46,6 @@ pub fn stream_item_warning_event_variant_test() {
   let item: StreamItem = WarningEvent(warning)
   case item {
     WarningEvent(w) -> w.message |> should.equal("test")
-    _ -> should.fail()
   }
 }
 
@@ -56,7 +54,6 @@ pub fn stream_item_end_of_stream_variant_test() {
   let item: StreamItem = EndOfStream
   case item {
     EndOfStream -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -80,7 +77,6 @@ pub fn message_system_variant_test() {
   let msg: Message = System(make_minimal_system())
   case msg {
     System(_) -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -88,7 +84,6 @@ pub fn message_assistant_variant_test() {
   let msg: Message = Assistant(make_minimal_assistant())
   case msg {
     Assistant(_) -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -96,7 +91,6 @@ pub fn message_user_variant_test() {
   let msg: Message = User(make_minimal_user())
   case msg {
     User(_) -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -104,7 +98,6 @@ pub fn message_result_variant_test() {
   let msg: Message = Result(make_minimal_result())
   case msg {
     Result(_) -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -129,7 +122,6 @@ pub fn content_block_text_variant_test() {
   let block = TextBlock(text: "Hello, world!")
   case block {
     TextBlock(text) -> text |> should.equal("Hello, world!")
-    _ -> should.fail()
   }
 }
 
@@ -141,7 +133,6 @@ pub fn content_block_tool_use_variant_test() {
       id |> should.equal("tu_123")
       name |> should.equal("bash")
     }
-    _ -> should.fail()
   }
 }
 
@@ -151,7 +142,6 @@ pub fn content_block_unknown_variant_test() {
   let block = UnknownBlock(raw: raw)
   case block {
     UnknownBlock(_) -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -301,7 +291,6 @@ pub fn error_unexpected_message_preserves_raw_json_test() {
   let error: StreamError = UnexpectedMessageError(raw)
   case error {
     UnexpectedMessageError(json) -> json |> should.equal(raw)
-    _ -> should.fail()
   }
 }
 
@@ -319,7 +308,6 @@ pub fn result_subtype_success_test() {
   let subtype: ResultSubtype = Success
   case subtype {
     Success -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -327,7 +315,6 @@ pub fn result_subtype_error_max_turns_test() {
   let subtype: ResultSubtype = ErrorMaxTurns
   case subtype {
     ErrorMaxTurns -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -335,7 +322,6 @@ pub fn result_subtype_error_during_execution_test() {
   let subtype: ResultSubtype = ErrorDuringExecution
   case subtype {
     ErrorDuringExecution -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -343,7 +329,6 @@ pub fn result_subtype_error_max_budget_test() {
   let subtype: ResultSubtype = ErrorMaxBudget
   case subtype {
     ErrorMaxBudget -> should.be_true(True)
-    _ -> should.fail()
   }
 }
 
@@ -352,7 +337,6 @@ pub fn result_subtype_unknown_preserves_string_test() {
   let subtype: ResultSubtype = UnknownSubtype("new_subtype")
   case subtype {
     UnknownSubtype(s) -> s |> should.equal("new_subtype")
-    _ -> should.fail()
   }
 }
 

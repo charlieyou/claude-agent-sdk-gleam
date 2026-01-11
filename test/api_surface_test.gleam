@@ -9,12 +9,11 @@ import gleeunit/should
 // Import all public types from main SDK module to verify they're exported
 import claude_agent_sdk.{
   type AssistantMessage, type AssistantMessageContent, type ContentBlock,
-  type ErrorDiagnostic, type Handle, type McpServerStatus, type Message,
-  type MessageEnvelope, type PermissionDenial, type QueryError, type ReadResult,
-  type ResultMessage, type ResultSubtype, type Runner, type StreamError,
-  type StreamItem, type SystemMessage, type ToolResultBlock, type Usage,
-  type UserMessage, type UserMessageContent, type Warning, type WarningCode,
-  is_terminal, version,
+  type ErrorDiagnostic, type McpServerStatus, type Message, type MessageEnvelope,
+  type PermissionDenial, type QueryError, type ReadResult, type ResultMessage,
+  type ResultSubtype, type Runner, type StreamError, type StreamItem,
+  type SystemMessage, type ToolResultBlock, type Usage, type UserMessage,
+  type UserMessageContent, type Warning, type WarningCode, is_terminal, version,
 }
 
 // Import message module constructors for creating test values
@@ -63,7 +62,6 @@ pub fn message_types_importable_test() {
   // Verify message matches expected variant
   let is_system = case msg {
     message.System(_) -> True
-    _ -> False
   }
   is_system |> should.be_true()
 }
@@ -103,7 +101,6 @@ pub fn content_block_types_importable_test() {
 
   let is_text = case text_block {
     content.TextBlock(text) -> text == "hello"
-    _ -> False
   }
   is_text |> should.be_true()
 }
@@ -115,7 +112,6 @@ pub fn unknown_block_importable_test() {
 
   let is_unknown = case unknown_block {
     content.UnknownBlock(_) -> True
-    _ -> False
   }
   is_unknown |> should.be_true()
 }
@@ -138,7 +134,6 @@ pub fn error_types_importable_test() {
 
   let is_cli_error = case err {
     error.CliNotFoundError(msg) -> msg == "claude not found"
-    _ -> False
   }
   is_cli_error |> should.be_true()
 }
@@ -168,7 +163,6 @@ pub fn stream_item_importable_test() {
 
   let is_end = case item {
     error.EndOfStream -> True
-    _ -> False
   }
   is_end |> should.be_true()
 }
@@ -179,7 +173,6 @@ pub fn result_subtype_importable_test() {
 
   let is_success = case subtype {
     message.Success -> True
-    _ -> False
   }
   is_success |> should.be_true()
 }
@@ -331,7 +324,6 @@ pub fn runner_types_importable_test() {
   let read_result: ReadResult = runner.Data(<<>>)
   let is_data = case read_result {
     runner.Data(_) -> True
-    _ -> False
   }
   is_data |> should.be_true()
 }
