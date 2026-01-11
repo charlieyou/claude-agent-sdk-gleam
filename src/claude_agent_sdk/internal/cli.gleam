@@ -16,15 +16,11 @@ import gleam/string
 // Version Detection Types
 // ============================================================================
 
-/// Parsed CLI version with semantic version components.
-/// The raw field stores the canonical "major.minor.patch" string (no prerelease suffix).
+/// CLI version type with two variants:
+/// - CliVersion: Successfully parsed semantic version
+/// - UnknownVersion: Could not parse version from output
 pub type CliVersion {
   CliVersion(major: Int, minor: Int, patch: Int, raw: String)
-}
-
-/// Version that could not be parsed from CLI output.
-/// Standalone type allowing caller to decide: fail-fast (default) or permissive.
-pub type UnknownVersion {
   UnknownVersion(raw: String)
 }
 
@@ -139,12 +135,16 @@ fn is_digit(s: String) -> Bool {
 
 /// Single source of truth for version comparison.
 /// Returns True if `version >= minimum` using semantic versioning.
+/// Only accepts known CliVersion variants - UnknownVersion must be handled separately.
 pub fn version_meets_minimum(version: CliVersion, minimum: CliVersion) -> Bool {
-  let CliVersion(maj, min, patch, _) = version
-  let CliVersion(min_maj, min_min, min_patch, _) = minimum
-  maj > min_maj
-  || { maj == min_maj && min > min_min }
-  || { maj == min_maj && min == min_min && patch >= min_patch }
+  case version, minimum {
+    CliVersion(maj, min, patch, _), CliVersion(min_maj, min_min, min_patch, _) ->
+      maj > min_maj
+      || { maj == min_maj && min > min_min }
+      || { maj == min_maj && min == min_min && patch >= min_patch }
+    // UnknownVersion cannot be compared - return False to be safe
+    _, _ -> False
+  }
 }
 
 /// Format a human-readable error message for version mismatch.
@@ -152,10 +152,18 @@ pub fn format_version_error(
   detected: CliVersion,
   required: CliVersion,
 ) -> String {
+  let detected_str = case detected {
+    CliVersion(_, _, _, raw) -> raw
+    UnknownVersion(raw) -> raw
+  }
+  let required_str = case required {
+    CliVersion(_, _, _, raw) -> raw
+    UnknownVersion(raw) -> raw
+  }
   "CLI version "
-  <> detected.raw
+  <> detected_str
   <> " is below minimum required "
-  <> required.raw
+  <> required_str
   <> ". Run: npm update -g @anthropic-ai/claude-code"
 }
 
