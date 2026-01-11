@@ -42,7 +42,7 @@ fn ffi_insert(table: Table, tuple: #(Dynamic, Dynamic)) -> Dynamic
 pub fn lookup(table: Table, key: Dynamic) -> Option(Dynamic) {
   case ffi_lookup(table, key) {
     [] -> None
-    [tuple] -> Some(tuple_element(tuple, 2))
+    [tuple] -> Some(tuple_element(2, tuple))
     _ -> None
   }
 }
@@ -51,7 +51,7 @@ pub fn lookup(table: Table, key: Dynamic) -> Option(Dynamic) {
 fn ffi_lookup(table: Table, key: Dynamic) -> List(Dynamic)
 
 @external(erlang, "erlang", "element")
-fn tuple_element(tuple: Dynamic, index: Int) -> Dynamic
+fn tuple_element(index: Int, tuple: Dynamic) -> Dynamic
 
 /// Delete a key from the table.
 pub fn delete(table: Table, key: Dynamic) -> Nil {
