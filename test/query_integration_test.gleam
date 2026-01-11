@@ -1,14 +1,17 @@
 import claude_agent_sdk
+import claude_agent_sdk/content.{TextBlock}
 import claude_agent_sdk/error.{
   BufferOverflow, CliNotFoundError, JsonDecodeError, ProcessError, SpawnError,
   TooManyDecodeErrors, UnexpectedMessageError, UnknownVersionError,
   UnsupportedCliVersionError, VersionDetectionError,
 }
 import claude_agent_sdk/internal/cli.{CliVersion, UnknownVersion}
+import claude_agent_sdk/message
 import gleam/int
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 import support/integration_helpers.{
   CliMissing, NdjsonImpure, NdjsonPure, PreflightTimeout, check_cli_help_flags,
@@ -290,4 +293,138 @@ pub fn integration__skip_message_ndjson_impure_test() {
 /// Validates the skip message constant for preflight timeout scenario.
 pub fn integration__skip_message_timeout_test() {
   should.equal(skip_msg_timeout, "[SKIP:TIMEOUT] Preflight check timed out")
+}
+
+// ============================================================================
+// Session Resume Integration Test
+// ============================================================================
+
+/// Integration test: session resume (opt-in via CLAUDE_INTEGRATION_TEST=1)
+/// Creates an initial session, extracts session_id, resumes with follow-up,
+/// and verifies session context is preserved.
+pub fn integration__session_resume_test() {
+  case integration_enabled("integration__session_resume_test") {
+    True -> {
+      case is_authenticated() {
+        True -> {
+          // 1. Create initial session with memorable prompt
+          let opts1 =
+            claude_agent_sdk.default_options()
+            |> claude_agent_sdk.with_max_turns(1)
+
+          case claude_agent_sdk.query("Remember the number 42", opts1) {
+            Error(err) -> {
+              io.println(
+                "[FAIL] Initial query failed: " <> query_error_to_string(err),
+              )
+              should.be_true(False)
+            }
+            Ok(stream1) -> {
+              // 2. Consume stream to get session_id from SystemMessage
+              let result1 = claude_agent_sdk.collect_messages(stream1)
+
+              case extract_session_id(result1.items) {
+                None -> {
+                  io.println("[FAIL] No session_id found in initial session")
+                  should.be_true(False)
+                }
+                Some(session_id) -> {
+                  io.println("[INFO] Session ID: " <> session_id)
+
+                  // 3. Resume session with follow-up
+                  let opts2 =
+                    claude_agent_sdk.default_options()
+                    |> claude_agent_sdk.with_resume(session_id)
+                    |> claude_agent_sdk.with_max_turns(1)
+
+                  case
+                    claude_agent_sdk.query(
+                      "What number did I ask you to remember?",
+                      opts2,
+                    )
+                  {
+                    Error(err) -> {
+                      io.println(
+                        "[FAIL] Resume query failed: "
+                        <> query_error_to_string(err),
+                      )
+                      should.be_true(False)
+                    }
+                    Ok(stream2) -> {
+                      // 4. Verify response references the number
+                      let result2 = claude_agent_sdk.collect_messages(stream2)
+
+                      case check_response_contains_42(result2.items) {
+                        True -> {
+                          io.println(
+                            "[PASS] Session context preserved - response mentions 42",
+                          )
+                          should.be_true(True)
+                        }
+                        False -> {
+                          io.println(
+                            "[FAIL] Session context NOT preserved - response does not mention 42",
+                          )
+                          should.be_true(False)
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+        False -> {
+          io.println(skip_msg_auth_unavailable)
+          should.be_true(True)
+        }
+      }
+    }
+    False -> should.be_true(True)
+  }
+}
+
+/// Extract session_id from the first SystemMessage in a list of messages.
+fn extract_session_id(
+  messages: List(claude_agent_sdk.MessageEnvelope),
+) -> option.Option(String) {
+  case messages {
+    [] -> None
+    [envelope, ..rest] -> {
+      case envelope.message {
+        message.System(sys_msg) -> sys_msg.session_id
+        _ -> extract_session_id(rest)
+      }
+    }
+  }
+}
+
+/// Check if any AssistantMessage content contains "42".
+fn check_response_contains_42(
+  messages: List(claude_agent_sdk.MessageEnvelope),
+) -> Bool {
+  list.any(messages, fn(envelope) {
+    case envelope.message {
+      message.Assistant(assistant_msg) -> {
+        case assistant_msg.message {
+          Some(content) -> {
+            case content.content {
+              Some(blocks) -> {
+                list.any(blocks, fn(block) {
+                  case block {
+                    TextBlock(text) -> string.contains(text, "42")
+                    _ -> False
+                  }
+                })
+              }
+              None -> False
+            }
+          }
+          None -> False
+        }
+      }
+      _ -> False
+    }
+  })
 }
