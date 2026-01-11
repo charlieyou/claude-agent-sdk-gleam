@@ -201,6 +201,9 @@ pub type QueryError {
   /// Failed to spawn the CLI process.
   /// May indicate permission issues, missing dependencies, or resource limits.
   SpawnError(reason: String)
+  /// Test mode configuration error.
+  /// Occurs when test_mode is enabled but test_runner is not provided.
+  TestModeError(reason: String)
 }
 
 // ============================================================================
@@ -287,6 +290,7 @@ pub fn error_to_string(error: QueryError) -> String {
       "Unknown CLI version format: " <> raw_output <> ". " <> suggestion
     VersionDetectionError(reason) -> "Version detection failed: " <> reason
     SpawnError(reason) -> "Failed to spawn process: " <> reason
+    TestModeError(reason) -> "Test mode error: " <> reason
   }
 }
 

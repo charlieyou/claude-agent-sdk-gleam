@@ -325,9 +325,18 @@ pub fn query(
   options: QueryOptions,
 ) -> Result(QueryStream, QueryError) {
   case options.test_mode {
-    True -> spawn_query(prompt, options, cli_name)
+    True -> {
+      // Test mode: validate test_runner is provided, then spawn without CLI discovery
+      case options.test_runner {
+        Some(_) -> spawn_query(prompt, options, cli_name)
+        None ->
+          Error(error.TestModeError(
+            "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
+          ))
+      }
+    }
     False -> {
-      // Step 1: Find CLI in PATH
+      // Production mode: Find CLI in PATH
       case port_ffi.find_cli_path(cli_name) {
         Error(_) ->
           Error(error.CliNotFoundError(
@@ -442,12 +451,14 @@ fn spawn_query(
         Some(test_runner) -> {
           case runner.spawn(test_runner, cli_path, args, cwd) {
             Error(reason) -> Error(error.SpawnError(reason))
-            Ok(handle) -> Ok(internal_stream.new_from_runner(test_runner, handle))
+            Ok(handle) ->
+              Ok(internal_stream.new_from_runner(test_runner, handle))
           }
         }
-        None -> Error(error.SpawnError(
-          "test_mode enabled but no test_runner provided",
-        ))
+        None ->
+          Error(error.TestModeError(
+            "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
+          ))
       }
     }
     False ->
