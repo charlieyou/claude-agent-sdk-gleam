@@ -5,6 +5,21 @@
 
 A Gleam SDK for the Claude CLI, providing streaming query support with proper resource management.
 
+## Scope & Non-Goals
+
+This SDK wraps the **Claude CLI** (`claude` command) as a subprocess. It is designed for:
+
+- Local development and scripting
+- CLI-based automation workflows
+- Applications where Claude CLI is already installed
+
+**Out of scope** for this project:
+
+- **Direct API access**: This SDK requires the Claude CLI; it does not call Anthropic's HTTP API directly. For direct API integration without CLI dependencies, see [`plans/MALA_SDK_REQUIREMENTS.md`](plans/MALA_SDK_REQUIREMENTS.md) which outlines requirements for a future "no CLI dependence" SDK.
+- **Server-side production deployments**: The CLI subprocess model is not optimized for high-concurrency server environments.
+
+If you need a Gleam SDK that calls the Anthropic API directly (no CLI), that work is tracked separately from this project.
+
 ## Prerequisites
 
 - **Claude CLI** installed and accessible in PATH (`claude --version` works)
