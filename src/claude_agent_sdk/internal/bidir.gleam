@@ -491,6 +491,8 @@ pub type ActorMessage {
   HookError(request_id: String, reason: Dynamic)
   /// Hook timeout fired (first-event-wins protocol).
   HookTimeout(request_id: String)
+  /// Cancel a pending request (for client-side timeout cleanup).
+  CancelPendingRequest(request_id: String)
 }
 
 /// Responses from synchronous operations.
@@ -869,6 +871,9 @@ fn handle_message(
     }
     HookTimeout(request_id) -> {
       handle_hook_timeout(state, request_id)
+    }
+    CancelPendingRequest(request_id) -> {
+      handle_cancel_pending_request(state, request_id)
     }
   }
 }
@@ -1510,6 +1515,37 @@ fn handle_request_timeout(
   }
 }
 
+/// Handle cancel pending request (client-side timeout cleanup).
+///
+/// Called when a client times out locally and wants to prevent the actor
+/// from sending a stale timeout message later. This cancels the timer and
+/// removes the pending request without sending any response.
+fn handle_cancel_pending_request(
+  state: SessionState,
+  request_id: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  case dict.get(state.pending_requests, request_id) {
+    Ok(pending) -> {
+      // Cancel the actor's timer to prevent stale timeout message
+      case pending.timer_ref {
+        Some(ref) -> {
+          let _ = cancel_timer(ref)
+          Nil
+        }
+        None -> Nil
+      }
+      // Remove from pending (no response sent - client already timed out)
+      let new_pending = dict.delete(state.pending_requests, request_id)
+      let new_state = SessionState(..state, pending_requests: new_pending)
+      actor.continue(new_state)
+    }
+    Error(Nil) -> {
+      // Request already handled, nothing to cancel
+      actor.continue(state)
+    }
+  }
+}
+
 /// Flush queued operations after successful init.
 ///
 /// Sends all queued operations to CLI without blocking.
@@ -1700,6 +1736,20 @@ pub fn send_control_request(
   actor.send(session, SendControlRequest(request, reply_to))
 }
 
+/// Cancel a pending request by ID.
+///
+/// Used for client-side timeout cleanup. When a client times out locally
+/// before the actor's timer fires, this cancels the actor's timer and
+/// removes the pending request to prevent stale messages.
+///
+/// This is safe to call even if the request was already handled.
+pub fn cancel_pending_request(
+  session: Subject(ActorMessage),
+  request_id: String,
+) -> Nil {
+  actor.send(session, CancelPendingRequest(request_id))
+}
+
 // =============================================================================
 // Public Control Operations
 // =============================================================================
@@ -1753,8 +1803,12 @@ pub fn interrupt(session: Subject(ActorMessage)) -> Result(Nil, InterruptError) 
     Ok(RequestError(message)) -> Error(CliError(message))
     Ok(RequestTimeout) -> Error(InterruptTimeout)
     Ok(RequestSessionStopped) -> Error(SessionStopped)
-    // Actor didn't respond in time (possibly stopped)
-    Error(Nil) -> Error(InterruptTimeout)
+    // Actor didn't respond in time (possibly stopped) - cancel pending request
+    // to prevent stale timeout message from polluting caller's mailbox
+    Error(Nil) -> {
+      cancel_pending_request(session, request_id)
+      Error(InterruptTimeout)
+    }
   }
 }
 
@@ -1816,7 +1870,12 @@ pub fn set_permission_mode(
     Ok(RequestError(message)) -> Error(SetPermissionModeCliError(message))
     Ok(RequestTimeout) -> Error(SetPermissionModeTimeout)
     Ok(RequestSessionStopped) -> Error(SetPermissionModeSessionStopped)
-    Error(Nil) -> Error(SetPermissionModeTimeout)
+    Error(Nil) -> {
+      // Client timed out before actor response - cancel the pending request
+      // to prevent stale timeout message from polluting caller's mailbox
+      cancel_pending_request(session, request_id)
+      Error(SetPermissionModeTimeout)
+    }
   }
 }
 
