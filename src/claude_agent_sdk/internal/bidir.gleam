@@ -70,6 +70,10 @@ pub type SessionError {
   CliExitedDuringStartup
   /// A runtime error occurred with the given reason.
   RuntimeError(reason: String)
+  /// Too many operations queued during initialization (max 16).
+  InitQueueOverflow(message: String)
+  /// Too many pending control requests (max 64).
+  TooManyPendingRequests(message: String)
 }
 
 /// Reason why a session was stopped.
@@ -974,4 +978,89 @@ pub fn shutdown(session: Subject(ActorMessage)) -> Nil {
 /// Send an InjectedPortClosed message to the actor (for testing).
 pub fn inject_port_closed(session: Subject(ActorMessage)) -> Nil {
   actor.send(session, InjectedPortClosed)
+}
+
+// =============================================================================
+// Backpressure Helpers
+// =============================================================================
+
+/// Maximum number of operations that can be queued during initialization.
+const max_queued_ops: Int = 16
+
+/// Maximum number of pending SDK-initiated requests.
+const max_pending_requests: Int = 64
+
+/// Maximum number of pending hook callbacks.
+const max_pending_hooks: Int = 32
+
+/// Queue an operation during initialization with backpressure limit.
+///
+/// Returns Error(InitQueueOverflow) if the queue is at capacity (16).
+/// Operations are queued in LIFO order (prepended to list).
+pub fn queue_operation(
+  state: SessionState,
+  op: QueuedOperation,
+) -> Result(SessionState, SessionError) {
+  case list.length(state.queued_ops) >= max_queued_ops {
+    True ->
+      Error(InitQueueOverflow(
+        "Too many control operations queued during initialization (max 16)",
+      ))
+    False -> Ok(SessionState(..state, queued_ops: [op, ..state.queued_ops]))
+  }
+}
+
+/// Add a pending request with backpressure limit.
+///
+/// Returns Error(TooManyPendingRequests) if at capacity (64).
+pub fn add_pending_request(
+  state: SessionState,
+  request_id: String,
+  pending: PendingRequest,
+) -> Result(SessionState, SessionError) {
+  case dict.size(state.pending_requests) >= max_pending_requests {
+    True ->
+      Error(TooManyPendingRequests("Too many pending control requests (max 64)"))
+    False ->
+      Ok(
+        SessionState(
+          ..state,
+          pending_requests: dict.insert(
+            state.pending_requests,
+            request_id,
+            pending,
+          ),
+        ),
+      )
+  }
+}
+
+/// Add a pending hook with backpressure limit.
+///
+/// Returns (state, None) on success.
+/// Returns (state, Some(immediate_response)) if at capacity (32).
+/// When at capacity, the hook is NOT added and an immediate fail-open response
+/// should be sent to CLI without spawning a handler task.
+pub fn add_pending_hook(
+  state: SessionState,
+  callback_id: String,
+  hook: PendingHook,
+) -> #(SessionState, Option(String)) {
+  case dict.size(state.pending_hooks) >= max_pending_hooks {
+    True -> {
+      // Return immediate fail-open response without adding to map
+      let response =
+        "{\"type\":\"hook_response\",\"callback_id\":\""
+        <> callback_id
+        <> "\",\"result\":{\"continue\":true},\"error\":\"backpressure: too many pending hooks (max 32)\"}"
+      #(state, Some(response))
+    }
+    False -> #(
+      SessionState(
+        ..state,
+        pending_hooks: dict.insert(state.pending_hooks, callback_id, hook),
+      ),
+      None,
+    )
+  }
 }
