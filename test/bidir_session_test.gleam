@@ -9,7 +9,7 @@ import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
   type SessionLifecycle, type SubscriberMessage, Failed, InitSent, Pong, Running,
-  RuntimeError, Starting, Stopped,
+  RuntimeError, SessionEnded, Starting, Stopped, UserRequested,
 }
 import support/mock_bidir_runner
 
@@ -155,6 +155,67 @@ pub fn actor_can_shutdown_test() {
   case process.receive(mock.closed, 100) {
     Ok(True) -> should.be_true(True)
     Ok(False) -> should.fail()
+    Error(_) -> should.fail()
+  }
+}
+
+// =============================================================================
+// Termination Cleanup Tests
+// =============================================================================
+
+pub fn shutdown_notifies_subscriber_with_session_ended_test() {
+  // Create a mock runner
+  let mock = mock_bidir_runner.new()
+
+  // Create subscriber for messages
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let config = bidir.default_config(subscriber)
+
+  // Start the actor
+  let assert Ok(session) = bidir.start(mock.runner, config)
+
+  // Shutdown the actor
+  bidir.shutdown(session)
+
+  // Give it time to shutdown
+  process.sleep(50)
+
+  // Verify subscriber received SessionEnded with UserRequested reason
+  case process.receive(subscriber, 100) {
+    Ok(SessionEnded(UserRequested)) -> should.be_true(True)
+    Ok(_other) -> should.fail()
+    Error(_) -> should.fail()
+  }
+}
+
+pub fn shutdown_closes_runner_and_notifies_subscriber_test() {
+  // Create a mock runner
+  let mock = mock_bidir_runner.new()
+
+  // Create subscriber for messages
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let config = bidir.default_config(subscriber)
+
+  // Start the actor
+  let assert Ok(session) = bidir.start(mock.runner, config)
+
+  // Shutdown the actor
+  bidir.shutdown(session)
+
+  // Give it time to shutdown
+  process.sleep(50)
+
+  // Verify close was called on the runner
+  case process.receive(mock.closed, 100) {
+    Ok(True) -> should.be_true(True)
+    Ok(False) -> should.fail()
+    Error(_) -> should.fail()
+  }
+
+  // Verify subscriber received SessionEnded
+  case process.receive(subscriber, 100) {
+    Ok(SessionEnded(UserRequested)) -> should.be_true(True)
+    Ok(_other) -> should.fail()
     Error(_) -> should.fail()
   }
 }

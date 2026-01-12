@@ -63,6 +63,18 @@ pub type SessionError {
   RuntimeError(reason: String)
 }
 
+/// Reason why a session was stopped.
+///
+/// Used to communicate shutdown cause to subscribers and pending callers.
+pub type StopReason {
+  /// stop() was explicitly called by the SDK user.
+  UserRequested
+  /// CLI process exited with the given code.
+  CliExited(code: Int)
+  /// Session failed during initialization.
+  InitFailed(SessionError)
+}
+
 /// Session lifecycle states.
 ///
 /// - Starting: Actor started, CLI port not yet spawned
@@ -172,6 +184,8 @@ pub type RequestResult {
   RequestError(String)
   /// Request timed out.
   RequestTimeout
+  /// Session was stopped before request completed.
+  RequestSessionStopped
 }
 
 /// A pending hook callback awaiting SDK response.
@@ -242,8 +256,8 @@ pub type CliCapabilities {
 pub type SubscriberMessage {
   /// A parsed message from the CLI.
   CliMessage(Dynamic)
-  /// Session has stopped (clean or with error).
-  SessionStopped(reason: Option(String))
+  /// Session has ended (clean shutdown or error).
+  SessionEnded(StopReason)
 }
 
 // =============================================================================
@@ -403,13 +417,39 @@ fn handle_message(
       actor.continue(state)
     }
     ShutdownActor -> {
-      // Clean shutdown - close the runner
-      // BidirRunner.close is a function field: fn() -> Nil
-      let close_fn = state.runner.close
-      close_fn()
+      // Clean shutdown with full cleanup
+      cleanup_session(state, UserRequested)
       actor.stop()
     }
   }
+}
+
+/// Clean up session resources when stopping.
+///
+/// This function performs the full cleanup sequence:
+/// 1. Resolve all pending_requests with RequestSessionStopped
+/// 2. Clear queued_ops (no reply_to field to notify)
+/// 3. Close the runner (terminates CLI process)
+/// 4. Notify subscriber with SessionEnded
+///
+/// Note: Timer cancellation will be added when timers are implemented.
+fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
+  // 1. Resolve all pending SDK-initiated requests with session stopped error
+  dict.each(state.pending_requests, fn(_request_id, pending) {
+    process.send(pending.reply_to, RequestSessionStopped)
+  })
+
+  // 2. queued_ops don't have reply_to fields yet, so nothing to notify
+  // (Will be updated when QueuedOperation gets reply_to in future task)
+
+  // 3. Close the runner (terminates CLI process)
+  let close_fn = state.runner.close
+  close_fn()
+
+  // 4. Notify subscriber that session has ended
+  process.send(state.subscriber, SessionEnded(reason))
+
+  Nil
 }
 
 /// Call the actor synchronously to get lifecycle state.
