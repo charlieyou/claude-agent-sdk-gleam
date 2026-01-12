@@ -161,7 +161,9 @@ pub type PreCompactContext {
 /// Result of a hook execution.
 ///
 /// Hooks can control the flow by returning one of these results.
-pub type HookResult {
+/// Note: This is distinct from `control.HookResult` which is used for
+/// protocol-level hook responses.
+pub type HookExecutionResult {
   /// Continue with normal execution.
   Continue
   /// Block the operation with a reason.
@@ -173,7 +175,9 @@ pub type HookResult {
 /// Result of a permission check.
 ///
 /// Permission hooks return either Allow or Deny.
-pub type PermissionResult {
+/// Note: This is distinct from `control.PermissionResult` which supports
+/// additional variants like AllowOnce, AllowAll, and Edit for the protocol.
+pub type PermissionCheckResult {
   /// Allow the operation to proceed.
   Allow
   /// Deny the operation with a reason.
@@ -192,6 +196,8 @@ pub type HookInput {
   PreToolUseInput(PreToolUseContext)
   /// Post-tool-use hook input.
   PostToolUseInput(PostToolUseContext)
+  /// Can-use-tool permission check input.
+  CanUseToolInput(CanUseToolContext)
   /// User-prompt-submit hook input.
   UserPromptSubmitInput(UserPromptSubmitContext)
   /// Stop hook input.

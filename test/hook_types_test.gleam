@@ -6,15 +6,16 @@ import gleam/option.{None, Some}
 import gleeunit/should
 
 import claude_agent_sdk/hook.{
-  type HookResult, type PermissionResult, Allow, Block, CanUseToolContext,
-  Continue, Deny, ModifyInput, PostToolUse, PostToolUseContext, PostToolUseInput,
-  PreCompact, PreCompactContext, PreCompactInput, PreToolUse, PreToolUseContext,
-  PreToolUseInput, Stop, StopContext, StopInput, SubagentStop,
-  SubagentStopContext, SubagentStopInput, UserPromptSubmit,
-  UserPromptSubmitContext, UserPromptSubmitInput,
+  type HookExecutionResult, type PermissionCheckResult, Allow, Block,
+  CanUseToolContext, CanUseToolInput, Continue, Deny, ModifyInput, PostToolUse,
+  PostToolUseContext, PostToolUseInput, PreCompact, PreCompactContext,
+  PreCompactInput, PreToolUse, PreToolUseContext, PreToolUseInput, Stop,
+  StopContext, StopInput, SubagentStop, SubagentStopContext, SubagentStopInput,
+  UserPromptSubmit, UserPromptSubmitContext, UserPromptSubmitInput,
 }
 
-// Helper to convert any value to Dynamic (identity function in Erlang)
+/// Converts any value to Dynamic using Gleam stdlib identity.
+/// This is the standard Gleam idiom for Erlang target.
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> Dynamic
 
@@ -141,7 +142,7 @@ pub fn pre_compact_context_test() {
 // =============================================================================
 
 pub fn hook_result_continue_test() {
-  let result: HookResult = Continue
+  let result: HookExecutionResult = Continue
   should.equal(result, Continue)
 }
 
@@ -163,7 +164,7 @@ pub fn hook_result_modify_input_test() {
 }
 
 pub fn permission_result_allow_test() {
-  let result: PermissionResult = Allow
+  let result: PermissionCheckResult = Allow
   should.equal(result, Allow)
 }
 
@@ -204,6 +205,25 @@ pub fn hook_input_post_tool_use_test() {
   let input = PostToolUseInput(ctx)
   case input {
     PostToolUseInput(c) -> should.equal(c.tool_name, "Read")
+    _ -> should.fail()
+  }
+}
+
+pub fn hook_input_can_use_tool_test() {
+  let ctx =
+    CanUseToolContext(
+      tool_name: "Write",
+      tool_input: to_dynamic("/path/to/file"),
+      session_id: "session-perm",
+      permission_suggestions: ["allow_write"],
+      blocked_path: Some("/path/to/file"),
+    )
+  let input = CanUseToolInput(ctx)
+  case input {
+    CanUseToolInput(c) -> {
+      should.equal(c.tool_name, "Write")
+      should.equal(c.permission_suggestions, ["allow_write"])
+    }
     _ -> should.fail()
   }
 }
