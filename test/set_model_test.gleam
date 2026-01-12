@@ -14,7 +14,7 @@ import gleeunit/should
 import claude_agent_sdk/control.{SetModel}
 import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage, RequestError, RequestSuccess,
-  Running, SetModelTimeout,
+  Running, SetModelSessionStopped,
 }
 import support/mock_bidir_runner
 
@@ -215,6 +215,7 @@ pub fn set_model_timeout_test() {
       hook_timeouts: dict.new(),
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
+      enable_file_checkpointing: False,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
@@ -252,12 +253,12 @@ pub fn set_model_timeout_test() {
 // Synchronous API Tests
 // =============================================================================
 
-/// Test: synchronous set_model returns timeout when session is stopped
+/// Test: synchronous set_model returns session stopped error when session is stopped
 ///
-/// This verifies the synchronous API wrapper correctly handles timeout.
-/// Since the session is stopped before calling set_model, the actor won't respond
-/// and the call will timeout.
-pub fn set_model_sync_returns_timeout_test() {
+/// This verifies the synchronous API wrapper correctly handles stopped sessions.
+/// When the session is stopped, the actor responds with RequestSessionStopped,
+/// which set_model maps to SetModelSessionStopped.
+pub fn set_model_sync_returns_session_stopped_test() {
   // Arrange: start session
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -279,9 +280,9 @@ pub fn set_model_sync_returns_timeout_test() {
   bidir.shutdown(session)
   process.sleep(100)
 
-  // Act: call synchronous set_model on stopped session - will timeout after 5000ms
+  // Act: call synchronous set_model on stopped session
   let result = bidir.set_model(session, "sonnet")
 
-  // Assert: returns SetModelTimeout (actor doesn't respond when stopped)
-  should.equal(result, Error(SetModelTimeout))
+  // Assert: returns SetModelSessionStopped (actor responds with session stopped)
+  should.equal(result, Error(SetModelSessionStopped))
 }

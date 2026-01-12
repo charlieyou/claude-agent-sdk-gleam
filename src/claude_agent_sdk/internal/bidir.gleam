@@ -250,6 +250,20 @@ pub type SetModelError {
   SetModelSessionStopped
 }
 
+/// Error type for rewind_files() operation.
+///
+/// Represents the possible failure modes when rewinding files.
+pub type RewindFilesError {
+  /// File checkpointing was not enabled during session initialization.
+  CheckpointingNotEnabled
+  /// CLI returned an error response.
+  RewindFilesCliError(message: String)
+  /// Request timed out (30000ms default for disk I/O).
+  RewindFilesTimeout
+  /// Session was stopped or not running.
+  RewindFilesSessionStopped
+}
+
 /// A pending hook callback awaiting SDK response.
 ///
 /// Tracks CLI-initiated hook requests that need SDK handler execution.
@@ -451,6 +465,8 @@ pub type SessionState {
     init_timeout_ms: Int,
     /// Timer reference for init timeout (for cancellation on cleanup).
     init_timer_ref: Option(Dynamic),
+    /// Whether file checkpointing is enabled (for rewind_files support).
+    file_checkpointing_enabled: Bool,
   )
 }
 
@@ -468,6 +484,8 @@ pub type ActorMessage {
   GetLifecycle(reply_to: Subject(SessionLifecycle))
   /// Get current capabilities.
   GetCapabilities(reply_to: Subject(Option(CliCapabilities)))
+  /// Get whether file checkpointing is enabled.
+  GetCheckpointingEnabled(reply_to: Subject(Bool))
   /// Ping for health check.
   Ping(reply_to: Subject(Response))
   /// Shutdown the session gracefully.
@@ -526,6 +544,8 @@ pub type StartConfig {
     init_timeout_ms: Int,
     /// Default timeout for hook callbacks (ms). Default: 30000.
     default_hook_timeout_ms: Int,
+    /// Enable file checkpointing for rewind_files support. Default: False.
+    enable_file_checkpointing: Bool,
   )
 }
 
@@ -537,6 +557,7 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
     hook_timeouts: dict.new(),
     init_timeout_ms: 10_000,
     default_hook_timeout_ms: 30_000,
+    enable_file_checkpointing: False,
   )
 }
 
@@ -625,6 +646,7 @@ fn start_internal(
           inject_subject: None,
           init_timeout_ms: config.init_timeout_ms,
           init_timer_ref: None,
+          file_checkpointing_enabled: config.enable_file_checkpointing,
         )
 
       // Perform the initialization handshake
@@ -752,7 +774,7 @@ fn perform_init_handshake(state: SessionState) -> SessionState {
       hooks: [],
       // Hooks will be populated from config in future
       mcp_servers: [],
-      enable_file_checkpointing: False,
+      enable_file_checkpointing: state.file_checkpointing_enabled,
     )
 
   // Encode and send the request
@@ -837,6 +859,10 @@ fn handle_message(
     }
     GetCapabilities(reply_to) -> {
       process.send(reply_to, state.capabilities)
+      actor.continue(state)
+    }
+    GetCheckpointingEnabled(reply_to) -> {
+      process.send(reply_to, state.file_checkpointing_enabled)
       actor.continue(state)
     }
     Ping(reply_to) -> {
@@ -1934,6 +1960,117 @@ pub fn set_model(
     Ok(RequestTimeout) -> Error(SetModelTimeout)
     Ok(RequestSessionStopped) -> Error(SetModelSessionStopped)
     Error(Nil) -> Error(SetModelTimeout)
+  }
+}
+
+/// Default timeout for rewind_files operation (30000ms).
+/// Longer timeout due to potential disk I/O for checkpoint restoration.
+const rewind_files_timeout_ms: Int = 30_000
+
+/// Rewind files to the state at a given user message checkpoint.
+///
+/// Restores file state to a previously captured checkpoint. This requires
+/// file checkpointing to be enabled when starting the session (via
+/// `enable_file_checkpointing: True` in StartConfig).
+///
+/// This is a synchronous call that blocks until the CLI responds or times out.
+///
+/// ## Requirements
+///
+/// File checkpointing must be enabled during session initialization.
+/// If not enabled, returns `Error(CheckpointingNotEnabled)` immediately
+/// without sending a request to the CLI.
+///
+/// ## Timeout
+///
+/// Uses a 30000ms timeout (longer than other operations) because file
+/// restoration may involve disk I/O.
+///
+/// ## Returns
+///
+/// - `Ok(Nil)` - Files rewound successfully
+/// - `Error(CheckpointingNotEnabled)` - Checkpointing was not enabled at session start
+/// - `Error(RewindFilesCliError(message))` - CLI returned an error (e.g., checkpoint not found)
+/// - `Error(RewindFilesTimeout)` - No response within 30000ms
+/// - `Error(RewindFilesSessionStopped)` - Session is not running
+///
+/// ## Example
+///
+/// ```gleam
+/// // Start session with checkpointing enabled
+/// let config = StartConfig(
+///   ..bidir.default_config(subscriber),
+///   enable_file_checkpointing: True,
+/// )
+/// let assert Ok(session) = bidir.start(runner, config)
+///
+/// // Later, rewind to a checkpoint
+/// case bidir.rewind_files(session, "msg_123", 30_000) {
+///   Ok(Nil) -> io.println("Files rewound successfully")
+///   Error(CheckpointingNotEnabled) -> io.println("Checkpointing not enabled")
+///   Error(RewindFilesCliError(msg)) -> io.println("Failed: " <> msg)
+///   Error(RewindFilesTimeout) -> io.println("Timed out")
+///   Error(RewindFilesSessionStopped) -> io.println("Session not running")
+/// }
+/// ```
+pub fn rewind_files(
+  session: Subject(ActorMessage),
+  user_message_id: String,
+  timeout_ms: Int,
+) -> Result(Nil, RewindFilesError) {
+  // First check if checkpointing is enabled
+  let checkpointing_subject: Subject(Bool) = process.new_subject()
+  actor.send(session, GetCheckpointingEnabled(checkpointing_subject))
+
+  // Wait briefly for the checkpointing state (should be fast, just memory read)
+  case process.receive(checkpointing_subject, 1000) {
+    Ok(True) -> {
+      // Checkpointing enabled - proceed with the request
+      rewind_files_internal(session, user_message_id, timeout_ms)
+    }
+    Ok(False) -> {
+      // Checkpointing not enabled - return error immediately
+      Error(CheckpointingNotEnabled)
+    }
+    Error(Nil) -> {
+      // Actor didn't respond - session likely stopped
+      Error(RewindFilesSessionStopped)
+    }
+  }
+}
+
+/// Internal function to send rewind_files request (after checkpointing check).
+fn rewind_files_internal(
+  session: Subject(ActorMessage),
+  user_message_id: String,
+  timeout_ms: Int,
+) -> Result(Nil, RewindFilesError) {
+  // Generate a request ID for this operation
+  let request_id = generate_request_id()
+  let request = control.RewindFiles(request_id, user_message_id)
+
+  // Create subject to receive the result
+  let result_subject: Subject(RequestResult) = process.new_subject()
+
+  // Send the request
+  send_control_request(session, request, result_subject)
+
+  // Wait for response with specified timeout (default 30s for disk I/O)
+  let effective_timeout = case timeout_ms > 0 {
+    True -> timeout_ms
+    False -> rewind_files_timeout_ms
+  }
+
+  case process.receive(result_subject, effective_timeout) {
+    Ok(RequestSuccess(_)) -> Ok(Nil)
+    Ok(RequestError(message)) -> Error(RewindFilesCliError(message))
+    Ok(RequestTimeout) -> Error(RewindFilesTimeout)
+    Ok(RequestSessionStopped) -> Error(RewindFilesSessionStopped)
+    Error(Nil) -> {
+      // Client timed out before actor response - cancel the pending request
+      cancel_pending_request(session, request_id)
+      Error(RewindFilesTimeout)
+    }
   }
 }
 

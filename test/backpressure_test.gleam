@@ -49,6 +49,7 @@ fn test_state() -> SessionState {
     inject_subject: None,
     init_timeout_ms: 10_000,
     init_timer_ref: None,
+    file_checkpointing_enabled: False,
   )
 }
 
