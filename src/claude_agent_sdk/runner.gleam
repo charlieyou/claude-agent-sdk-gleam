@@ -49,6 +49,10 @@ pub type ReadResult {
   ReadError(String)
   /// End of file reached (port closed without exit status).
   Eof
+  /// Read timed out waiting for data.
+  /// Used by test runners to simulate timeout scenarios where the CLI
+  /// would hang indefinitely without producing output.
+  Timeout
 }
 
 /// Opaque handle type for process references.

@@ -5,6 +5,7 @@
 ///
 /// ## Test Cases
 /// - SDK-62: Delayed exit handling (mock runner delays then exits non-zero)
+/// - SDK-62: Timeout handling (mock runner simulates hung CLI via Timeout)
 /// - SDK-63: Stream interruption (partial data then abrupt close)
 /// - SDK-64: Invalid JSON in stream (malformed JSON handling)
 ///
@@ -93,6 +94,64 @@ pub fn sdk_62_delayed_exit_test() {
         }
         Ok(_) -> {
           // Unexpected success - should not happen with failing runner
+          should.fail()
+        }
+      }
+
+      // Cleanup
+      let _ = claude_agent_sdk.close(updated_stream)
+      Nil
+    }
+  }
+}
+
+/// SDK-62: Verify timeout during streaming is handled gracefully.
+///
+/// The mock runner returns Timeout on the first read, simulating a hung CLI
+/// that stops producing output. The SDK should handle this as end-of-stream
+/// or return an appropriate error, not hang indefinitely.
+///
+/// This complements sdk_62_delayed_exit_test which tests delayed exit handling.
+/// This test exercises the Timeout variant added to runner.ReadResult.
+pub fn sdk_62_timeout_test() {
+  // Create mock runner that returns Timeout immediately (simulating hung CLI)
+  let mock_runner =
+    runner.test_runner(
+      on_spawn: fn(_cmd, _args, _cwd) { Ok(to_dynamic(Nil)) },
+      on_read: fn(_handle) {
+        // Simulate CLI hang by returning Timeout
+        runner.Timeout
+      },
+      on_close: fn(_handle) { Nil },
+    )
+
+  let opts =
+    claude_agent_sdk.default_options()
+    |> claude_agent_sdk.with_test_mode(mock_runner)
+    |> claude_agent_sdk.with_max_turns(1)
+    |> claude_agent_sdk.with_skip_version_check
+
+  case claude_agent_sdk.query("test prompt", opts) {
+    Error(_err) -> {
+      // Query itself failed - acceptable for timeout scenario
+      Nil
+    }
+    Ok(stream) -> {
+      // Query succeeded, read from stream - should see timeout handling
+      let #(result, updated_stream) = claude_agent_sdk.next(stream)
+
+      // Timeout should result in EndOfStream or an error, not hang
+      case result {
+        Ok(EndOfStream) -> {
+          // Timeout treated as end of stream - valid behavior
+          Nil
+        }
+        Error(_) -> {
+          // Any error is acceptable for timeout scenario
+          Nil
+        }
+        Ok(_) -> {
+          // Unexpected data after timeout - fail the test
           should.fail()
         }
       }

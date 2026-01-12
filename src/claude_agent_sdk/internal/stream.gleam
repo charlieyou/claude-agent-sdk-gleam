@@ -687,10 +687,11 @@ fn receive_from_source(
       }
     }
     RunnerSource(runner:, handle:) -> {
-      // Runner doesn't support timeout, but mock can simulate it
+      // Runner can simulate timeout via Timeout variant
       case runner.read_next(runner, handle) {
         runner.Data(bytes) -> SourceData(bytes)
         runner.ExitStatus(code) -> SourceExitStatus(code)
+        runner.Timeout -> SourceTimeout
         runner.Eof -> SourceEof
         runner.ReadError(msg) -> SourceError(msg)
       }
