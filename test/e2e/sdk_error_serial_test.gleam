@@ -199,11 +199,14 @@ pub fn sdk_61_auth_failure_test() {
                   |> should.equal(1)
 
                   // Diagnostic should have auth-related hint
+                  // Assert on exact hint text for stability
                   diagnostic.exit_code_hint
-                  |> string.contains("Authentication")
-                  |> should.be_true
+                  |> should.equal("Authentication required")
 
-                  // Troubleshooting should mention API key
+                  // Troubleshooting should mention authentication and API key
+                  diagnostic.troubleshooting
+                  |> string.contains("Authenticate")
+                  |> should.be_true
                   diagnostic.troubleshooting
                   |> string.contains("ANTHROPIC_API_KEY")
                   |> should.be_true
