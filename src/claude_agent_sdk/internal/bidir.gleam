@@ -588,8 +588,9 @@ fn start_internal(
           request_timeout_tag,
           1,
           fn(msg_dyn: Dynamic) -> ActorMessage {
-            // msg_dyn is the entire tuple {request_timeout, RequestId}
-            // Extract request_id (the second element, index 1)
+            // gleam_erlang_ffi:select/2 passes the full Erlang tuple to the handler.
+            // msg_dyn = {request_timeout, RequestId} (2-element tuple)
+            // decode.at([1], ...) extracts index 1 (0-indexed), i.e., RequestId
             let request_id = case
               decode.run(msg_dyn, decode.at([1], decode.string))
             {
