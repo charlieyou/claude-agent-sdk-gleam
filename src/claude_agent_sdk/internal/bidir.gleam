@@ -44,8 +44,8 @@ import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
   type IncomingMessage, type OutgoingControlRequest,
   type OutgoingControlResponse, CanUseTool, ControlRequest, ControlResponse,
-  Error as ControlError, HookCallback, HookResponse, HookSuccess, McpMessage,
-  RegularMessage, Success,
+  Error as ControlError, HookCallback, HookResponse, HookSuccess, Interrupt,
+  McpMessage, RegularMessage, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -210,6 +210,18 @@ pub type RequestResult {
   RequestTimeout
   /// Session was stopped before request completed.
   RequestSessionStopped
+}
+
+/// Error type for interrupt() operation.
+///
+/// Represents the possible failure modes when calling interrupt().
+pub type InterruptError {
+  /// CLI returned an error response.
+  CliError(message: String)
+  /// Request timed out (5000ms default).
+  InterruptTimeout
+  /// Session was stopped or not running.
+  SessionStopped
 }
 
 /// A pending hook callback awaiting SDK response.
@@ -1492,6 +1504,75 @@ pub fn send_control_request(
 ) -> Nil {
   actor.send(session, SendControlRequest(request, reply_to))
 }
+
+// =============================================================================
+// Public Control Operations
+// =============================================================================
+
+/// Default timeout for interrupt operation (5000ms).
+const interrupt_timeout_ms: Int = 5000
+
+/// Interrupt the current operation.
+///
+/// Signals the CLI to stop the current processing and return control.
+/// This is a synchronous call that blocks until the CLI responds or times out.
+///
+/// ## Timeout
+///
+/// Uses a 5000ms timeout. Interrupt should complete quickly since it just
+/// signals the CLI to stop.
+///
+/// ## Returns
+///
+/// - `Ok(Nil)` - Interrupt succeeded
+/// - `Error(CliError(message))` - CLI returned an error (e.g., nothing to interrupt)
+/// - `Error(InterruptTimeout)` - No response within 5000ms
+/// - `Error(SessionStopped)` - Session is not running
+///
+/// ## Example
+///
+/// ```gleam
+/// case bidir.interrupt(session) {
+///   Ok(Nil) -> io.println("Interrupted successfully")
+///   Error(CliError(msg)) -> io.println("Interrupt failed: " <> msg)
+///   Error(InterruptTimeout) -> io.println("Interrupt timed out")
+///   Error(SessionStopped) -> io.println("Session not running")
+/// }
+/// ```
+pub fn interrupt(session: Subject(ActorMessage)) -> Result(Nil, InterruptError) {
+  // Generate a request ID for this interrupt
+  let request_id = generate_request_id()
+  let request = Interrupt(request_id)
+
+  // Create subject to receive the result
+  let result_subject: Subject(RequestResult) = process.new_subject()
+
+  // Send the request
+  send_control_request(session, request, result_subject)
+
+  // Wait for response with 5000ms timeout
+  case process.receive(result_subject, interrupt_timeout_ms) {
+    Ok(RequestSuccess(_)) -> Ok(Nil)
+    Ok(RequestError(message)) -> Error(CliError(message))
+    Ok(RequestTimeout) -> Error(InterruptTimeout)
+    Ok(RequestSessionStopped) -> Error(SessionStopped)
+    Error(Nil) -> Error(InterruptTimeout)
+  }
+}
+
+/// Generate a unique request ID for control operations.
+///
+/// Uses unique_integer for guaranteed uniqueness within a session.
+fn generate_request_id() -> String {
+  let id = unique_integer()
+  "req_" <> int_to_string(id)
+}
+
+@external(erlang, "claude_agent_sdk_ffi", "unique_integer")
+fn unique_integer() -> Int
+
+@external(erlang, "erlang", "integer_to_binary")
+fn int_to_string(n: Int) -> String
 
 // =============================================================================
 // Backpressure Helpers
