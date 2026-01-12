@@ -300,14 +300,27 @@ pub fn set_permission_mode_sync_actor_timeout_test() {
 /// Test: set_permission_mode cancels pending request on client timeout
 ///
 /// This test verifies the mailbox pollution fix: when the client times out
-/// before the actor, it cancels the pending request to prevent stale messages.
-/// We test this indirectly by using the low-level API with a very long actor timeout.
+/// before the actor's internal timeout, it cancels the pending request to prevent
+/// stale RequestTimeout messages from being delivered to the client's subject.
+///
+/// Strategy:
+/// 1. Use a short actor timeout (50ms)
+/// 2. Cancel the request immediately after sending
+/// 3. Wait longer than the actor timeout (200ms)
+/// 4. Verify no RequestTimeout is delivered to result_subject
 pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
-  // This test verifies the CancelPendingRequest message exists and is handled
-  // by calling cancel_pending_request directly
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
-  let config = bidir.default_config(subscriber)
+  // Use short actor timeout so it would fire if not cancelled
+  let config =
+    bidir.StartConfig(
+      subscriber: subscriber,
+      default_timeout_ms: 50,
+      hook_timeouts: dict.new(),
+      init_timeout_ms: 10_000,
+      default_hook_timeout_ms: 30_000,
+      enable_file_checkpointing: False,
+    )
   let assert Ok(session) = bidir.start(mock.runner, config)
 
   // Complete init
@@ -318,7 +331,7 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
   )
   process.sleep(50)
 
-  // Send a request manually
+  // Send a request - actor will schedule a 50ms timeout
   let result_subject: process.Subject(bidir.RequestResult) =
     process.new_subject()
   bidir.send_control_request(
@@ -330,9 +343,16 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
   // Consume the request from mock
   let assert Ok(_) = process.receive(mock.writes, 500)
 
-  // Cancel the pending request (simulates what set_permission_mode does on timeout)
+  // Cancel the pending request immediately (simulates client timeout)
+  // This should cancel the timer and remove the pending request
   bidir.cancel_pending_request(session, "req_cancel_test")
-  process.sleep(50)
+
+  // Wait longer than the actor timeout would have been (50ms)
+  // If cancellation failed, we'd receive RequestTimeout here
+  let receive_result = process.receive(result_subject, 200)
+
+  // Should NOT receive anything - timeout was cancelled
+  should.be_error(receive_result)
 
   // Actor should still be alive and responsive
   should.equal(bidir.get_lifecycle(session, 1000), Running)
