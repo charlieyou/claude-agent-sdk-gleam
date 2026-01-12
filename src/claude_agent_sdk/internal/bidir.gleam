@@ -226,8 +226,13 @@ pub type PendingHook {
 /// Operations may be queued during startup before the session is fully initialized.
 pub type QueuedOperation {
   /// A control request to send once Running.
+  ///
+  /// The payload must be a pre-encoded JSON string (without trailing newline),
+  /// created via control_encoder.encode_request. This ensures wire format
+  /// consistency with directly-sent requests.
   QueuedRequest(
     request_id: String,
+    /// Pre-encoded JSON string (use control_encoder.encode_request).
     payload: Dynamic,
     reply_to: Subject(RequestResult),
   )
@@ -990,17 +995,24 @@ fn handle_init_timeout(
 ///
 /// Sends all queued operations to CLI without blocking.
 /// Each operation gets its own pending request entry.
+///
+/// Note: QueuedRequest.payload must be a pre-encoded JSON string (without
+/// trailing newline). Callers should encode via control_encoder.encode_request
+/// before queuing. This is consistent with the wire format used elsewhere.
 fn flush_queued_ops(state: SessionState) -> SessionState {
+  // Reverse to process in FIFO order (queue_operation prepends)
+  let ops_in_order = list.reverse(state.queued_ops)
+
   // Process each queued operation and accumulate updated pending_requests
   let #(new_pending, _) =
     list.fold(
-      state.queued_ops,
+      ops_in_order,
       #(state.pending_requests, state.runner),
       fn(acc, op) {
         let #(pending, runner) = acc
         case op {
           QueuedRequest(request_id, payload, reply_to) -> {
-            // Extract the encoded JSON string from payload
+            // Extract the pre-encoded JSON string from payload
             case decode.run(payload, decode.string) {
               Ok(json_str) -> {
                 // Send to CLI
@@ -1008,6 +1020,7 @@ fn flush_queued_ops(state: SessionState) -> SessionState {
                 let _result = write_fn(json_str <> "\n")
 
                 // Register in pending_requests for response correlation
+                // Note: sent_at=0 is acceptable since timeout logic is not yet implemented
                 let pending_req =
                   PendingRequest(
                     request_id: request_id,
@@ -1019,10 +1032,12 @@ fn flush_queued_ops(state: SessionState) -> SessionState {
                 #(updated_pending, runner)
               }
               Error(_) -> {
-                // Invalid payload - send error to caller
+                // Invalid payload - caller didn't pre-encode as JSON string
                 process.send(
                   reply_to,
-                  RequestError("Invalid queued request payload"),
+                  RequestError(
+                    "Invalid queued request payload: expected pre-encoded JSON string",
+                  ),
                 )
                 #(pending, runner)
               }
