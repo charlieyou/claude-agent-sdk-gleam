@@ -328,3 +328,35 @@ pub fn decode_ignores_unknown_fields_test() {
     _ -> should.fail()
   }
 }
+
+// =============================================================================
+// Event Name Mismatch Tests
+// =============================================================================
+
+pub fn decode_event_name_mismatch_returns_unknown_event_name_test() {
+  // Passing Stop event but payload has hook_event_name = "PreToolUse"
+  let json_str =
+    "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"abc123\",\"tool_name\":\"Bash\",\"tool_input\":{}}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(Stop, input)
+
+  case result {
+    Error(UnknownEventName(name)) -> should.equal(name, "PreToolUse")
+    _ -> should.fail()
+  }
+}
+
+pub fn decode_missing_hook_event_name_test() {
+  // Payload is missing hook_event_name field entirely
+  let json_str =
+    "{\"session_id\":\"abc123\",\"tool_name\":\"Bash\",\"tool_input\":{}}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreToolUse, input)
+
+  case result {
+    Error(MissingField(field)) -> should.equal(field, "hook_event_name")
+    _ -> should.fail()
+  }
+}

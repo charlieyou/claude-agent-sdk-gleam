@@ -57,6 +57,19 @@ pub type HookEvent {
   CanUseTool
 }
 
+/// Convert a HookEvent to its expected JSON hook_event_name string.
+fn hook_event_to_string(event: HookEvent) -> String {
+  case event {
+    PreToolUse -> "PreToolUse"
+    PostToolUse -> "PostToolUse"
+    UserPromptSubmit -> "UserPromptSubmit"
+    Stop -> "Stop"
+    SubagentStop -> "SubagentStop"
+    PreCompact -> "PreCompact"
+    CanUseTool -> "CanUseTool"
+  }
+}
+
 // =============================================================================
 // Context Types
 // =============================================================================
@@ -232,19 +245,37 @@ pub type HookDecodeError {
 /// Decode hook input to typed context based on event type.
 ///
 /// Dispatches to the appropriate decoder based on the HookEvent variant.
+/// Validates that hook_event_name matches the expected event.
 /// Unknown fields are ignored for forward compatibility.
 pub fn decode_hook_input(
   event: HookEvent,
   input: Dynamic,
 ) -> Result(HookInput, HookDecodeError) {
-  case event {
-    PreToolUse -> decode_pre_tool_use(input)
-    PostToolUse -> decode_post_tool_use(input)
-    UserPromptSubmit -> decode_user_prompt_submit(input)
-    Stop -> decode_stop(input)
-    SubagentStop -> decode_subagent_stop(input)
-    PreCompact -> decode_pre_compact(input)
-    CanUseTool -> decode_can_use_tool(input)
+  // First validate hook_event_name matches expected event
+  let expected_name = hook_event_to_string(event)
+  let name_decoder = {
+    use name <- decode.field("hook_event_name", decode.string)
+    decode.success(name)
+  }
+  case decode.run(input, name_decoder) {
+    Error(_) -> Error(MissingField("hook_event_name"))
+    Ok(actual_name) -> {
+      case actual_name == expected_name {
+        False -> Error(UnknownEventName(actual_name))
+        True -> {
+          // Event name matches, proceed with event-specific decoding
+          case event {
+            PreToolUse -> decode_pre_tool_use(input)
+            PostToolUse -> decode_post_tool_use(input)
+            UserPromptSubmit -> decode_user_prompt_submit(input)
+            Stop -> decode_stop(input)
+            SubagentStop -> decode_subagent_stop(input)
+            PreCompact -> decode_pre_compact(input)
+            CanUseTool -> decode_can_use_tool(input)
+          }
+        }
+      }
+    }
   }
 }
 
