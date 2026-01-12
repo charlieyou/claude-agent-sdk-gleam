@@ -37,7 +37,7 @@ pub type StartError {
 fn ffi_open_port_bidir(executable: String, args: List(String)) -> Dynamic
 
 /// Open a port with bidirectional protocol options.
-/// Uses spawn_executable with binary, {packet, 0}, exit_status, use_stdio,
+/// Uses spawn_executable with binary, exit_status, use_stdio,
 /// and stderr_to_stdout (on OTP >= 25).
 fn open_port_bidir(
   executable: String,

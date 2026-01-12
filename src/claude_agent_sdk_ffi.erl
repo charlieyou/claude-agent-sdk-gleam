@@ -44,7 +44,6 @@ open_port_safe(Executable, Args, WorkingDir) ->
 %% Opens a port for bidirectional protocol communication.
 %% Uses spawn_executable with options optimized for streaming JSON:
 %% - binary: receive data as binary, not list
-%% - {packet, 0}: raw binary mode, no framing (we handle line parsing)
 %% - exit_status: receive {Port, {exit_status, Code}} on process exit
 %% - use_stdio: communicate via stdin/stdout
 %% - stderr_to_stdout: merge stderr into stdout (OTP >= 25 only)
