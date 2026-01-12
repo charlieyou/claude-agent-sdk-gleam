@@ -34,6 +34,7 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
+import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 
@@ -213,7 +214,11 @@ pub type PendingHook {
 /// Operations may be queued during startup before the session is fully initialized.
 pub type QueuedOperation {
   /// A control request to send once Running.
-  QueuedRequest(request_id: String, payload: Dynamic)
+  QueuedRequest(
+    request_id: String,
+    payload: Dynamic,
+    reply_to: Subject(RequestResult),
+  )
 }
 
 // =============================================================================
@@ -764,19 +769,28 @@ fn flush_queued_ops(state: SessionState) -> SessionState {
 ///
 /// This function performs the full cleanup sequence:
 /// 1. Resolve all pending_requests with RequestSessionStopped
-/// 2. Clear queued_ops (no reply_to field to notify)
+/// 2. Resolve all queued_ops with RequestSessionStopped
 /// 3. Close the runner (terminates CLI process)
 /// 4. Notify subscriber with SessionEnded
 ///
 /// Note: Timer cancellation will be added when timers are implemented.
+/// State maps are not explicitly cleared since actor.stop() is called
+/// immediately after cleanup, terminating the actor process.
 fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
   // 1. Resolve all pending SDK-initiated requests with session stopped error
-  dict.each(state.pending_requests, fn(_request_id, pending) {
-    process.send(pending.reply_to, RequestSessionStopped)
-  })
+  let _ =
+    dict.each(state.pending_requests, fn(_request_id, pending) {
+      process.send(pending.reply_to, RequestSessionStopped)
+    })
 
-  // 2. queued_ops don't have reply_to fields yet, so nothing to notify
-  // (Will be updated when QueuedOperation gets reply_to in future task)
+  // 2. Resolve all queued operations with session stopped error
+  list.each(state.queued_ops, fn(op) {
+    case op {
+      QueuedRequest(_request_id, _payload, reply_to) -> {
+        process.send(reply_to, RequestSessionStopped)
+      }
+    }
+  })
 
   // 3. Close the runner (terminates CLI process)
   let close_fn = state.runner.close

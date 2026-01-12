@@ -151,19 +151,15 @@ pub fn hook_result_continue_test() {
 
 pub fn hook_result_block_test() {
   let result = Block(reason: "Operation not allowed")
-  case result {
-    Block(reason) -> should.equal(reason, "Operation not allowed")
-    _ -> should.fail()
-  }
+  let Block(reason) = result
+  should.equal(reason, "Operation not allowed")
 }
 
 pub fn hook_result_modify_input_test() {
   let new_input = to_dynamic("modified input")
   let result = ModifyInput(new_input: new_input)
-  case result {
-    ModifyInput(input) -> should.equal(input, new_input)
-    _ -> should.fail()
-  }
+  let ModifyInput(input) = result
+  should.equal(input, new_input)
 }
 
 pub fn permission_result_allow_test() {
@@ -173,10 +169,8 @@ pub fn permission_result_allow_test() {
 
 pub fn permission_result_deny_test() {
   let result = Deny(reason: "Insufficient permissions")
-  case result {
-    Deny(reason) -> should.equal(reason, "Insufficient permissions")
-    _ -> should.fail()
-  }
+  let Deny(reason) = result
+  should.equal(reason, "Insufficient permissions")
 }
 
 // =============================================================================
@@ -191,10 +185,8 @@ pub fn hook_input_pre_tool_use_test() {
       session_id: "session-1",
     )
   let input = PreToolUseInput(ctx)
-  case input {
-    PreToolUseInput(c) -> should.equal(c.tool_name, "Bash")
-    _ -> should.fail()
-  }
+  let PreToolUseInput(c) = input
+  should.equal(c.tool_name, "Bash")
 }
 
 pub fn hook_input_post_tool_use_test() {
@@ -206,10 +198,8 @@ pub fn hook_input_post_tool_use_test() {
       session_id: "session-2",
     )
   let input = PostToolUseInput(ctx)
-  case input {
-    PostToolUseInput(c) -> should.equal(c.tool_name, "Read")
-    _ -> should.fail()
-  }
+  let PostToolUseInput(c) = input
+  should.equal(c.tool_name, "Read")
 }
 
 pub fn hook_input_can_use_tool_test() {
@@ -222,32 +212,24 @@ pub fn hook_input_can_use_tool_test() {
       blocked_path: Some("/path/to/file"),
     )
   let input = CanUseToolInput(ctx)
-  case input {
-    CanUseToolInput(c) -> {
-      should.equal(c.tool_name, "Write")
-      should.equal(c.permission_suggestions, ["allow_write"])
-    }
-    _ -> should.fail()
-  }
+  let CanUseToolInput(c) = input
+  should.equal(c.tool_name, "Write")
+  should.equal(c.permission_suggestions, ["allow_write"])
 }
 
 pub fn hook_input_user_prompt_submit_test() {
   let ctx =
     UserPromptSubmitContext(prompt: "Test prompt", session_id: "session-3")
   let input = UserPromptSubmitInput(ctx)
-  case input {
-    UserPromptSubmitInput(c) -> should.equal(c.prompt, "Test prompt")
-    _ -> should.fail()
-  }
+  let UserPromptSubmitInput(c) = input
+  should.equal(c.prompt, "Test prompt")
 }
 
 pub fn hook_input_stop_test() {
   let ctx = StopContext(reason: "done", session_id: "session-4")
   let input = StopInput(ctx)
-  case input {
-    StopInput(c) -> should.equal(c.reason, "done")
-    _ -> should.fail()
-  }
+  let StopInput(c) = input
+  should.equal(c.reason, "done")
 }
 
 pub fn hook_input_subagent_stop_test() {
@@ -258,19 +240,15 @@ pub fn hook_input_subagent_stop_test() {
       session_id: "session-5",
     )
   let input = SubagentStopInput(ctx)
-  case input {
-    SubagentStopInput(c) -> should.equal(c.subagent_id, "sub-1")
-    _ -> should.fail()
-  }
+  let SubagentStopInput(c) = input
+  should.equal(c.subagent_id, "sub-1")
 }
 
 pub fn hook_input_pre_compact_test() {
   let ctx = PreCompactContext(session_id: "session-6")
   let input = PreCompactInput(ctx)
-  case input {
-    PreCompactInput(c) -> should.equal(c.session_id, "session-6")
-    _ -> should.fail()
-  }
+  let PreCompactInput(c) = input
+  should.equal(c.session_id, "session-6")
 }
 
 // =============================================================================

@@ -7,13 +7,10 @@ import gleam/option.{None, Some}
 import gleeunit/should
 
 import claude_agent_sdk/hook.{
-  type HookDecodeError, type HookEvent, type HookInput, CanUseTool,
-  CanUseToolContext, CanUseToolInput, MissingField, PostToolUse,
-  PostToolUseContext, PostToolUseInput, PreCompact, PreCompactContext,
-  PreCompactInput, PreToolUse, PreToolUseContext, PreToolUseInput, Stop,
-  StopContext, StopInput, SubagentStop, SubagentStopContext, SubagentStopInput,
-  UnknownEventName, UserPromptSubmit, UserPromptSubmitContext,
-  UserPromptSubmitInput, WrongType, decode_hook_input,
+  CanUseTool, CanUseToolInput, MissingField, PostToolUse, PostToolUseInput,
+  PreCompact, PreCompactInput, PreToolUse, PreToolUseInput, Stop, StopInput,
+  SubagentStop, SubagentStopInput, UserPromptSubmit, UserPromptSubmitInput,
+  WrongType, decode_hook_input,
 }
 
 import gleam/dynamic/decode

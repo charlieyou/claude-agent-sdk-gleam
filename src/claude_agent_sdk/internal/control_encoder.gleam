@@ -6,7 +6,6 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/json.{type Json}
 import gleam/list
-import gleam/option.{None, Some}
 
 import claude_agent_sdk/control.{
   type HookRegistration, type HookResult, type OutgoingControlRequest,

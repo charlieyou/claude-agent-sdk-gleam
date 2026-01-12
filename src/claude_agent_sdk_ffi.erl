@@ -59,7 +59,6 @@ open_port_bidir(Executable, Args) ->
     BaseOpts = [
         {args, ArgsStr},
         binary,
-        {packet, 0},
         exit_status,
         use_stdio
     ],

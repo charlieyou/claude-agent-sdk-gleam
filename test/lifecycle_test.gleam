@@ -7,7 +7,6 @@
 import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
-  type InvalidTransition, type LifecycleEvent, type SessionLifecycle,
   CliExitedDuringInit, CliExitedDuringStartup, CliSpawned, ErrorOccurred, Failed,
   InitSent, InitSuccess, InitTimeout, InitializationError, InitializationTimeout,
   InvalidTransition, PortClosed, Running, RuntimeError, Starting, StopRequested,
