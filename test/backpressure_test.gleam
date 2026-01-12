@@ -5,6 +5,7 @@
 /// - pending_requests: max 64, returns TooManyPendingRequests
 /// - pending_hooks: max 32, returns immediate fail response (no spawn)
 import gleam/dict
+import gleam/dynamic
 import gleam/erlang/process
 import gleam/int
 import gleam/list
@@ -43,6 +44,7 @@ fn test_state() -> SessionState {
     capabilities: None,
     default_timeout_ms: 60_000,
     hook_timeouts: dict.new(),
+    default_hook_timeout_ms: 30_000,
     init_request_id: None,
     inject_subject: None,
     init_timeout_ms: 10_000,
@@ -67,6 +69,7 @@ fn make_pending_hook(id: String) -> PendingHook {
   PendingHook(
     task_pid: stub_pid(),
     monitor_ref: stub_monitor(),
+    timer_ref: dynamic.nil(),
     callback_id: "cb-" <> id,
     request_id: "req-" <> id,
     received_at: 0,

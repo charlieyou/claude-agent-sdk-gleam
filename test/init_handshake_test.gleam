@@ -165,6 +165,7 @@ pub fn timeout_transitions_to_failed_test() {
       default_timeout_ms: 60_000,
       hook_timeouts: dict.new(),
       init_timeout_ms: 100,
+      default_hook_timeout_ms: 30_000,
     )
 
   // Start actor

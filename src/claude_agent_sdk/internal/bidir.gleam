@@ -245,6 +245,8 @@ pub type PendingHook {
     task_pid: process.Pid,
     /// Monitor reference for crash detection.
     monitor_ref: process.Monitor,
+    /// Timer reference for timeout (for first-event-wins cancellation).
+    timer_ref: Dynamic,
     /// The callback ID from the CLI.
     callback_id: String,
     /// The request ID for the response.
@@ -425,6 +427,8 @@ pub type SessionState {
     default_timeout_ms: Int,
     /// Per-event hook timeouts (ms).
     hook_timeouts: Dict(HookEvent, Int),
+    /// Default timeout for hook callbacks (ms).
+    default_hook_timeout_ms: Int,
     /// Request ID of the init request (for correlation).
     init_request_id: Option(String),
     /// Subject for receiving injected messages (for testing).
@@ -471,6 +475,8 @@ pub type ActorMessage {
   HookDone(request_id: String, result: Dynamic)
   /// Hook task crashed with error.
   HookError(request_id: String, reason: Dynamic)
+  /// Hook timeout fired (first-event-wins protocol).
+  HookTimeout(request_id: String)
 }
 
 /// Responses from synchronous operations.
@@ -502,6 +508,8 @@ pub type StartConfig {
     hook_timeouts: Dict(HookEvent, Int),
     /// Timeout for initialization handshake (ms). Default: 10000.
     init_timeout_ms: Int,
+    /// Default timeout for hook callbacks (ms). Default: 30000.
+    default_hook_timeout_ms: Int,
   )
 }
 
@@ -512,6 +520,7 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
     default_timeout_ms: 60_000,
     hook_timeouts: dict.new(),
     init_timeout_ms: 10_000,
+    default_hook_timeout_ms: 30_000,
   )
 }
 
@@ -595,6 +604,7 @@ fn start_internal(
           capabilities: None,
           default_timeout_ms: config.default_timeout_ms,
           hook_timeouts: config.hook_timeouts,
+          default_hook_timeout_ms: config.default_hook_timeout_ms,
           init_request_id: Some(init_request_id),
           inject_subject: None,
           init_timeout_ms: config.init_timeout_ms,
@@ -610,10 +620,12 @@ fn start_internal(
       // 3. Request timeout message {request_timeout, request_id} (via select_record)
       // 4. Hook done message {hook_done, request_id, result} (via select_record)
       // 5. Hook error message {hook_error, request_id, reason} (via select_record)
+      // 6. Hook timeout message {hook_timeout, request_id} (via select_record)
       let init_timeout_tag = atom.create("init_timeout")
       let request_timeout_tag = atom.create("request_timeout")
       let hook_done_tag = atom.create("hook_done")
       let hook_error_tag = atom.create("hook_error")
+      let hook_timeout_tag = atom.create("hook_timeout")
       let selector =
         process.new_selector()
         |> process.select_map(self_subject, fn(msg) { msg })
@@ -674,6 +686,20 @@ fn start_internal(
               Error(_) -> dynamic.nil()
             }
             HookError(request_id, reason)
+          },
+        )
+        |> process.select_record(
+          hook_timeout_tag,
+          1,
+          fn(msg_dyn: Dynamic) -> ActorMessage {
+            // msg_dyn = {hook_timeout, RequestId} (2-element tuple)
+            let request_id = case
+              decode.run(msg_dyn, decode.at([1], decode.string))
+            {
+              Ok(id) -> id
+              Error(_) -> "unknown"
+            }
+            HookTimeout(request_id)
           },
         )
 
@@ -750,6 +776,21 @@ fn schedule_request_timeout(timeout_ms: Int, request_id: String) -> Dynamic
 @external(erlang, "bidir_ffi", "cancel_timer")
 fn cancel_timer(timer_ref: Dynamic) -> Bool
 
+/// Schedule hook timeout by sending HookTimeout message after delay.
+///
+/// Uses erlang:send_after/3 to schedule the timeout message.
+/// The message includes request_id for correlation.
+/// Returns the timer reference for later cancellation.
+@external(erlang, "bidir_ffi", "schedule_hook_timeout")
+fn schedule_hook_timeout(timeout_ms: Int, request_id: String) -> Dynamic
+
+/// Kill a task process immediately.
+///
+/// Uses erlang:exit/2 with 'kill' reason for immediate termination.
+/// Used when hook timeout fires before task completes.
+@external(erlang, "bidir_ffi", "kill_task")
+fn kill_task(pid: process.Pid) -> Nil
+
 /// Spawn a hook task to execute callback in separate process.
 ///
 /// The task executes the handler with input and sends {hook_done, request_id, result}
@@ -812,6 +853,9 @@ fn handle_message(
     HookError(request_id, _reason) -> {
       handle_hook_error(state, request_id)
     }
+    HookTimeout(request_id) -> {
+      handle_hook_timeout(state, request_id)
+    }
   }
 }
 
@@ -827,6 +871,9 @@ fn handle_hook_done(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
+      // Cancel the timeout timer (we won the race)
+      let _ = cancel_timer(pending.timer_ref)
+
       // Demonitor the task (cleanup)
       demonitor_hook(pending.monitor_ref)
 
@@ -855,6 +902,9 @@ fn handle_hook_error(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
+      // Cancel the timeout timer (we won the race)
+      let _ = cancel_timer(pending.timer_ref)
+
       // Demonitor the task (cleanup)
       demonitor_hook(pending.monitor_ref)
 
@@ -869,6 +919,38 @@ fn handle_hook_error(
     }
     Error(Nil) -> {
       // Already handled (timeout won), ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle hook timeout (first-event-wins protocol).
+///
+/// Called when the timeout fires before hook task completes. Kills the task,
+/// sends fail-open response, and removes from pending_hooks.
+fn handle_hook_timeout(
+  state: SessionState,
+  request_id: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  case dict.get(state.pending_hooks, request_id) {
+    Ok(pending) -> {
+      // Kill the task (timeout won the race)
+      kill_task(pending.task_pid)
+
+      // Demonitor with flush to clear any DOWN message
+      demonitor_hook(pending.monitor_ref)
+
+      // Send fail-open response to CLI (allow continuation despite timeout)
+      let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
+      let response = HookResponse(request_id, HookSuccess(fail_open_result))
+      send_control_response(state, response)
+
+      // Remove from pending_hooks
+      let new_pending = dict.delete(state.pending_hooks, request_id)
+      actor.continue(SessionState(..state, pending_hooks: new_pending))
+    }
+    Error(Nil) -> {
+      // Already handled (HookDone/HookError won), ignore stale timeout
       actor.continue(state)
     }
   }
@@ -1159,11 +1241,16 @@ fn dispatch_hook_callback(
           let #(task_pid, monitor_ref) =
             spawn_hook_task(parent_pid, request_id, handler, input)
 
-          // Record the pending hook
+          // Schedule timeout for first-event-wins protocol
+          let timer_ref =
+            schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
+
+          // Record the pending hook with timer reference
           let pending =
             PendingHook(
               task_pid: task_pid,
               monitor_ref: monitor_ref,
+              timer_ref: timer_ref,
               callback_id: callback_id,
               request_id: request_id,
               received_at: 0,
@@ -1515,7 +1602,19 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
       process.send(pending.reply_to, RequestSessionStopped)
     })
 
-  // 3. Resolve all queued operations with session stopped error
+  // 3. Cancel timers and kill tasks for pending hook callbacks
+  let _ =
+    dict.each(state.pending_hooks, fn(_request_id, pending) {
+      // Cancel timeout timer
+      let _ = cancel_timer(pending.timer_ref)
+      // Kill the task
+      kill_task(pending.task_pid)
+      // Demonitor to avoid stray DOWN messages
+      demonitor_hook(pending.monitor_ref)
+      Nil
+    })
+
+  // 4. Resolve all queued operations with session stopped error
   list.each(state.queued_ops, fn(op) {
     case op {
       QueuedRequest(_request_id, _payload, reply_to) -> {
@@ -1524,11 +1623,11 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
     }
   })
 
-  // 4. Close the runner (terminates CLI process)
+  // 5. Close the runner (terminates CLI process)
   let close_fn = state.runner.close
   close_fn()
 
-  // 5. Notify subscriber that session has ended
+  // 6. Notify subscriber that session has ended
   process.send(state.subscriber, SessionEnded(reason))
 
   Nil

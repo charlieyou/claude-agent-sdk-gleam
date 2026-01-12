@@ -1,6 +1,6 @@
 -module(bidir_ffi).
--export([schedule_init_timeout/1, schedule_request_timeout/2, cancel_timer/1,
-         spawn_hook_task/4, demonitor_hook/1]).
+-export([schedule_init_timeout/1, schedule_request_timeout/2, schedule_hook_timeout/2,
+         cancel_timer/1, spawn_hook_task/4, demonitor_hook/1, kill_task/1]).
 
 %% Schedule an init timeout message to be sent to the calling process.
 %%
@@ -66,4 +66,27 @@ spawn_hook_task(Parent, RequestId, Handler, Input) ->
 %% Removes the monitor and flushes any DOWN message from the mailbox.
 demonitor_hook(MonitorRef) ->
     erlang:demonitor(MonitorRef, [flush]),
+    nil.
+
+%% Schedule a hook timeout message to be sent to the calling process.
+%%
+%% Uses erlang:send_after/3 to send a tagged tuple message after the
+%% specified delay. The message includes the request_id for correlation.
+%%
+%% The message format {hook_timeout, RequestId} can be received by a selector
+%% using select_record with tag=hook_timeout and arity=1.
+%%
+%% Returns the timer reference for later cancellation.
+schedule_hook_timeout(TimeoutMs, RequestId) ->
+    Self = self(),
+    erlang:send_after(TimeoutMs, Self, {hook_timeout, RequestId}).
+
+%% Kill a task process immediately.
+%%
+%% Unlinks from the task first to prevent the exit signal from propagating
+%% back to the calling process, then sends kill signal.
+%% This is used when a hook timeout fires before the task completes.
+kill_task(Pid) ->
+    erlang:unlink(Pid),
+    erlang:exit(Pid, kill),
     nil.
