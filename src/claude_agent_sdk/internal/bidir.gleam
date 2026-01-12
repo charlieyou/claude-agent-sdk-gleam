@@ -32,12 +32,18 @@
 /// ```
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
+import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
-import gleam/option.{type Option, None}
+import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 
+import claude_agent_sdk/control.{
+  type IncomingControlResponse, Error as ControlError, Success,
+}
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
+import claude_agent_sdk/internal/control_decoder
+import claude_agent_sdk/internal/control_encoder
 
 // =============================================================================
 // Session Lifecycle
@@ -296,6 +302,12 @@ pub type SessionState {
     default_timeout_ms: Int,
     /// Per-event hook timeouts (ms).
     hook_timeouts: Dict(HookEvent, Int),
+    /// Request ID of the init request (for correlation).
+    init_request_id: Option(String),
+    /// Subject for receiving injected messages (for testing).
+    inject_subject: Option(Subject(String)),
+    /// Timeout for initialization handshake (ms).
+    init_timeout_ms: Int,
   )
 }
 
@@ -311,10 +323,18 @@ pub type SessionState {
 pub type ActorMessage {
   /// Get current lifecycle state.
   GetLifecycle(reply_to: Subject(SessionLifecycle))
+  /// Get current capabilities.
+  GetCapabilities(reply_to: Subject(Option(CliCapabilities)))
   /// Ping for health check.
   Ping(reply_to: Subject(Response))
   /// Shutdown the session gracefully.
   ShutdownActor
+  /// Injected JSON message from mock runner (for testing).
+  InjectedMessage(json: String)
+  /// Injected port closed event from mock runner (for testing).
+  InjectedPortClosed
+  /// Init timeout fired.
+  InitTimeoutFired
 }
 
 /// Responses from synchronous operations.
@@ -344,6 +364,8 @@ pub type StartConfig {
     default_timeout_ms: Int,
     /// Hook timeouts per event.
     hook_timeouts: Dict(HookEvent, Int),
+    /// Timeout for initialization handshake (ms). Default: 10000.
+    init_timeout_ms: Int,
   )
 }
 
@@ -353,6 +375,7 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
     subscriber: subscriber,
     default_timeout_ms: 60_000,
     hook_timeouts: dict.new(),
+    init_timeout_ms: 10_000,
   )
 }
 
@@ -364,34 +387,91 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
 /// ## Port Ownership Note
 ///
 /// In the current skeleton, the runner is passed in for testing purposes.
-/// The full implementation (T3) will use `new_with_initialiser` to spawn
+/// The full implementation will use `new_with_initialiser` to spawn
 /// the port inside the actor's init function, ensuring proper port ownership.
 /// Mock runners work correctly because they don't use real port messages.
 pub fn start(
   runner: BidirRunner,
   config: StartConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
-  let initial_state =
-    SessionState(
-      runner: runner,
-      lifecycle: Starting,
-      pending_requests: dict.new(),
-      pending_hooks: dict.new(),
-      queued_ops: [],
-      hooks: empty_hook_config(),
-      mcp_handlers: dict.new(),
-      next_request_id: 0,
-      next_callback_id: 0,
-      subscriber: config.subscriber,
-      capabilities: None,
-      default_timeout_ms: config.default_timeout_ms,
-      hook_timeouts: config.hook_timeouts,
-    )
+  start_internal(runner, config, None)
+}
 
-  // Use the Builder pattern for gleam_otp 1.x
-  // Note: Port selector will be added in T3 using new_with_initialiser
+/// Start a bidirectional session actor for testing.
+///
+/// This is the same as `start` but exposes the actor subject for
+/// injecting messages during tests. Use `inject_message` and
+/// `inject_port_closed` to simulate CLI responses.
+pub fn start_for_testing(
+  runner: BidirRunner,
+  config: StartConfig,
+) -> Result(Subject(ActorMessage), StartError) {
+  start_internal(runner, config, None)
+}
+
+/// Inject a JSON message to the actor as if it came from the CLI.
+///
+/// This is for testing only - simulates a control_response or other
+/// CLI message arriving on the port.
+pub fn inject_message(session: Subject(ActorMessage), json: String) -> Nil {
+  actor.send(session, InjectedMessage(json))
+}
+
+/// Internal start function.
+fn start_internal(
+  runner: BidirRunner,
+  config: StartConfig,
+  _inject_subject: Option(Subject(String)),
+) -> Result(Subject(ActorMessage), StartError) {
+  // Generate the init request ID
+  let init_request_id = "req_0"
+
+  // Use new_with_initialiser to perform init handshake during actor start
   let builder =
-    actor.new(initial_state)
+    actor.new_with_initialiser(5000, fn(self_subject) {
+      // Build initial state
+      let initial_state =
+        SessionState(
+          runner: runner,
+          lifecycle: Starting,
+          pending_requests: dict.new(),
+          pending_hooks: dict.new(),
+          queued_ops: [],
+          hooks: empty_hook_config(),
+          mcp_handlers: dict.new(),
+          next_request_id: 1,
+          // Start at 1 since req_0 is used for init
+          next_callback_id: 0,
+          subscriber: config.subscriber,
+          capabilities: None,
+          default_timeout_ms: config.default_timeout_ms,
+          hook_timeouts: config.hook_timeouts,
+          init_request_id: Some(init_request_id),
+          inject_subject: None,
+          init_timeout_ms: config.init_timeout_ms,
+        )
+
+      // Perform the initialization handshake
+      let state_after_init = perform_init_handshake(initial_state)
+
+      // Build a selector that handles:
+      // 1. Messages on the actor's subject (via process.selecting)
+      // 2. Init timeout message {init_timeout, nil} (via select_record)
+      let init_timeout_tag = atom.create("init_timeout")
+      let selector =
+        process.new_selector()
+        |> process.select_map(self_subject, fn(msg) { msg })
+        |> process.select_record(init_timeout_tag, 1, fn(_dyn) {
+          InitTimeoutFired
+        })
+
+      // Return the actor's subject to the caller with custom selector
+      Ok(
+        actor.initialised(state_after_init)
+        |> actor.selecting(selector)
+        |> actor.returning(self_subject),
+      )
+    })
     |> actor.on_message(handle_message)
 
   case actor.start(builder) {
@@ -399,6 +479,46 @@ pub fn start(
     Error(err) -> Error(ActorStartFailed(err))
   }
 }
+
+/// Perform initialization handshake.
+///
+/// Called during actor init:
+/// 1. Transition to InitSent
+/// 2. Send initialize control_request
+/// 3. Schedule init timeout timer
+fn perform_init_handshake(state: SessionState) -> SessionState {
+  // Transition from Starting to InitSent
+  let assert Ok(new_lifecycle) = transition(state.lifecycle, CliSpawned)
+
+  // Build the initialize request
+  let assert Some(request_id) = state.init_request_id
+  let init_request =
+    control.Initialize(
+      request_id: request_id,
+      hooks: [],
+      // Hooks will be populated from config in future
+      mcp_servers: [],
+      enable_file_checkpointing: False,
+    )
+
+  // Encode and send the request
+  let json_line = control_encoder.encode_request(init_request) <> "\n"
+  let write_fn = state.runner.write
+  let _result = write_fn(json_line)
+
+  // Schedule init timeout (send message to self after delay)
+  // Note: This uses process.send_after via the inject mechanism for now
+  // Full implementation would use OTP timers
+  schedule_init_timeout(state.init_timeout_ms)
+
+  SessionState(..state, lifecycle: new_lifecycle)
+}
+
+/// Schedule init timeout by sending InitTimeoutFired message after delay.
+///
+/// Uses erlang:send_after/3 to schedule the timeout message.
+@external(erlang, "bidir_ffi", "schedule_init_timeout")
+fn schedule_init_timeout(timeout_ms: Int) -> Nil
 
 /// Handle incoming messages to the actor.
 ///
@@ -412,6 +532,10 @@ fn handle_message(
       process.send(reply_to, state.lifecycle)
       actor.continue(state)
     }
+    GetCapabilities(reply_to) -> {
+      process.send(reply_to, state.capabilities)
+      actor.continue(state)
+    }
     Ping(reply_to) -> {
       process.send(reply_to, Pong)
       actor.continue(state)
@@ -421,7 +545,219 @@ fn handle_message(
       cleanup_session(state, UserRequested)
       actor.stop()
     }
+    InjectedMessage(json) -> {
+      handle_injected_message(state, json)
+    }
+    InjectedPortClosed -> {
+      handle_port_closed(state)
+    }
+    InitTimeoutFired -> {
+      handle_init_timeout(state)
+    }
   }
+}
+
+/// Handle injected JSON message (simulated CLI response).
+fn handle_injected_message(
+  state: SessionState,
+  json: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Decode the JSON line
+  case control_decoder.decode_line(json) {
+    Ok(control.ControlResponse(response)) -> {
+      handle_control_response(state, response)
+    }
+    Ok(_other) -> {
+      // Regular messages or control requests - ignore for now
+      // (Will be handled in future tasks)
+      actor.continue(state)
+    }
+    Error(_decode_error) -> {
+      // Invalid JSON - ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle control response from CLI.
+fn handle_control_response(
+  state: SessionState,
+  response: IncomingControlResponse,
+) -> actor.Next(SessionState, ActorMessage) {
+  case response {
+    Success(request_id, payload) -> {
+      handle_success_response(state, request_id, payload)
+    }
+    ControlError(request_id, message) -> {
+      handle_error_response(state, request_id, message)
+    }
+  }
+}
+
+/// Handle successful control response.
+fn handle_success_response(
+  state: SessionState,
+  request_id: String,
+  payload: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Check if this is the init response
+  case state.init_request_id {
+    Some(init_id) if init_id == request_id -> {
+      // This is the init success response
+      handle_init_success(state, payload)
+    }
+    _ -> {
+      // Not init response - check pending_requests
+      // (Will be implemented in future task)
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle init success - transition to Running and store capabilities.
+fn handle_init_success(
+  state: SessionState,
+  payload: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Only process if in InitSent state
+  case state.lifecycle {
+    InitSent -> {
+      // Transition to Running
+      let assert Ok(new_lifecycle) = transition(state.lifecycle, InitSuccess)
+
+      // Parse capabilities from payload (basic extraction)
+      let capabilities = parse_capabilities(payload)
+
+      // Clear init_request_id since init is complete
+      let new_state =
+        SessionState(
+          ..state,
+          lifecycle: new_lifecycle,
+          capabilities: Some(capabilities),
+          init_request_id: None,
+        )
+
+      // Flush queued operations (non-blocking)
+      let flushed_state = flush_queued_ops(new_state)
+
+      actor.continue(flushed_state)
+    }
+    _ -> {
+      // Not in InitSent - ignore (might be duplicate response)
+      actor.continue(state)
+    }
+  }
+}
+
+/// Parse CLI capabilities from init response payload.
+fn parse_capabilities(_payload: Dynamic) -> CliCapabilities {
+  // For now, return default capabilities
+  // Full parsing will be added when capabilities format is finalized
+  CliCapabilities(
+    supported_commands: [],
+    hooks_supported: True,
+    permissions_supported: True,
+    mcp_sdk_servers_supported: True,
+  )
+}
+
+/// Handle error control response.
+fn handle_error_response(
+  state: SessionState,
+  request_id: String,
+  message: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Check if this is the init response
+  case state.init_request_id {
+    Some(init_id) if init_id == request_id -> {
+      // This is init error response
+      handle_init_error(state, message)
+    }
+    _ -> {
+      // Not init response - check pending_requests
+      // (Will be implemented in future task)
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle init error - transition to Failed.
+fn handle_init_error(
+  state: SessionState,
+  message: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Only process if in InitSent state
+  case state.lifecycle {
+    InitSent -> {
+      // Transition to Failed with error message
+      let assert Ok(new_lifecycle) =
+        transition(state.lifecycle, ErrorOccurred(message))
+
+      // Cleanup and stop
+      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      cleanup_session(new_state, InitFailed(InitializationError(message)))
+      actor.stop()
+    }
+    _ -> {
+      // Not in InitSent - ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle port closed event.
+fn handle_port_closed(
+  state: SessionState,
+) -> actor.Next(SessionState, ActorMessage) {
+  case state.lifecycle {
+    InitSent -> {
+      // Port closed during init - transition to Failed
+      let assert Ok(new_lifecycle) = transition(state.lifecycle, PortClosed)
+      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      cleanup_session(new_state, InitFailed(CliExitedDuringInit))
+      actor.stop()
+    }
+    Running -> {
+      // Port closed during running - transition to Stopped
+      let assert Ok(new_lifecycle) = transition(state.lifecycle, PortClosed)
+      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      cleanup_session(new_state, CliExited(0))
+      actor.stop()
+    }
+    _ -> {
+      // Already stopped/failed - ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle init timeout.
+fn handle_init_timeout(
+  state: SessionState,
+) -> actor.Next(SessionState, ActorMessage) {
+  case state.lifecycle {
+    InitSent -> {
+      // Timeout during init - transition to Failed
+      let assert Ok(new_lifecycle) = transition(state.lifecycle, InitTimeout)
+      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      cleanup_session(new_state, InitFailed(InitializationTimeout))
+      actor.stop()
+    }
+    _ -> {
+      // Not in InitSent - timeout is stale, ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Flush queued operations after successful init.
+///
+/// Sends all queued operations to CLI without blocking.
+/// Each operation gets its own pending request entry.
+fn flush_queued_ops(state: SessionState) -> SessionState {
+  // For now, just clear the queue
+  // Full implementation will send queued requests in T5+
+  SessionState(..state, queued_ops: [])
 }
 
 /// Clean up session resources when stopping.
@@ -465,7 +801,20 @@ pub fn ping(session: Subject(ActorMessage), timeout: Int) -> Response {
   actor.call(session, timeout, Ping)
 }
 
+/// Get CLI capabilities (populated after successful init).
+pub fn get_capabilities(
+  session: Subject(ActorMessage),
+  timeout: Int,
+) -> Option(CliCapabilities) {
+  actor.call(session, timeout, GetCapabilities)
+}
+
 /// Shutdown the session gracefully.
 pub fn shutdown(session: Subject(ActorMessage)) -> Nil {
   actor.send(session, ShutdownActor)
+}
+
+/// Send an InjectedPortClosed message to the actor (for testing).
+pub fn inject_port_closed(session: Subject(ActorMessage)) -> Nil {
+  actor.send(session, InjectedPortClosed)
 }

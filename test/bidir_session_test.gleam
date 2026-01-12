@@ -74,9 +74,9 @@ pub fn actor_returns_lifecycle_state_test() {
   // Start the actor
   let assert Ok(session) = bidir.start(mock.runner, config)
 
-  // Get lifecycle state - should be Starting initially
+  // Get lifecycle state - should be InitSent after actor sends init request
   let lifecycle = bidir.get_lifecycle(session, 1000)
-  should.equal(lifecycle, Starting)
+  should.equal(lifecycle, InitSent)
 }
 
 // =============================================================================
