@@ -39,7 +39,9 @@ import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
 
 import claude_agent_sdk/control.{
-  type IncomingControlResponse, Error as ControlError, Success,
+  type IncomingControlRequest, type IncomingControlResponse,
+  type IncomingMessage, CanUseTool, ControlRequest, ControlResponse,
+  Error as ControlError, HookCallback, McpMessage, RegularMessage, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -269,6 +271,74 @@ pub type SubscriberMessage {
   CliMessage(Dynamic)
   /// Session has ended (clean shutdown or error).
   SessionEnded(StopReason)
+}
+
+// =============================================================================
+// Message Routing
+// =============================================================================
+
+/// Routing destination for an incoming message.
+///
+/// Used by the dispatcher to determine which handler should process a message.
+pub type MessageRoute {
+  /// Route to hook callback handler with the callback_id.
+  RouteHookCallback(callback_id: String)
+  /// Route to permission handler with the tool_name.
+  RoutePermission(tool_name: String)
+  /// Route to MCP handler with the server_name.
+  RouteMcp(server_name: String)
+  /// Route to response correlator with the request_id.
+  RouteResponse(request_id: String)
+  /// Route to subscriber for regular messages.
+  RouteSubscriber
+}
+
+/// Determine the routing destination for an incoming message.
+///
+/// This pure function inspects the message structure and returns the
+/// appropriate route. The caller uses this to dispatch to the correct handler.
+pub fn route_incoming(message: IncomingMessage) -> MessageRoute {
+  case message {
+    ControlRequest(request) -> route_control_request(request)
+    ControlResponse(response) -> route_control_response(response)
+    RegularMessage(_) -> RouteSubscriber
+  }
+}
+
+/// Route a control request to its handler.
+fn route_control_request(request: IncomingControlRequest) -> MessageRoute {
+  case request {
+    HookCallback(callback_id: cid, ..) -> RouteHookCallback(cid)
+    CanUseTool(tool_name: name, ..) -> RoutePermission(name)
+    McpMessage(server_name: name, ..) -> RouteMcp(name)
+  }
+}
+
+/// Route a control response to its correlator.
+fn route_control_response(response: IncomingControlResponse) -> MessageRoute {
+  case response {
+    Success(request_id: rid, ..) -> RouteResponse(rid)
+    ControlError(request_id: rid, ..) -> RouteResponse(rid)
+  }
+}
+
+/// Resolve a pending request by sending the appropriate result to its reply_to subject.
+///
+/// This function is called when a control_response is received that matches
+/// a pending request. It sends either RequestSuccess or RequestError to the
+/// caller's reply_to subject.
+pub fn resolve_pending(
+  pending: PendingRequest,
+  response: IncomingControlResponse,
+) -> Nil {
+  case response {
+    Success(_request_id, payload) -> {
+      process.send(pending.reply_to, RequestSuccess(payload))
+    }
+    ControlError(_request_id, message) -> {
+      process.send(pending.reply_to, RequestError(message))
+    }
+  }
 }
 
 // =============================================================================
