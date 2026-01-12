@@ -307,6 +307,20 @@ pub type PendingHook {
   )
 }
 
+/// Source of cleanup for a pending hook.
+///
+/// Determines cleanup behavior (e.g., whether to kill the task).
+pub type CleanupSource {
+  /// Normal completion - task finished successfully.
+  NormalCompletion
+  /// Crash - task crashed or errored.
+  Crash
+  /// Timeout - timer fired before task completed.
+  Timeout
+  /// Session stopping - cleanup during shutdown.
+  SessionStopping
+}
+
 /// An operation queued while session is not Running.
 ///
 /// Operations may be queued during startup before the session is fully initialized.
@@ -881,6 +895,42 @@ fn spawn_hook_task(
 @external(erlang, "bidir_ffi", "demonitor_hook")
 fn demonitor_hook(monitor_ref: process.Monitor) -> Nil
 
+/// Clean up a pending hook atomically.
+///
+/// Removes all resources (timer, monitor, task) for a pending hook.
+/// Called by:
+/// - handle_hook_done (NormalCompletion): task finished, cancel timer and demonitor
+/// - handle_hook_error (Crash): task crashed, cancel timer and demonitor
+/// - handle_hook_timeout (Timeout): timer fired, kill task and demonitor
+/// - cleanup_session (SessionStopping): shutdown, kill task and demonitor
+///
+/// Cleanup is idempotent: cancel_timer on fired timer returns False (safe),
+/// demonitor with flush is idempotent, kill on dead process is safe.
+fn cleanup_pending_hook(
+  state: SessionState,
+  request_id: String,
+  pending: PendingHook,
+  source: CleanupSource,
+) -> SessionState {
+  // Cancel timer (safe even if already fired - returns False)
+  let _ = cancel_timer(pending.timer_ref)
+
+  // Kill task if needed (timeout or session stopping)
+  case source {
+    NormalCompletion | Crash -> Nil
+    Timeout | SessionStopping -> kill_task(pending.task_pid)
+  }
+
+  // Demonitor with flush (clears any queued DOWN message, idempotent)
+  demonitor_hook(pending.monitor_ref)
+
+  // Remove from pending_hooks map
+  SessionState(
+    ..state,
+    pending_hooks: dict.delete(state.pending_hooks, request_id),
+  )
+}
+
 /// Handle incoming messages to the actor.
 ///
 /// This is the main message loop. Handles synchronous requests with replies.
@@ -952,19 +1002,14 @@ fn handle_hook_done(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Cancel the timeout timer (we won the race)
-      let _ = cancel_timer(pending.timer_ref)
-
-      // Demonitor the task (cleanup)
-      demonitor_hook(pending.monitor_ref)
-
       // Send success response to CLI
       let response = HookResponse(request_id, HookSuccess(result))
       send_control_response(state, response)
 
-      // Remove from pending_hooks
-      let new_pending = dict.delete(state.pending_hooks, request_id)
-      actor.continue(SessionState(..state, pending_hooks: new_pending))
+      // Clean up resources atomically
+      let new_state =
+        cleanup_pending_hook(state, request_id, pending, NormalCompletion)
+      actor.continue(new_state)
     }
     Error(Nil) -> {
       // Already handled (timeout won), ignore
@@ -986,12 +1031,6 @@ fn handle_hook_error(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Cancel the timeout timer (we won the race)
-      let _ = cancel_timer(pending.timer_ref)
-
-      // Demonitor the task (cleanup)
-      demonitor_hook(pending.monitor_ref)
-
       // Branch response based on callback type
       case pending.callback_type {
         HookType -> {
@@ -1032,9 +1071,9 @@ fn handle_hook_error(
         }
       }
 
-      // Remove from pending_hooks
-      let new_pending = dict.delete(state.pending_hooks, request_id)
-      actor.continue(SessionState(..state, pending_hooks: new_pending))
+      // Clean up resources atomically
+      let new_state = cleanup_pending_hook(state, request_id, pending, Crash)
+      actor.continue(new_state)
     }
     Error(Nil) -> {
       // Already handled (timeout won), ignore
@@ -1061,12 +1100,6 @@ fn handle_hook_timeout(
         True -> {
           // Calculate elapsed time for logging
           let elapsed_ms = port_ffi.monotonic_time_ms() - pending.received_at
-
-          // Kill the task (timeout won the race)
-          kill_task(pending.task_pid)
-
-          // Demonitor with flush to clear any DOWN message
-          demonitor_hook(pending.monitor_ref)
 
           // Branch response based on callback type
           case pending.callback_type {
@@ -1111,9 +1144,10 @@ fn handle_hook_timeout(
             }
           }
 
-          // Remove from pending_hooks
-          let new_pending = dict.delete(state.pending_hooks, request_id)
-          actor.continue(SessionState(..state, pending_hooks: new_pending))
+          // Clean up resources atomically (kills task since timeout won)
+          let new_state =
+            cleanup_pending_hook(state, request_id, pending, Timeout)
+          actor.continue(new_state)
         }
         False -> {
           // Stale timeout (timer_ref mismatch), ignore
@@ -1913,16 +1947,10 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
       process.send(pending.reply_to, RequestSessionStopped)
     })
 
-  // 3. Cancel timers and kill tasks for pending hook callbacks
+  // 3. Clean up all pending hook callbacks using consolidated cleanup
   let _ =
-    dict.each(state.pending_hooks, fn(_request_id, pending) {
-      // Cancel timeout timer
-      let _ = cancel_timer(pending.timer_ref)
-      // Kill the task
-      kill_task(pending.task_pid)
-      // Demonitor to avoid stray DOWN messages
-      demonitor_hook(pending.monitor_ref)
-      Nil
+    dict.fold(state.pending_hooks, state, fn(acc_state, request_id, pending) {
+      cleanup_pending_hook(acc_state, request_id, pending, SessionStopping)
     })
 
   // 4. Resolve all queued operations with session stopped error
