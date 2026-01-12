@@ -9,6 +9,9 @@ import claude_agent_sdk/internal/request_tracker.{
   InitializeOp, InterruptOp, RewindFilesOp, SetModelOp, SetPermissionModeOp,
 }
 
+// Alias import for module-qualified calls
+import claude_agent_sdk/internal/request_tracker
+
 // ============================================================================
 // Test 1: generate_id produces unique IDs
 // ============================================================================
