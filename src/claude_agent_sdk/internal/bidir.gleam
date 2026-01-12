@@ -2344,7 +2344,7 @@ pub fn queue_operation(
 ///
 /// Returns Error(TooManyPendingRequests) if at capacity (64).
 ///
-/// Note: This helper is primarily for testing. Production code in handle_control_request
+/// Note: This helper is primarily for testing. Production code in handle_send_control_request
 /// and flush_queued_ops performs inline capacity checks and sends RequestError to callers,
 /// since reply_to subjects expect RequestResult (not SessionError).
 @internal
