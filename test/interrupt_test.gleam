@@ -214,19 +214,20 @@ pub fn interrupt_timeout_test() {
 // Public API Tests
 // =============================================================================
 
-/// Test: interrupt() returns InterruptTimeout on timeout
+/// Test: interrupt() returns InterruptTimeout after internal actor timeout
 ///
-/// The interrupt() timeout is controlled by the session's default_timeout_ms.
-/// With default_timeout_ms: 100, the actor's internal timer fires at ~100ms
-/// and sends RequestTimeout to the caller.
+/// The actor's internal timeout (default_timeout_ms: 100ms) fires before
+/// interrupt()'s 5000ms receive timeout. The actor sends RequestTimeout
+/// which is mapped to InterruptTimeout.
 pub fn interrupt_api_timeout_test() {
-  // Arrange: start session with short timeout
+  // Arrange: start session with short internal timeout
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
     bidir.StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 100,
+      // Actor's internal timeout - fires at ~100ms
       hook_timeouts: dict.new(),
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
@@ -244,17 +245,22 @@ pub fn interrupt_api_timeout_test() {
   // Verify Running state
   should.equal(bidir.get_lifecycle(session, 1000), Running)
 
-  // Call interrupt without any responder - should timeout
+  // Call interrupt without CLI response - actor's timeout fires at ~100ms
   let result = bidir.interrupt(session)
 
-  // Assert: returns InterruptTimeout
+  // Assert: returns InterruptTimeout (from actor's RequestTimeout)
   should.equal(result, Error(InterruptTimeout))
 
   // Cleanup
   bidir.shutdown(session)
 }
 
-/// Test: interrupt() returns SessionStopped if session is stopped
+/// Test: interrupt() returns InterruptTimeout if session is stopped
+///
+/// When the session actor is stopped, actor.send silently drops the message
+/// and no response is sent. The function times out after 5000ms and returns
+/// InterruptTimeout. This is expected behavior - the 5000ms timeout ensures
+/// we don't hang indefinitely.
 pub fn interrupt_api_session_stopped_test() {
   // Arrange: start session with mock runner
   let mock = mock_bidir_runner.new()
@@ -277,16 +283,9 @@ pub fn interrupt_api_session_stopped_test() {
   bidir.shutdown(session)
   process.sleep(100)
 
-  // Call interrupt on stopped session
+  // Call interrupt on stopped session - will timeout after 5000ms
   let result = bidir.interrupt(session)
 
-  // Assert: returns SessionStopped
-  // Note: Calling interrupt on a stopped session should timeout or error
-  // since the actor won't respond. The exact behavior depends on Gleam's
-  // actor implementation - it might return an error or just timeout.
-  case result {
-    Error(InterruptTimeout) -> should.be_true(True)
-    // Timeout is acceptable since actor is stopped
-    _ -> should.fail()
-  }
+  // Assert: returns InterruptTimeout (actor doesn't respond when stopped)
+  should.equal(result, Error(InterruptTimeout))
 }
