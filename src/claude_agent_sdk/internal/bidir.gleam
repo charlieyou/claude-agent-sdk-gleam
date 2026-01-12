@@ -59,6 +59,10 @@ import claude_agent_sdk/message
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> Dynamic
 
+// FFI: Compare two Dynamic values for exact equality (uses Erlang =:=)
+@external(erlang, "bidir_ffi", "dynamic_equals")
+fn dynamic_equals(a: Dynamic, b: Dynamic) -> Bool
+
 // =============================================================================
 // Session Lifecycle
 // =============================================================================
@@ -508,7 +512,8 @@ pub type ActorMessage {
   /// Hook task crashed with error.
   HookError(request_id: String, reason: Dynamic)
   /// Hook timeout fired (first-event-wins protocol).
-  HookTimeout(request_id: String)
+  /// Includes timer_ref for verification against stale timeouts.
+  HookTimeout(request_id: String, timer_ref: Dynamic)
   /// Cancel a pending request (for client-side timeout cleanup).
   CancelPendingRequest(request_id: String)
 }
@@ -728,16 +733,22 @@ fn start_internal(
         )
         |> process.select_record(
           hook_timeout_tag,
-          1,
+          2,
           fn(msg_dyn: Dynamic) -> ActorMessage {
-            // msg_dyn = {hook_timeout, RequestId} (2-element tuple)
+            // msg_dyn = {hook_timeout, RequestId, TimerRef} (3-element tuple)
             let request_id = case
               decode.run(msg_dyn, decode.at([1], decode.string))
             {
               Ok(id) -> id
               Error(_) -> "unknown"
             }
-            HookTimeout(request_id)
+            let timer_ref = case
+              decode.run(msg_dyn, decode.at([2], decode.dynamic))
+            {
+              Ok(r) -> r
+              Error(_) -> dynamic.nil()
+            }
+            HookTimeout(request_id, timer_ref)
           },
         )
 
@@ -895,8 +906,8 @@ fn handle_message(
     HookError(request_id, _reason) -> {
       handle_hook_error(state, request_id)
     }
-    HookTimeout(request_id) -> {
-      handle_hook_timeout(state, request_id)
+    HookTimeout(request_id, timer_ref) -> {
+      handle_hook_timeout(state, request_id, timer_ref)
     }
     CancelPendingRequest(request_id) -> {
       handle_cancel_pending_request(state, request_id)
@@ -976,23 +987,34 @@ fn handle_hook_error(
 fn handle_hook_timeout(
   state: SessionState,
   request_id: String,
+  msg_timer_ref: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Kill the task (timeout won the race)
-      kill_task(pending.task_pid)
+      // Verify timer_ref matches to prevent stale timeouts from killing wrong task
+      case dynamic_equals(pending.timer_ref, msg_timer_ref) {
+        True -> {
+          // Kill the task (timeout won the race)
+          kill_task(pending.task_pid)
 
-      // Demonitor with flush to clear any DOWN message
-      demonitor_hook(pending.monitor_ref)
+          // Demonitor with flush to clear any DOWN message
+          demonitor_hook(pending.monitor_ref)
 
-      // Send fail-open response to CLI (allow continuation despite timeout)
-      let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
-      let response = HookResponse(request_id, HookSuccess(fail_open_result))
-      send_control_response(state, response)
+          // Send fail-open response to CLI (allow continuation despite timeout)
+          let fail_open_result =
+            to_dynamic(dict.from_list([#("continue", True)]))
+          let response = HookResponse(request_id, HookSuccess(fail_open_result))
+          send_control_response(state, response)
 
-      // Remove from pending_hooks
-      let new_pending = dict.delete(state.pending_hooks, request_id)
-      actor.continue(SessionState(..state, pending_hooks: new_pending))
+          // Remove from pending_hooks
+          let new_pending = dict.delete(state.pending_hooks, request_id)
+          actor.continue(SessionState(..state, pending_hooks: new_pending))
+        }
+        False -> {
+          // Stale timeout (timer_ref mismatch), ignore
+          actor.continue(state)
+        }
+      }
     }
     Error(Nil) -> {
       // Already handled (HookDone/HookError won), ignore stale timeout

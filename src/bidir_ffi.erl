@@ -1,6 +1,7 @@
 -module(bidir_ffi).
 -export([schedule_init_timeout/1, schedule_request_timeout/2, schedule_hook_timeout/2,
-         cancel_timer/1, spawn_hook_task/4, demonitor_hook/1, kill_task/1]).
+         cancel_timer/1, spawn_hook_task/4, demonitor_hook/1, kill_task/1,
+         dynamic_equals/2]).
 
 %% Schedule an init timeout message to be sent to the calling process.
 %%
@@ -71,22 +72,31 @@ demonitor_hook(MonitorRef) ->
 %% Schedule a hook timeout message to be sent to the calling process.
 %%
 %% Uses erlang:send_after/3 to send a tagged tuple message after the
-%% specified delay. The message includes the request_id for correlation.
+%% specified delay. The message includes request_id and timer_ref for
+%% first-event-wins verification (prevents stale timeouts from killing
+%% a new task that reuses the same request_id).
 %%
-%% The message format {hook_timeout, RequestId} can be received by a selector
-%% using select_record with tag=hook_timeout and arity=1.
+%% The message format {hook_timeout, RequestId, TimerRef} can be received
+%% by a selector using select_record with tag=hook_timeout and arity=2.
 %%
-%% Returns the timer reference for later cancellation.
+%% Returns the timer reference for later cancellation and verification.
 schedule_hook_timeout(TimeoutMs, RequestId) ->
     Self = self(),
-    erlang:send_after(TimeoutMs, Self, {hook_timeout, RequestId}).
+    TimerRef = erlang:make_ref(),
+    erlang:send_after(TimeoutMs, Self, {hook_timeout, RequestId, TimerRef}),
+    TimerRef.
 
 %% Kill a task process immediately.
 %%
-%% Unlinks from the task first to prevent the exit signal from propagating
-%% back to the calling process, then sends kill signal.
+%% Uses catch to safely unlink (handles case where task already exited).
 %% This is used when a hook timeout fires before the task completes.
 kill_task(Pid) ->
-    erlang:unlink(Pid),
+    catch erlang:unlink(Pid),
     erlang:exit(Pid, kill),
     nil.
+
+%% Compare two dynamic values for exact equality.
+%%
+%% Used for timer_ref verification in first-event-wins protocol.
+dynamic_equals(A, B) ->
+    A =:= B.
