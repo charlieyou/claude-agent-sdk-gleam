@@ -7,7 +7,8 @@
 %%
 %% Handles Gleam-specific types:
 %% - Gleam proplists ([{<<"key">>, value}, ...]) become JSON objects
-%% - 2-tuples with binary key become object entries
+%% - Empty lists [] become JSON arrays []
+%% - Non-proplist tuples become JSON arrays
 %% - nil becomes null
 %% - true/false remain booleans
 %% - Other atoms become strings
@@ -24,8 +25,11 @@ encoder(true, Encode) ->
 encoder(false, Encode) ->
     %% Preserve boolean false
     json:encode_value(false, Encode);
+encoder([], Encode) ->
+    %% Empty list is always a JSON array, not an object
+    json:encode_value([], Encode);
 encoder(List, Encode) when is_list(List) ->
-    %% Check if this is a proplist (list of 2-tuples with binary keys)
+    %% Check if this is a non-empty proplist (list of 2-tuples with binary keys)
     case is_proplist(List) of
         true ->
             %% Convert proplist to JSON object
@@ -35,18 +39,27 @@ encoder(List, Encode) when is_list(List) ->
             %% Regular list - encode as array
             json:encode_value(List, Encode)
     end;
+encoder(Tuple, Encode) when is_tuple(Tuple) ->
+    %% Convert non-proplist tuples (like #(1, 2) or Ok("val")) to arrays
+    List = tuple_to_list(Tuple),
+    Encode(List, Encode);
 encoder(Atom, Encode) when is_atom(Atom) ->
     %% Convert other atoms to strings
     Encode(atom_to_binary(Atom, utf8), Encode);
 encoder(Other, Encode) ->
-    %% Default encoding for maps, numbers, binaries, tuples
+    %% Default encoding for maps, numbers, binaries
     json:encode_value(Other, Encode).
 
-%% Check if a list is a proplist (list of 2-tuples with binary keys)
-is_proplist([]) -> true;
+%% Check if a non-empty list is a proplist (list of 2-tuples with binary keys)
+%% Note: Empty list handled separately in encoder/2 to always produce []
 is_proplist([{Key, _Value} | Rest]) when is_binary(Key) ->
-    is_proplist(Rest);
+    is_proplist_rest(Rest);
 is_proplist(_) -> false.
+
+is_proplist_rest([]) -> true;
+is_proplist_rest([{Key, _Value} | Rest]) when is_binary(Key) ->
+    is_proplist_rest(Rest);
+is_proplist_rest(_) -> false.
 
 %% Convert proplist to map for JSON object encoding
 proplist_to_map(Proplist) ->

@@ -346,6 +346,28 @@ pub fn encode_dynamic_null_test() {
   json_str |> string.contains(":null") |> should.be_true
 }
 
+pub fn encode_dynamic_empty_list_test() {
+  // Verify empty list encodes as JSON array [], not object {}
+  let output = to_dynamic([#("items", [])])
+  let resp = HookResponse(request_id: "test", result: HookSuccess(output))
+  let json_str = control_encoder.encode_response(resp)
+
+  // Should contain [] as JSON array
+  json_str |> string.contains(":[]") |> should.be_true
+  // Should NOT contain {} (empty object)
+  json_str |> string.contains(":{}") |> should.be_false
+}
+
+pub fn encode_dynamic_tuple_test() {
+  // Verify non-proplist tuples encode as JSON arrays
+  let output = to_dynamic([#("pair", #(1, 2))])
+  let resp = HookResponse(request_id: "test", result: HookSuccess(output))
+  let json_str = control_encoder.encode_response(resp)
+
+  // Tuple should become array [1,2]
+  json_str |> string.contains("[1,2]") |> should.be_true
+}
+
 // ============================================================================
 // Test Helpers
 // ============================================================================
