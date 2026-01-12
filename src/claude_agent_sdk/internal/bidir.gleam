@@ -35,6 +35,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
+import gleam/int
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -1882,14 +1883,11 @@ pub fn set_model(
 /// Uses unique_integer for guaranteed uniqueness within a session.
 fn generate_request_id() -> String {
   let id = unique_integer()
-  "req_" <> int_to_string(id)
+  "req_" <> int.to_string(id)
 }
 
 @external(erlang, "claude_agent_sdk_ffi", "unique_integer")
 fn unique_integer() -> Int
-
-@external(erlang, "erlang", "integer_to_binary")
-fn int_to_string(n: Int) -> String
 
 // =============================================================================
 // Backpressure Helpers
