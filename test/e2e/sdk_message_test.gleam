@@ -14,7 +14,7 @@ import claude_agent_sdk/content.{TextBlock, ToolUseBlock}
 import claude_agent_sdk/error.{error_to_string}
 import claude_agent_sdk/message.{
   type MessageEnvelope, type ResultMessage, type Usage, Assistant, Result,
-  System,
+  System, User,
 }
 import claude_agent_sdk/options.{BypassPermissions}
 import e2e/helpers.{consume_stream, skip_if_no_e2e}
@@ -228,10 +228,40 @@ pub fn sdk_12_tool_result_test() {
 
           // Tool use may or may not occur depending on model choice
           // The key invariant is: no crashes during parsing
-          // If tool use occurred, validate structure
+          // If tool use occurred, validate structure and check for ToolResultBlock
           case has_tool_use {
             True -> {
               io.println("[INFO] Tool use detected and parsed successfully")
+
+              // Finding 2 fix: Check for ToolResultBlock in User messages
+              // When there's a ToolUseBlock, there should be a corresponding ToolResultBlock
+              let has_tool_result =
+                list.any(result.messages, fn(envelope) {
+                  case envelope.message {
+                    User(user_msg) -> {
+                      case user_msg.message {
+                        Some(msg_content) -> {
+                          case msg_content.content {
+                            Some(blocks) -> {
+                              list.any(blocks, fn(block) {
+                                // ToolResultBlock has tool_use_id, content, is_error fields
+                                string.length(block.tool_use_id) > 0
+                              })
+                            }
+                            None -> False
+                          }
+                        }
+                        None -> False
+                      }
+                    }
+                    _ -> False
+                  }
+                })
+
+              // If tool use occurred, we should have tool results too
+              has_tool_result
+              |> should.be_true
+              io.println("[INFO] ToolResultBlock found with valid tool_use_id")
             }
             False -> {
               io.println("[INFO] No tool use in this response (acceptable)")
@@ -360,18 +390,26 @@ pub fn sdk_14_error_message_test() {
     Ok(Nil) -> {
       // Test error scenario: use invalid model to trigger API error
       // This tests that error responses are handled gracefully
+      // Finding 1 & 3 fix: Actually use an invalid model to trigger error
       let opts =
         claude_agent_sdk.default_options()
+        |> claude_agent_sdk.with_model("invalid-model-xyz-does-not-exist")
         |> claude_agent_sdk.with_max_turns(1)
 
-      // Normal query - verify ResultMessage with is_error handling
+      // Query with invalid model should trigger an error
       case claude_agent_sdk.query("Say hi", opts) {
         Error(err) -> {
-          // Query-level errors are acceptable; verify no panic
+          // Query-level errors are expected with invalid model
+          // Key assertion: error is surfaced properly, no panic
           io.println("[INFO] Query error (expected): " <> error_to_string(err))
-          Nil
+          let err_str = error_to_string(err)
+          // Verify we got a meaningful error, not empty
+          { string.length(err_str) > 0 }
+          |> should.be_true
+          io.println("[PASS] Error surfaced cleanly without panic")
         }
         Ok(stream) -> {
+          // If query somehow succeeds, the model should still report an error
           let result = consume_stream(stream)
 
           // Find ResultMessage and check is_error field
@@ -379,7 +417,7 @@ pub fn sdk_14_error_message_test() {
 
           case result_msg {
             Some(res) -> {
-              // is_error should be a valid Bool option
+              // With invalid model, we expect is_error=True or errors list populated
               case res.is_error {
                 Some(is_err) -> {
                   io.println(
@@ -389,19 +427,26 @@ pub fn sdk_14_error_message_test() {
                       False -> "false"
                     },
                   )
-                }
-                None -> {
-                  io.println("[INFO] is_error not present")
-                }
-              }
-
-              // If there are errors, they should be a list
-              case res.errors {
-                Some(errs) -> {
-                  { list.length(errs) >= 0 }
+                  // We expect an error condition
+                  is_err
                   |> should.be_true
                 }
-                None -> Nil
+                None -> {
+                  // If is_error not present, check for errors list
+                  case res.errors {
+                    Some(errs) -> {
+                      { errs != [] }
+                      |> should.be_true
+                      io.println("[INFO] errors list populated")
+                    }
+                    None -> {
+                      // Neither is_error nor errors populated - unexpected for invalid model
+                      io.println(
+                        "[WARN] No error indicators with invalid model",
+                      )
+                    }
+                  }
+                }
               }
             }
             None -> {
