@@ -9,6 +9,10 @@ import claude_agent_sdk/internal/port_ffi.{
   wrap_port,
 }
 
+/// FFI binding to erlang:make_ref/0 for creating unique references.
+@external(erlang, "erlang", "make_ref")
+fn make_ref() -> Dynamic
+
 /// Push-based runner for start_session() (bidir mode only).
 /// This is INTERNAL - not exported from the public API.
 pub type BidirRunner {
@@ -185,4 +189,21 @@ fn decode_exit_status(value: Dynamic) -> Result(PortMessage, Nil) {
     Ok(code) -> Ok(PortExitStatus(code))
     Error(_) -> Error(Nil)
   }
+}
+
+/// Create a mock BidirRunner for testing.
+///
+/// The mock runner uses the provided callbacks instead of a real port:
+/// - `on_write` is called when write() is invoked
+/// - `on_close` is called when close() is invoked
+///
+/// The port field contains a unique reference that can be used for pattern
+/// matching in tests (e.g., with decode_port_message).
+pub fn mock(
+  on_write on_write: fn(String) -> Result(Nil, WriteError),
+  on_close on_close: fn() -> Nil,
+) -> BidirRunner {
+  // Create a unique reference as a pseudo-port for pattern matching
+  let mock_port = wrap_port(make_ref())
+  BidirRunner(port: mock_port, write: on_write, close: on_close)
 }

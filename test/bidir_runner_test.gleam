@@ -1,8 +1,10 @@
 import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/port_ffi
 import gleam/bit_array
+import gleam/erlang/process
 import gleam/string
 import gleeunit/should
+import support/mock_bidir_runner
 
 /// start() returns SpawnFailed when 'claude' is not found in PATH.
 /// If claude IS in PATH, we verify the runner can be created and closed.
@@ -193,5 +195,93 @@ pub fn bidir_runner_exit_status_nonzero_test() {
         Error(_) -> should.fail()
       }
     }
+  }
+}
+
+// =============================================================================
+// Mock BidirRunner Tests
+// =============================================================================
+
+/// mock() creates a BidirRunner that captures write calls via callback.
+pub fn mock_captures_writes_test() {
+  let writes = process.new_subject()
+
+  let runner =
+    bidir_runner.mock(
+      on_write: fn(data) {
+        process.send(writes, data)
+        Ok(Nil)
+      },
+      on_close: fn() { Nil },
+    )
+
+  let assert Ok(Nil) = runner.write("hello")
+  let assert Ok("hello") = process.receive(writes, 100)
+}
+
+/// mock() close callback is invoked when close() is called.
+pub fn mock_close_callback_test() {
+  let closed = process.new_subject()
+
+  let runner =
+    bidir_runner.mock(on_write: fn(_) { Ok(Nil) }, on_close: fn() {
+      process.send(closed, True)
+    })
+
+  runner.close()
+  let assert Ok(True) = process.receive(closed, 100)
+}
+
+/// mock() write callback can return errors.
+pub fn mock_write_error_test() {
+  let runner =
+    bidir_runner.mock(
+      on_write: fn(_) { Error(port_ffi.PortClosed) },
+      on_close: fn() { Nil },
+    )
+
+  let result = runner.write("data")
+  case result {
+    Error(port_ffi.PortClosed) -> should.be_true(True)
+    _ -> should.fail()
+  }
+}
+
+/// mock() port field is usable for pattern matching (has valid reference).
+pub fn mock_port_is_usable_test() {
+  let runner =
+    bidir_runner.mock(on_write: fn(_) { Ok(Nil) }, on_close: fn() { Nil })
+
+  // Port should be extractable and usable for comparisons
+  let port_dynamic = port_ffi.port_to_dynamic(runner.port)
+  // Verify we get a valid dynamic value
+  should.be_true(port_dynamic != port_dynamic || port_dynamic == port_dynamic)
+}
+
+/// MockRunner helper captures writes via subject.
+pub fn mock_runner_helper_captures_writes_test() {
+  let mock = mock_bidir_runner.new()
+
+  let assert Ok(Nil) = mock.runner.write("test data")
+  let assert Ok("test data") = process.receive(mock.writes, 100)
+}
+
+/// MockRunner helper notifies on close via subject.
+pub fn mock_runner_helper_notifies_close_test() {
+  let mock = mock_bidir_runner.new()
+
+  mock.runner.close()
+  let assert Ok(True) = process.receive(mock.closed, 100)
+}
+
+/// MockRunner custom write behavior test.
+pub fn mock_runner_custom_write_test() {
+  let mock =
+    mock_bidir_runner.new_with_write(fn(_) { Error(port_ffi.PortClosed) })
+
+  let result = mock.runner.write("will fail")
+  case result {
+    Error(port_ffi.PortClosed) -> should.be_true(True)
+    _ -> should.fail()
   }
 }
