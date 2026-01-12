@@ -7,9 +7,11 @@ import gleeunit/should
 fn get_plain_arguments() -> List(String)
 
 pub fn e2e_runner_test() {
-  case list.contains(get_plain_arguments(), "--e2e") {
+  let args = get_plain_arguments()
+  case list.contains(args, "--e2e") {
     True -> {
-      case run_e2e.run([]) {
+      let filtered_args = args |> list.filter(fn(arg) { arg != "--e2e" })
+      case run_e2e.run(filtered_args) {
         Ok(summary) -> run_e2e.failed(summary) |> should.equal(0)
         Error(message) -> {
           io.println("E2E runner error: " <> message)

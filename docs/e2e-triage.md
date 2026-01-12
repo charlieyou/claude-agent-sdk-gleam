@@ -7,8 +7,8 @@ This document covers common E2E test failures and how to resolve them.
 E2E test runs produce artifacts in `artifacts/e2e/<run_id>/`:
 - `events.jsonl` - Structured event log (machine-readable)
 - `summary.txt` - Human-readable results summary
-- `stdout.txt` - CLI stdout (redacted)
-- `stderr.txt` - CLI stderr (redacted)
+- `stdout.txt` - CLI output (stdout + stderr combined, redacted)
+- `stderr.txt` - Reserved for future use (currently empty)
 - `metadata.json` - Run metadata (versions, timing, etc.)
 
 In CI, these are uploaded as the `e2e-artifacts` artifact and retained for 7 days.
@@ -21,7 +21,7 @@ In CI, these are uploaded as the `e2e-artifacts` artifact and retained for 7 day
 
 **Events log pattern:**
 ```json
-{"event": "skip", "error": {"kind": "cli_missing", ...}}
+{"event": "scenario_end", "scenario_id": "E2E-07", "result": "skip", ...}
 ```
 
 **Cause:** Claude CLI is not installed or not in PATH.
@@ -37,7 +37,7 @@ In CI, these are uploaded as the `e2e-artifacts` artifact and retained for 7 day
 
 **Events log pattern:**
 ```json
-{"event": "skip", "error": {"kind": "auth_missing", ...}}
+{"event": "scenario_end", "scenario_id": "E2E-06", "result": "skip", ...}
 ```
 
 **Cause:** `ANTHROPIC_API_KEY` environment variable not set or invalid.
@@ -53,16 +53,15 @@ In CI, these are uploaded as the `e2e-artifacts` artifact and retained for 7 day
 
 **Events log pattern:**
 ```json
-{"event": "error", "error": {"kind": "ndjson_impurity", "message": "...", "details": {"line_number": N}}}
+{"event": "scenario_end", "scenario_id": "E2E-03", "result": "fail", ...}
 ```
 
 **Cause:** CLI output contains non-JSON lines mixed with expected NDJSON.
 
 **Resolution:**
 1. Check `stdout.txt` for the offending line(s)
-2. Ensure `CLAUDE_INTEGRATION_TEST=1` is set (enables machine output mode)
-3. If the CLI prints debug output, report as a CLI bug
-4. Temporary workaround: use `CLAUDE_INTEGRATION_ALLOW_NONJSON=1` to skip non-JSON lines
+2. If the CLI prints debug output, report it as a CLI bug
+3. Re-run the command in `events.jsonl` locally to confirm reproducibility
 
 ### Timeout Failures
 

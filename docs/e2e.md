@@ -5,7 +5,7 @@ End-to-end integration test runner for Claude Agent SDK (Gleam).
 ## Quick Start
 
 ```bash
-# Run via gleam test (runs unit + integration + E2E)
+# Run via gleam test (runs unit + E2E)
 gleam test -- --e2e
 ```
 
@@ -14,14 +14,22 @@ gleam test -- --e2e
 - Claude CLI installed and in PATH (`claude --version`)
 - Authentication: `ANTHROPIC_API_KEY` env var or authenticated CLI session
 
-## Environment Variables
+## Options
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `ANTHROPIC_API_KEY` | No* | API key for authentication |
-| `CLAUDE_INTEGRATION_ALLOW_NONJSON` | No | Set to `1` to tolerate non-JSON CLI output |
+These options are passed through to the E2E runner when using `gleam test`.
 
-*Either `ANTHROPIC_API_KEY` or an authenticated CLI session required.
+```bash
+# List scenarios
+gleam test -- --e2e --list
+
+# Run a specific scenario
+gleam test -- --e2e --scenario E2E-02
+
+# Custom output directory
+gleam test -- --e2e --output-dir artifacts/e2e/manual
+```
+
+Short flags are also supported: `-l`, `-s`, `-o`.
 
 ## Scenarios
 
@@ -45,8 +53,8 @@ Each run creates `artifacts/e2e/<run_id>/` containing:
 | `events.jsonl` | Structured event log (machine-parseable) |
 | `summary.txt` | Human-readable results summary |
 | `metadata.json` | Run metadata (versions, timing, system info) |
-| `stdout.txt` | Redacted CLI stdout capture |
-| `stderr.txt` | Redacted CLI stderr capture |
+| `stdout.txt` | Redacted CLI output (stdout + stderr combined) |
+| `stderr.txt` | Reserved for future use (currently empty) |
 
 ## JSONL Event Schema
 
@@ -64,12 +72,11 @@ Each line in `events.jsonl` contains:
 }
 ```
 
-Event types: `run_start`, `run_end`, `scenario_start`, `scenario_end`, `step_start`, `step_end`, `command_start`, `command_end`, `skip`, `warning`, `error`, `artifact_written`
+Event types: `run_start`, `run_end`, `scenario_start`, `scenario_end`, `step_start`, `step_end`, `command_start`, `command_end`
 
 ## Security
 
 - API keys and tokens are redacted from all logs
-- Environment variables are filtered to an allowlist
 - Long lines are truncated (4KB max per line)
 - Secrets matching known patterns replaced with `REDACTED`
 

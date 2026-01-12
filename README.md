@@ -12,7 +12,7 @@ Gleam module namespace: `claude_agent_sdk`
 
 - **Claude Code** installed and accessible in PATH (`claude --version` works)
 - **Authentication** via one of:
-  - Authenticated Claude CLI session
+  - `claude login` (interactive)
   - `ANTHROPIC_API_KEY` environment variable
 - **Gleam** 1.0 or later
 
@@ -178,9 +178,9 @@ gleam test  # Run the tests
 
 | Category | Description | External Dependencies |
 |----------|-------------|----------------------|
-| **Unit tests** | Schema parsing, type construction | None |
-| **Integration tests** | Real CLI interaction | Claude CLI + auth |
-| **Phase 0 tests** | FFI/runtime validation | Erlang runtime |
+| **Unit tests** | Schema parsing, type construction, CLI arg building | None |
+| **Phase 0 tests** | FFI/runtime validation (opt-in) | Erlang runtime |
+| **E2E tests** | Real CLI interaction and streaming | Claude CLI + auth |
 
 ### Running Tests
 
@@ -188,14 +188,18 @@ gleam test  # Run the tests
 # Unit tests only (default, no CLI required)
 gleam test
 
-# Integration tests (requires Claude CLI installed and authenticated)
-gleam test
-
-# Phase 0 FFI validation tests
+# Phase 0 FFI validation tests (opt-in)
 PHASE0_RUNTIME=1 gleam test
 
-# Integration tests with non-JSON tolerance (for CLI versions with extra output)
-CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
+# E2E tests (requires Claude CLI + auth)
+gleam test -- --e2e
+
+# E2E tests: list scenarios or run a specific one
+gleam test -- --e2e --list
+gleam test -- --e2e --scenario E2E-02
+
+# E2E tests: custom output directory
+gleam test -- --e2e --output-dir artifacts/e2e/manual
 ```
 
 ### Environment Variables
@@ -203,19 +207,18 @@ CLAUDE_INTEGRATION_ALLOW_NONJSON=1 gleam test
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | API key for CLI authentication |
-| `CLAUDE_INTEGRATION_ALLOW_NONJSON` | Set to `1` to tolerate non-JSON CLI output |
 | `PHASE0_RUNTIME` | Set to `1` to enable Phase 0 FFI validation tests |
 
-### Prerequisites for Integration Tests
+### Prerequisites for E2E Tests
 
 1. Claude CLI installed (`claude --version` works)
 2. Authentication via one of:
-   - Authenticated Claude CLI session
+   - `claude login` (interactive)
    - `ANTHROPIC_API_KEY` environment variable
 
 ### E2E Tests
 
-End-to-end tests validate the full SDK against a real Claude CLI. See [`scripts/e2e/README.md`](scripts/e2e/README.md) for detailed documentation.
+End-to-end tests validate the full SDK against a real Claude CLI. See [`docs/e2e.md`](docs/e2e.md) for detailed documentation.
 
 #### Running Locally
 
@@ -226,8 +229,14 @@ npm install -g @anthropic-ai/claude-code
 # Authenticate
 export ANTHROPIC_API_KEY=your-key
 
-# Run E2E via gleam test (runs unit + integration + E2E)
+# Run E2E via gleam test (runs unit + E2E)
 gleam test -- --e2e
+
+# List scenarios
+gleam test -- --e2e --list
+
+# Run a specific scenario
+gleam test -- --e2e --scenario E2E-02
 ```
 
 #### Running in CI

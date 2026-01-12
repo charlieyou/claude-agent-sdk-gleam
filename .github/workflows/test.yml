@@ -42,9 +42,6 @@ jobs:
           otp-version: "28"
           gleam-version: "1.14.0"
           rebar3-version: "3"
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
       - name: Check E2E prerequisites
         id: prereq
         run: |
@@ -63,11 +60,13 @@ jobs:
       - name: Install Claude CLI
         if: steps.prereq.outputs.skip != 'true'
         run: npm install -g @anthropic-ai/claude-code
+      - name: Download Gleam deps
+        if: steps.prereq.outputs.skip != 'true'
+        run: gleam deps download
       - name: Run E2E tests
         if: steps.prereq.outputs.skip != 'true'
         run: |
-          export CLAUDE_INTEGRATION_TEST=1
-          python scripts/e2e/run_e2e.py
+          gleam test -- --e2e
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
       - name: Upload E2E artifacts
@@ -78,4 +77,3 @@ jobs:
           path: artifacts/e2e/
           retention-days: 7
           if-no-files-found: ignore
-
