@@ -47,6 +47,55 @@ pub type ReadLineResult {
 }
 
 // ============================================================================
+// LineBuffer: Push-based line buffering for GenServer use
+// ============================================================================
+
+/// Buffer state for line accumulation in push-based processing.
+/// Used by BidirRunner's GenServer which receives port messages asynchronously.
+pub type LineBuffer {
+  LineBuffer(buffer: BitArray)
+}
+
+/// Result of handling port data in push-based mode.
+pub type HandlePortDataResult {
+  /// Complete lines extracted, with remaining buffer for incomplete data
+  Lines(lines: List(String), new_buffer: LineBuffer)
+  /// Buffer overflow - combined buffer + data exceeds max_line_size_bytes
+  PushBufferOverflow
+}
+
+/// Handle incoming port data, extract all complete lines.
+/// This is a stateless function for push-based GenServer processing.
+/// Reuses existing append_to_buffer and read_line functions.
+pub fn handle_port_data(
+  buffer: LineBuffer,
+  data: BitArray,
+) -> HandlePortDataResult {
+  let LineBuffer(buf) = buffer
+  // Append new data, checking for overflow
+  case append_to_buffer(buf, data) {
+    Error(_) -> PushBufferOverflow
+    Ok(combined) -> extract_all_lines(combined, [])
+  }
+}
+
+/// Extract all complete lines from buffer, accumulating in reverse order.
+fn extract_all_lines(
+  buffer: BitArray,
+  acc: List(String),
+) -> HandlePortDataResult {
+  case read_line(buffer) {
+    #(CompleteLine(line), rest) -> extract_all_lines(rest, [line, ..acc])
+    #(NeedMoreData, remaining) ->
+      Lines(lines: list.reverse(acc), new_buffer: LineBuffer(remaining))
+    #(BufferOverflow, _) -> PushBufferOverflow
+    // ReadError and other cases treated as incomplete - keep in buffer
+    #(_, remaining) ->
+      Lines(lines: list.reverse(acc), new_buffer: LineBuffer(remaining))
+  }
+}
+
+// ============================================================================
 // StreamState: State machine for stream lifecycle
 // ============================================================================
 
