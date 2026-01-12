@@ -16,7 +16,7 @@ import claude_agent_sdk/message.{
   type MessageEnvelope, type ResultMessage, type Usage, Assistant, Result,
   System,
 }
-import claude_agent_sdk/options
+import claude_agent_sdk/options.{BypassPermissions}
 import e2e/helpers.{consume_stream, skip_if_no_e2e}
 import gleam/int
 import gleam/io
@@ -187,7 +187,7 @@ pub fn sdk_12_tool_result_test() {
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(2)
-        |> claude_agent_sdk.with_permission_mode(options.BypassPermissions)
+        |> claude_agent_sdk.with_permission_mode(BypassPermissions)
 
       case claude_agent_sdk.query("Read the file gleam.toml", opts) {
         Error(err) -> {
