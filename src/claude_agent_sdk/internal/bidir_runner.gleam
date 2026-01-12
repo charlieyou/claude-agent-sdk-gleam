@@ -5,7 +5,8 @@ import gleam/dynamic/decode
 import gleam/erlang/atom
 
 import claude_agent_sdk/internal/port_ffi.{
-  type Port, type WriteError, find_cli_path, port_write, wrap_port,
+  type Port, type WriteError, ffi_close_port, find_cli_path, port_write,
+  wrap_port,
 }
 
 /// Push-based runner for start_session() (bidir mode only).
@@ -71,7 +72,7 @@ pub fn start(args: List(String)) -> Result(BidirRunner, StartError) {
 }
 
 /// Start a BidirRunner with an explicit executable path.
-/// Used for testing with non-claude executables.
+/// Prepends --output-format stream-json --input-format stream-json to args.
 pub fn start_with_path(
   executable_path: String,
   args: List(String),
@@ -84,16 +85,24 @@ pub fn start_with_path(
     "stream-json",
     ..args
   ]
+  start_raw(executable_path, full_args)
+}
 
-  case open_port_bidir(executable_path, full_args) {
+/// Start a BidirRunner with raw arguments (no stream-json args prepended).
+/// Used for testing with non-claude executables that don't accept those flags.
+pub fn start_raw(
+  executable_path: String,
+  args: List(String),
+) -> Result(BidirRunner, StartError) {
+  case open_port_bidir(executable_path, args) {
     Error(reason) -> Error(SpawnFailed(reason))
     Ok(port) -> {
       // Create the write function that sends data to the port
       let write_fn = fn(data: String) -> Result(Nil, WriteError) {
         port_write(port, data)
       }
-      // Create the close function that closes the port
-      let close_fn = fn() -> Nil { port_ffi.ffi_close_port(port) }
+      // Create the close function that closes the port (uses safe wrapper with drain)
+      let close_fn = fn() -> Nil { ffi_close_port(port) }
       Ok(BidirRunner(port: port, write: write_fn, close: close_fn))
     }
   }
