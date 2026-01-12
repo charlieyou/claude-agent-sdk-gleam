@@ -4,7 +4,7 @@
 /// They verify graceful handling of network-level failures without API costs.
 ///
 /// ## Test Cases
-/// - SDK-62: Network timeout (mock runner never responds)
+/// - SDK-62: Delayed exit handling (mock runner delays then exits non-zero)
 /// - SDK-63: Stream interruption (partial data then abrupt close)
 /// - SDK-64: Invalid JSON in stream (malformed JSON handling)
 ///
@@ -36,28 +36,27 @@ fn to_dynamic(a: a) -> dynamic.Dynamic
 fn from_dynamic(d: dynamic.Dynamic) -> a
 
 // ============================================================================
-// SDK-62: Network Timeout
+// SDK-62: Delayed Exit Handling
 // ============================================================================
 
-/// SDK-62: Verify timeout error is surfaced when mock runner hangs.
+/// SDK-62: Verify delayed non-zero exit is handled gracefully.
 ///
-/// The mock runner sleeps for 10 seconds on read, simulating a hang.
-/// The SDK should detect this and eventually surface a timeout-related error.
+/// The mock runner delays briefly before returning a non-zero exit status,
+/// simulating a slow process that eventually fails. The SDK should surface
+/// this as a ProcessError with the correct exit code.
 ///
-/// Note: This test uses a relatively short sleep to keep test time reasonable.
-/// In a real timeout scenario, the SDK would use its configured timeout value.
-pub fn sdk_62_network_timeout_test() {
-  // Create mock runner that hangs on read
+/// Note: This tests delayed exit handling, not timeout enforcement.
+/// True timeout testing would require a mock that hangs indefinitely
+/// and SDK-level timeout configuration.
+pub fn sdk_62_delayed_exit_test() {
+  // Create mock runner that delays before returning exit status
   let mock_runner =
     runner.test_runner(
       on_spawn: fn(_cmd, _args, _cwd) { Ok(to_dynamic(Nil)) },
       on_read: fn(_handle) {
-        // Simulate a hanging network request
-        // Use a short sleep for test purposes, but still longer than
-        // reasonable response time
+        // Simulate a slow process that eventually fails
         process.sleep(100)
-        // After sleep, return exit status to complete the test
-        // In a real scenario, the SDK timeout would fire before this
+        // Return non-zero exit to indicate failure
         runner.ExitStatus(1)
       },
       on_close: fn(_handle) { Nil },
@@ -71,21 +70,21 @@ pub fn sdk_62_network_timeout_test() {
 
   case claude_agent_sdk.query("test prompt", opts) {
     Error(_err) -> {
-      // Query itself failed - acceptable for timeout scenario
+      // Query itself failed - acceptable for delayed exit scenario
       Nil
     }
     Ok(stream) -> {
       // Query succeeded, read from stream
       let #(result, updated_stream) = claude_agent_sdk.next(stream)
 
-      // Should get an error (ProcessError for non-zero exit, or similar)
+      // Should get an error (ProcessError for non-zero exit)
       case result {
         Error(ProcessError(exit_code, _diagnostic)) -> {
-          // Non-zero exit after hanging is expected
+          // Non-zero exit after delay is expected
           exit_code |> should.equal(1)
         }
         Error(other_error) -> {
-          // Any error is acceptable for a hung/timeout scenario
+          // Any terminal error is acceptable
           claude_agent_sdk.is_terminal(other_error) |> should.be_true
         }
         Ok(EndOfStream) -> {
@@ -93,7 +92,7 @@ pub fn sdk_62_network_timeout_test() {
           Nil
         }
         Ok(_) -> {
-          // Unexpected success - should not happen with hanging runner
+          // Unexpected success - should not happen with failing runner
           should.fail()
         }
       }
@@ -192,6 +191,8 @@ pub fn sdk_63_stream_interruption_test() {
         Error(ProcessError(exit_code, _diagnostic)) -> {
           // Stream interrupted - exit code should be 1
           exit_code |> should.equal(1)
+          let _ = claude_agent_sdk.close(stream2)
+          Nil
         }
         Ok(WarningEvent(_)) -> {
           // Warning about no result is also acceptable before interruption error
@@ -209,10 +210,6 @@ pub fn sdk_63_stream_interruption_test() {
           should.fail()
         }
       }
-
-      // Cleanup
-      let _ = claude_agent_sdk.close(stream2)
-      Nil
     }
   }
 }
