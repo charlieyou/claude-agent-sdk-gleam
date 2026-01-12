@@ -247,15 +247,21 @@ pub fn mock_write_error_test() {
   }
 }
 
-/// mock() port field is usable for pattern matching (has valid reference).
+/// mock() port field is usable for pattern matching with decode_port_message.
 pub fn mock_port_is_usable_test() {
   let runner =
     bidir_runner.mock(on_write: fn(_) { Ok(Nil) }, on_close: fn() { Nil })
 
-  // Port should be extractable and usable for comparisons
+  // Port should be extractable as a valid dynamic reference
   let port_dynamic = port_ffi.port_to_dynamic(runner.port)
-  // Verify we get a valid dynamic value
-  should.be_true(port_dynamic != port_dynamic || port_dynamic == port_dynamic)
+
+  // Create a second mock to verify port comparison works
+  let runner2 =
+    bidir_runner.mock(on_write: fn(_) { Ok(Nil) }, on_close: fn() { Nil })
+  let port_dynamic2 = port_ffi.port_to_dynamic(runner2.port)
+
+  // Mock ports should be distinct references
+  should.be_true(port_dynamic != port_dynamic2)
 }
 
 /// MockRunner helper captures writes via subject.
