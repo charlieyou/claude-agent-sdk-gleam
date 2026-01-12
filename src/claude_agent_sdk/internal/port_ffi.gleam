@@ -200,3 +200,42 @@ pub fn rescue(thunk: fn() -> a) -> Result(a, String)
 /// Monotonic time is guaranteed to never go backwards (unlike wall clock time).
 @external(erlang, "claude_agent_sdk_ffi", "monotonic_time_ms")
 pub fn monotonic_time_ms() -> Int
+
+// ============================================================================
+// OTP Version Detection
+// ============================================================================
+
+/// Returns the OTP major version as an integer (e.g., 25, 26, 27).
+/// Use this to check runtime capabilities that depend on OTP version.
+@external(erlang, "claude_agent_sdk_ffi", "otp_version")
+pub fn get_otp_version() -> Int
+
+/// FFI binding for check_stderr_support - returns {supported, Bool}
+@external(erlang, "claude_agent_sdk_ffi", "check_stderr_support")
+fn ffi_check_stderr_support() -> Dynamic
+
+/// Check if the current OTP version supports the stderr_to_stdout port option.
+/// Returns True for OTP >= 25, False otherwise.
+///
+/// The stderr_to_stdout option allows capturing both stdout and stderr from
+/// a spawned process through a single port. Without this option (OTP < 25),
+/// stderr from the CLI goes directly to the terminal and is not captured by
+/// the SDK.
+///
+/// Fallback behavior for OTP < 25:
+/// - CLI logs (written to stderr) will appear on the terminal, not in SDK
+/// - This is acceptable for debugging but means logs aren't programmatically accessible
+/// - Recommend OTP 25+ for full functionality
+pub fn supports_stderr_to_stdout() -> Bool {
+  let result = ffi_check_stderr_support()
+  let result_decoder = {
+    use _tag <- decode.field(0, decode.string)
+    use supported <- decode.field(1, decode.bool)
+    decode.success(supported)
+  }
+  case decode.run(result, result_decoder) {
+    Ok(supported) -> supported
+    // If decode fails, assume not supported (safe default)
+    Error(_) -> False
+  }
+}

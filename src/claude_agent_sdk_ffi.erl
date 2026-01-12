@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1, otp_version/0, check_stderr_support/0]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -156,3 +156,16 @@ system_info() ->
 os_cmd(Command) ->
     CommandStr = binary_to_list(Command),
     list_to_binary(os:cmd(CommandStr)).
+
+%% Returns OTP major version as an integer.
+%% Uses erlang:system_info(otp_release) which returns a string like "27".
+otp_version() ->
+    Release = erlang:system_info(otp_release),
+    list_to_integer(Release).
+
+%% Checks if stderr_to_stdout port option is supported (OTP >= 25).
+%% Returns {supported, true} or {supported, false}.
+check_stderr_support() ->
+    Version = otp_version(),
+    Supported = Version >= 25,
+    {<<"supported">>, Supported}.
