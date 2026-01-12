@@ -30,7 +30,8 @@
 /// }
 /// ```
 import gleam/dynamic.{type Dynamic}
-import gleam/option.{type Option}
+import gleam/dynamic/decode
+import gleam/option.{type Option, None, Some}
 
 // =============================================================================
 // Hook Events
@@ -52,6 +53,8 @@ pub type HookEvent {
   SubagentStop
   /// Fires before context compaction.
   PreCompact
+  /// Permission check for tool usage.
+  CanUseTool
 }
 
 // =============================================================================
@@ -206,4 +209,175 @@ pub type HookInput {
   SubagentStopInput(SubagentStopContext)
   /// Pre-compact hook input.
   PreCompactInput(PreCompactContext)
+}
+
+// =============================================================================
+// Hook Decode Errors
+// =============================================================================
+
+/// Error types for hook input decoding.
+pub type HookDecodeError {
+  /// A required field is missing from the input.
+  MissingField(field: String)
+  /// A field has the wrong type.
+  WrongType(field: String, expected: String)
+  /// Unknown event name in the input.
+  UnknownEventName(name: String)
+}
+
+// =============================================================================
+// Hook Input Decoders
+// =============================================================================
+
+/// Decode hook input to typed context based on event type.
+///
+/// Dispatches to the appropriate decoder based on the HookEvent variant.
+/// Unknown fields are ignored for forward compatibility.
+pub fn decode_hook_input(
+  event: HookEvent,
+  input: Dynamic,
+) -> Result(HookInput, HookDecodeError) {
+  case event {
+    PreToolUse -> decode_pre_tool_use(input)
+    PostToolUse -> decode_post_tool_use(input)
+    UserPromptSubmit -> decode_user_prompt_submit(input)
+    Stop -> decode_stop(input)
+    SubagentStop -> decode_subagent_stop(input)
+    PreCompact -> decode_pre_compact(input)
+    CanUseTool -> decode_can_use_tool(input)
+  }
+}
+
+/// Decode PreToolUse input to PreToolUseContext.
+fn decode_pre_tool_use(input: Dynamic) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(PreToolUseContext(tool_name:, tool_input:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(PreToolUseInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Decode PostToolUse input to PostToolUseContext.
+fn decode_post_tool_use(input: Dynamic) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    use tool_output <- decode.field("tool_result", decode.dynamic)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(PostToolUseContext(
+      tool_name:,
+      tool_input:,
+      tool_output:,
+      session_id:,
+    ))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(PostToolUseInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Decode UserPromptSubmit input to UserPromptSubmitContext.
+fn decode_user_prompt_submit(
+  input: Dynamic,
+) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use prompt <- decode.field("prompt", decode.string)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(UserPromptSubmitContext(prompt:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(UserPromptSubmitInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Decode Stop input to StopContext.
+fn decode_stop(input: Dynamic) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use reason <- decode.field("reason", decode.string)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(StopContext(reason:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(StopInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Decode SubagentStop input to SubagentStopContext.
+fn decode_subagent_stop(input: Dynamic) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use subagent_id <- decode.field("subagent_id", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(SubagentStopContext(subagent_id:, reason:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(SubagentStopInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Decode PreCompact input to PreCompactContext.
+fn decode_pre_compact(input: Dynamic) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(PreCompactContext(session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(PreCompactInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Decode CanUseTool input to CanUseToolContext.
+fn decode_can_use_tool(input: Dynamic) -> Result(HookInput, HookDecodeError) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    use session_id <- decode.field("session_id", decode.string)
+    use permission_suggestions <- decode.field(
+      "permission_suggestions",
+      decode.list(decode.string),
+    )
+    use blocked_path <- decode.optional_field(
+      "blocked_path",
+      None,
+      decode.optional(decode.string),
+    )
+    decode.success(CanUseToolContext(
+      tool_name:,
+      tool_input:,
+      session_id:,
+      permission_suggestions:,
+      blocked_path:,
+    ))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(CanUseToolInput(ctx))
+    Error(errors) -> Error(decode_errors_to_hook_error(errors))
+  }
+}
+
+/// Convert decode errors to HookDecodeError.
+/// Extracts the first missing field from decode errors.
+fn decode_errors_to_hook_error(
+  errors: List(decode.DecodeError),
+) -> HookDecodeError {
+  case errors {
+    [decode.DecodeError(expected: _, found: _, path: path), ..] -> {
+      // Path gives field name(s), e.g. ["tool_name"]
+      case path {
+        [field, ..] -> MissingField(field)
+        [] -> MissingField("unknown")
+      }
+    }
+    [] -> MissingField("unknown")
+  }
 }
