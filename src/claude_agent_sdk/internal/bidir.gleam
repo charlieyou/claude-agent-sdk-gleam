@@ -1061,10 +1061,16 @@ fn handle_implicit_confirmation(
   let flushed_state = flush_queued_ops(new_state)
 
   // Now process the triggering request in Running state
-  // TODO: Actually process hook_callback, can_use_tool, mcp_message
-  // For now, just continue - request processing will be added in future task
-  let _ = request
-  actor.continue(flushed_state)
+  // Dispatch the request that triggered implicit confirmation
+  case request {
+    HookCallback(request_id, callback_id, input, _tool_use_id) -> {
+      dispatch_hook_callback(flushed_state, request_id, callback_id, input)
+    }
+    CanUseTool(..) | McpMessage(..) -> {
+      // TODO: Implement can_use_tool and mcp_message handlers
+      actor.continue(flushed_state)
+    }
+  }
 }
 
 /// Handle port closed event.
