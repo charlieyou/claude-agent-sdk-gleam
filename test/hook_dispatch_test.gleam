@@ -121,6 +121,12 @@ pub fn hook_callback_unknown_callback_id_ignored_test() {
   // Session should still be Running (fail-open - not crashed)
   should.equal(bidir.get_lifecycle(session, 1000), Running)
 
+  // Verify fail-open response was sent (CLI should not hang)
+  let assert Ok(response_json) = process.receive(mock.writes, 500)
+  should.be_true(string.contains(response_json, "control_response"))
+  should.be_true(string.contains(response_json, "cli_99"))
+  should.be_true(string.contains(response_json, "continue"))
+
   // Cleanup
   bidir.shutdown(session)
 }

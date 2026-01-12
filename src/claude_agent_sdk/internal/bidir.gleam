@@ -994,8 +994,11 @@ fn dispatch_hook_callback(
       actor.continue(state)
     }
     Error(Nil) -> {
-      // Unknown callback_id - log warning and continue (fail-open)
-      // TODO: Add proper logging
+      // Unknown callback_id - send fail-open success response
+      // This allows the CLI to proceed rather than hang waiting for a response
+      let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
+      let response = HookResponse(request_id, HookSuccess(fail_open_result))
+      send_control_response(state, response)
       actor.continue(state)
     }
   }
