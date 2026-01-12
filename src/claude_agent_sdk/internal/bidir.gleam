@@ -1605,6 +1605,10 @@ fn handle_cancel_pending_request(
 ///
 /// Sends all queued operations to CLI without blocking.
 /// Each operation gets its own pending request entry.
+///
+/// Note: Overflow errors are sent as RequestError (not SessionError) since
+/// reply_to subjects expect RequestResult, consistent with send_control_request.
+@internal
 pub fn flush_queued_ops(state: SessionState) -> SessionState {
   // Reverse to process in FIFO order (queue_operation prepends)
   let ops_in_order = list.reverse(state.queued_ops)
