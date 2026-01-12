@@ -7,12 +7,15 @@ import gleeunit/should
 
 import claude_agent_sdk/hook.{
   type HookExecutionResult, type PermissionCheckResult, Allow, Block,
-  CanUseToolContext, CanUseToolInput, Continue, Deny, ModifyInput, PostToolUse,
-  PostToolUseContext, PostToolUseInput, PreCompact, PreCompactContext,
-  PreCompactInput, PreToolUse, PreToolUseContext, PreToolUseInput, Stop,
-  StopContext, StopInput, SubagentStop, SubagentStopContext, SubagentStopInput,
-  UserPromptSubmit, UserPromptSubmitContext, UserPromptSubmitInput,
+  CanUseToolContext, CanUseToolInput, Continue, Deny, MissingField, ModifyInput,
+  PostToolUse, PostToolUseContext, PostToolUseInput, PreCompact,
+  PreCompactContext, PreCompactInput, PreToolUse, PreToolUseContext,
+  PreToolUseInput, Stop, StopContext, StopInput, SubagentStop,
+  SubagentStopContext, SubagentStopInput, UserPromptSubmit,
+  UserPromptSubmitContext, UserPromptSubmitInput, WrongType, decode_hook_input,
 }
+import gleam/dynamic/decode
+import gleam/json
 
 /// Converts any value to Dynamic using Gleam stdlib identity.
 /// This is the standard Gleam idiom for Erlang target.
@@ -266,6 +269,51 @@ pub fn hook_input_pre_compact_test() {
   let input = PreCompactInput(ctx)
   case input {
     PreCompactInput(c) -> should.equal(c.session_id, "session-6")
+    _ -> should.fail()
+  }
+}
+
+// =============================================================================
+// hook_event_name Validation Tests
+// =============================================================================
+
+/// Parse JSON string to Dynamic for tests
+fn parse_json(json_string: String) -> Dynamic {
+  case json.parse(json_string, decode.dynamic) {
+    Ok(d) -> d
+    Error(_) -> panic as "invalid json in test"
+  }
+}
+
+/// When hook_event_name is missing, should return MissingField error
+pub fn decode_hook_input_missing_hook_event_name_test() {
+  // JSON with no hook_event_name field
+  let json_str =
+    "{\"session_id\":\"abc123\",\"tool_name\":\"Bash\",\"tool_input\":{}}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreToolUse, input)
+
+  case result {
+    Error(MissingField(field)) -> should.equal(field, "hook_event_name")
+    _ -> should.fail()
+  }
+}
+
+/// When hook_event_name has wrong type (number instead of string), should return WrongType error
+pub fn decode_hook_input_wrong_type_hook_event_name_test() {
+  // JSON with hook_event_name as number instead of string
+  let json_str =
+    "{\"hook_event_name\":123,\"session_id\":\"abc123\",\"tool_name\":\"Bash\",\"tool_input\":{}}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreToolUse, input)
+
+  case result {
+    Error(WrongType(field: field, expected: expected)) -> {
+      should.equal(field, "hook_event_name")
+      should.equal(expected, "String")
+    }
     _ -> should.fail()
   }
 }

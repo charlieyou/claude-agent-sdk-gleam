@@ -258,7 +258,7 @@ pub fn decode_hook_input(
     decode.success(name)
   }
   case decode.run(input, name_decoder) {
-    Error(_) -> Error(MissingField("hook_event_name"))
+    Error(errs) -> Error(decode_errors_to_hook_error(errs))
     Ok(actual_name) -> {
       case actual_name == expected_name {
         False -> Error(UnknownEventName(actual_name))
@@ -408,9 +408,9 @@ fn decode_errors_to_hook_error(
         [f, ..] -> f
         [] -> "unknown"
       }
-      // "nothing" indicates the field was missing entirely
+      // "Nothing" or "nothing" indicates the field was missing entirely
       case found {
-        "nothing" -> MissingField(field)
+        "nothing" | "Nothing" -> MissingField(field)
         _ -> WrongType(field: field, expected: expected)
       }
     }
