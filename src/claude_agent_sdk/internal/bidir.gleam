@@ -32,6 +32,7 @@
 /// ```
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/list
@@ -959,9 +960,48 @@ fn handle_init_timeout(
 /// Sends all queued operations to CLI without blocking.
 /// Each operation gets its own pending request entry.
 fn flush_queued_ops(state: SessionState) -> SessionState {
-  // For now, just clear the queue
-  // Full implementation will send queued requests in T5+
-  SessionState(..state, queued_ops: [])
+  // Process each queued operation and accumulate updated pending_requests
+  let #(new_pending, _) =
+    list.fold(
+      state.queued_ops,
+      #(state.pending_requests, state.runner),
+      fn(acc, op) {
+        let #(pending, runner) = acc
+        case op {
+          QueuedRequest(request_id, payload, reply_to) -> {
+            // Extract the encoded JSON string from payload
+            case decode.run(payload, decode.string) {
+              Ok(json_str) -> {
+                // Send to CLI
+                let write_fn = runner.write
+                let _result = write_fn(json_str <> "\n")
+
+                // Register in pending_requests for response correlation
+                let pending_req =
+                  PendingRequest(
+                    request_id: request_id,
+                    reply_to: reply_to,
+                    sent_at: 0,
+                  )
+                let updated_pending =
+                  dict.insert(pending, request_id, pending_req)
+                #(updated_pending, runner)
+              }
+              Error(_) -> {
+                // Invalid payload - send error to caller
+                process.send(
+                  reply_to,
+                  RequestError("Invalid queued request payload"),
+                )
+                #(pending, runner)
+              }
+            }
+          }
+        }
+      },
+    )
+
+  SessionState(..state, queued_ops: [], pending_requests: new_pending)
 }
 
 /// Forward a regular message to the subscriber.
