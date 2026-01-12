@@ -36,6 +36,7 @@ import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/int
+import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
@@ -53,6 +54,7 @@ import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 import claude_agent_sdk/internal/control_decoder
 import claude_agent_sdk/internal/control_encoder
+import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/message
 
 // FFI: Convert any value to Dynamic (identity function at runtime)
@@ -908,8 +910,8 @@ fn handle_message(
     HookDone(request_id, result) -> {
       handle_hook_done(state, request_id, result)
     }
-    HookError(request_id, _reason) -> {
-      handle_hook_error(state, request_id)
+    HookError(request_id, reason) -> {
+      handle_hook_error(state, request_id, reason)
     }
     HookTimeout(request_id, verify_ref) -> {
       handle_hook_timeout(state, request_id, verify_ref)
@@ -957,12 +959,22 @@ fn handle_hook_done(
 ///
 /// Called when a spawned hook task crashes. Sends a fail-open response
 /// to the CLI to prevent hanging, then cleans up the pending hook entry.
+/// Logs an error with the callback_id and crash reason.
 fn handle_hook_error(
   state: SessionState,
   request_id: String,
+  reason: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
+      // Log error with callback_id and crash reason
+      io.println_error(
+        "Hook callback crashed: "
+        <> dynamic.classify(reason)
+        <> " for "
+        <> pending.callback_id,
+      )
+
       // Cancel the timeout timer (we won the race)
       let _ = cancel_timer(pending.timer_ref)
 
@@ -988,7 +1000,8 @@ fn handle_hook_error(
 /// Handle hook timeout (first-event-wins protocol).
 ///
 /// Called when the timeout fires before hook task completes. Kills the task,
-/// sends fail-open response, and removes from pending_hooks.
+/// sends fail-open response, and removes from pending_hooks. Logs a warning
+/// with the callback_id and elapsed time.
 fn handle_hook_timeout(
   state: SessionState,
   request_id: String,
@@ -999,6 +1012,17 @@ fn handle_hook_timeout(
       // Verify ref matches to prevent stale timeouts from killing wrong task
       case dynamic_equals(pending.verify_ref, msg_verify_ref) {
         True -> {
+          // Calculate elapsed time for logging
+          let elapsed_ms = port_ffi.monotonic_time_ms() - pending.received_at
+
+          // Log warning with callback_id and duration
+          io.println_error(
+            "Hook callback timed out after "
+            <> int.to_string(elapsed_ms)
+            <> "ms for "
+            <> pending.callback_id,
+          )
+
           // Kill the task (timeout won the race)
           kill_task(pending.task_pid)
 
@@ -1307,6 +1331,9 @@ fn dispatch_hook_callback(
     False -> {
       case dict.get(state.hooks.handlers, callback_id) {
         Ok(handler) -> {
+          // Record start time for timeout duration logging
+          let started_at = port_ffi.monotonic_time_ms()
+
           // Spawn a task to execute the handler asynchronously
           // The task will send HookDone message back when complete
           let parent_pid = process.self()
@@ -1327,7 +1354,7 @@ fn dispatch_hook_callback(
               verify_ref: verify_ref,
               callback_id: callback_id,
               request_id: request_id,
-              received_at: 0,
+              received_at: started_at,
             )
           let new_pending =
             dict.insert(state.pending_hooks, request_id, pending)
