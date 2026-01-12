@@ -642,9 +642,13 @@ fn handle_injected_message(
     Ok(control.ControlResponse(response)) -> {
       handle_control_response(state, response)
     }
-    Ok(_other) -> {
-      // Regular messages or control requests - ignore for now
-      // (Will be handled in future tasks)
+    Ok(ControlRequest(request)) -> {
+      // Handle control request - may trigger implicit confirmation during InitSent
+      handle_control_request(state, request)
+    }
+    Ok(RegularMessage(_)) -> {
+      // Regular messages do NOT trigger implicit confirmation
+      // CLI may emit system/assistant messages before processing our init
       actor.continue(state)
     }
     Error(_decode_error) -> {
@@ -778,6 +782,75 @@ fn handle_init_error(
       actor.continue(state)
     }
   }
+}
+
+/// Handle incoming control request from CLI.
+///
+/// Control requests (hook_callback, can_use_tool, mcp_message) during InitSent
+/// trigger implicit confirmation - proving CLI accepted our handshake.
+fn handle_control_request(
+  state: SessionState,
+  request: IncomingControlRequest,
+) -> actor.Next(SessionState, ActorMessage) {
+  case state.lifecycle {
+    InitSent -> {
+      // Implicit confirmation! CLI is sending control requests,
+      // proving it understood our initialization and registered our hooks.
+      handle_implicit_confirmation(state, request)
+    }
+    Running -> {
+      // Normal request processing in Running state
+      // TODO: Process hook_callback, can_use_tool, mcp_message
+      // For now, just acknowledge we received it
+      actor.continue(state)
+    }
+    _ -> {
+      // Not in a state to handle requests - ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle implicit confirmation during InitSent.
+///
+/// When CLI sends hook_callback, can_use_tool, or mcp_message before
+/// explicit init response, it proves CLI accepted the handshake.
+///
+/// Process:
+/// 1. Transition to Running
+/// 2. Clear init_request_id (init timeout will be ignored)
+/// 3. Flush queued_ops
+/// 4. Process the triggering request normally
+fn handle_implicit_confirmation(
+  state: SessionState,
+  request: IncomingControlRequest,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Transition to Running
+  let assert Ok(new_lifecycle) = transition(state.lifecycle, InitSuccess)
+
+  // Clear init_request_id since init is implicitly confirmed
+  // Use default capabilities since we didn't get explicit response
+  let new_state =
+    SessionState(
+      ..state,
+      lifecycle: new_lifecycle,
+      capabilities: Some(CliCapabilities(
+        supported_commands: [],
+        hooks_supported: True,
+        permissions_supported: True,
+        mcp_sdk_servers_supported: True,
+      )),
+      init_request_id: None,
+    )
+
+  // Flush queued operations (non-blocking)
+  let flushed_state = flush_queued_ops(new_state)
+
+  // Now process the triggering request in Running state
+  // TODO: Actually process hook_callback, can_use_tool, mcp_message
+  // For now, just continue - request processing will be added in future task
+  let _ = request
+  actor.continue(flushed_state)
 }
 
 /// Handle port closed event.
