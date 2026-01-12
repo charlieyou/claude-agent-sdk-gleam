@@ -65,10 +65,11 @@ pub fn sdk_01_basic_query_test() {
           has_result_message(result.messages)
           |> should.be_true
 
-          // Protocol invariant: should have exactly one system message
+          // Protocol invariant: should have at least one system message
+          // (streams can include multiple System envelopes, e.g., init plus later events)
           let counts = count_message_types(result.messages)
-          counts.system
-          |> should.equal(1)
+          { counts.system >= 1 }
+          |> should.be_true
 
           // Protocol invariant: should have at least one result
           { counts.result >= 1 }
