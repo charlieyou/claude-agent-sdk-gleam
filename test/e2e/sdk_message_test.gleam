@@ -10,7 +10,7 @@
 /// gleam test
 /// ```
 import claude_agent_sdk
-import claude_agent_sdk/content.{TextBlock, ToolUseBlock}
+import claude_agent_sdk/content.{TextBlock, ToolResultBlock, ToolUseBlock}
 import claude_agent_sdk/error.{error_to_string}
 import claude_agent_sdk/message.{
   type MessageEnvelope, type ResultMessage, type Usage, Assistant, Result,
@@ -244,8 +244,11 @@ pub fn sdk_12_tool_result_test() {
                           case msg_content.content {
                             Some(blocks) -> {
                               list.any(blocks, fn(block) {
-                                // ToolResultBlock has tool_use_id, content, is_error fields
-                                string.length(block.tool_use_id) > 0
+                                // Explicit pattern match on ToolResultBlock variant
+                                case block {
+                                  ToolResultBlock(tool_use_id:, ..) ->
+                                    string.length(tool_use_id) > 0
+                                }
                               })
                             }
                             None -> False
@@ -440,10 +443,11 @@ pub fn sdk_14_error_message_test() {
                       io.println("[INFO] errors list populated")
                     }
                     None -> {
-                      // Neither is_error nor errors populated - unexpected for invalid model
+                      // Neither is_error nor errors populated - fail for invalid model
                       io.println(
-                        "[WARN] No error indicators with invalid model",
+                        "[FAIL] No error indicators with invalid model - expected is_error or errors",
                       )
+                      should.fail()
                     }
                   }
                 }
