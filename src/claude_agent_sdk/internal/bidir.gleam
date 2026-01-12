@@ -41,6 +41,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
+import gleam/string
 
 import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
@@ -967,10 +968,10 @@ fn handle_hook_error(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Log error with callback_id and crash reason
+      // Log error with callback_id and crash reason (using string.inspect for full details)
       io.println_error(
         "Hook callback crashed: "
-        <> dynamic.classify(reason)
+        <> string.inspect(reason)
         <> " for "
         <> pending.callback_id,
       )
@@ -982,7 +983,14 @@ fn handle_hook_error(
       demonitor_hook(pending.monitor_ref)
 
       // Send fail-open response to CLI (allow continuation despite error)
-      let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
+      // Include reason field for debugging as per spec
+      let fail_open_result =
+        to_dynamic(
+          dict.from_list([
+            #("continue", to_dynamic(True)),
+            #("reason", to_dynamic("crash")),
+          ]),
+        )
       let response = HookResponse(request_id, HookSuccess(fail_open_result))
       send_control_response(state, response)
 
@@ -1030,8 +1038,14 @@ fn handle_hook_timeout(
           demonitor_hook(pending.monitor_ref)
 
           // Send fail-open response to CLI (allow continuation despite timeout)
+          // Include reason field for debugging as per spec
           let fail_open_result =
-            to_dynamic(dict.from_list([#("continue", True)]))
+            to_dynamic(
+              dict.from_list([
+                #("continue", to_dynamic(True)),
+                #("reason", to_dynamic("timeout")),
+              ]),
+            )
           let response = HookResponse(request_id, HookSuccess(fail_open_result))
           send_control_response(state, response)
 

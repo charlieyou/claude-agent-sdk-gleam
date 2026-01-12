@@ -4,7 +4,7 @@
 /// to the CLI, ensuring fail-open semantics.
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
-import gleam/erlang/process
+import gleam/erlang/process.{type Subject}
 import gleam/string
 import gleeunit/should
 
@@ -16,6 +16,29 @@ import support/mock_bidir_runner
 // FFI for creating Dynamic values
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> Dynamic
+
+/// Receive messages from a subject until finding one containing target_id.
+/// Returns the matching message or Error if max_attempts exceeded.
+fn receive_until_match(
+  subject: Subject(String),
+  target_id: String,
+  max_attempts: Int,
+) -> Result(String, Nil) {
+  case max_attempts <= 0 {
+    True -> Error(Nil)
+    False -> {
+      case process.receive(subject, 500) {
+        Ok(msg) -> {
+          case string.contains(msg, target_id) {
+            True -> Ok(msg)
+            False -> receive_until_match(subject, target_id, max_attempts - 1)
+          }
+        }
+        Error(Nil) -> Error(Nil)
+      }
+    }
+  }
+}
 
 // =============================================================================
 // Fail-Open Tests - Crash Scenarios
@@ -79,9 +102,9 @@ pub fn crashing_callback_returns_continue_true_test() {
   // Wait for crash to be handled
   process.sleep(100)
 
-  // Should have received fail-open response
-  let assert Ok(response_json) = process.receive(mock.writes, 500)
-  should.be_true(string.contains(response_json, "cli_crash_1"))
+  // Should have received fail-open response (loop until matching request_id)
+  let assert Ok(response_json) =
+    receive_until_match(mock.writes, "cli_crash_1", 5)
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
 
@@ -148,9 +171,9 @@ pub fn session_continues_after_crash_fail_open_test() {
   let assert Ok("crash_invoked") = process.receive(callback_tracker, 500)
   process.sleep(100)
 
-  // Get fail-open response for crash
-  let assert Ok(crash_response) = process.receive(mock.writes, 500)
-  should.be_true(string.contains(crash_response, "cli_crash"))
+  // Get fail-open response for crash (loop until matching request_id)
+  let assert Ok(crash_response) =
+    receive_until_match(mock.writes, "cli_crash", 5)
   should.be_true(string.contains(crash_response, "continue"))
 
   // Second: send working hook - should work normally
@@ -162,9 +185,9 @@ pub fn session_continues_after_crash_fail_open_test() {
   let assert Ok("working_invoked") = process.receive(callback_tracker, 500)
   process.sleep(50)
 
-  // Get success response for working hook
-  let assert Ok(working_response) = process.receive(mock.writes, 500)
-  should.be_true(string.contains(working_response, "cli_working"))
+  // Get success response for working hook (loop until matching request_id)
+  let assert Ok(working_response) =
+    receive_until_match(mock.writes, "cli_working", 5)
   should.be_true(string.contains(working_response, "success"))
   should.be_true(string.contains(working_response, "continue"))
 
@@ -225,9 +248,9 @@ pub fn timeout_returns_continue_true_test() {
   // Wait for timeout (100ms + margin)
   process.sleep(200)
 
-  // Should have received fail-open response
-  let assert Ok(response_json) = process.receive(mock.writes, 500)
-  should.be_true(string.contains(response_json, "cli_timeout_1"))
+  // Should have received fail-open response (loop until matching request_id)
+  let assert Ok(response_json) =
+    receive_until_match(mock.writes, "cli_timeout_1", 5)
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
 
