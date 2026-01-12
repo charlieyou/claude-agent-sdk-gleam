@@ -3,6 +3,7 @@
 /// Tests encode_request and encode_response produce correct NDJSON output
 /// matching the wire format specification.
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/json
 import gleam/option.{None, Some}
 import gleam/string
@@ -49,6 +50,79 @@ pub fn encode_initialize_request_test() {
   let assert Ok(request) = get_object(parsed, "request")
   request |> get_string("subtype") |> should.equal(Ok("initialize"))
   request |> get_bool("enable_file_checkpointing") |> should.equal(Ok(True))
+
+  // Verify hooks is object keyed by event
+  let assert Ok(hooks_obj) = get_object(request, "hooks")
+  let assert Ok(pre_tool_use) = get_array(hooks_obj, "PreToolUse")
+  // Should have one hook entry
+  pre_tool_use |> should.not_equal([])
+}
+
+pub fn encode_initialize_hooks_wire_format_test() {
+  // Test wire format: {"PreToolUse":[{"matcher":null,"hookCallbackIds":["hook_0"]}]}
+  let hooks = [
+    HookRegistration(hook_id: "hook_0", event: "PreToolUse", filter: None),
+  ]
+  let req =
+    Initialize(
+      request_id: "req_0",
+      hooks: hooks,
+      mcp_servers: [],
+      enable_file_checkpointing: False,
+    )
+  let json_str = control_encoder.encode_request(req)
+
+  // Verify wire format structure
+  json_str |> string.contains("\"PreToolUse\"") |> should.be_true
+  json_str |> string.contains("\"matcher\"") |> should.be_true
+  json_str |> string.contains("\"hookCallbackIds\"") |> should.be_true
+  json_str |> string.contains("\"hook_0\"") |> should.be_true
+}
+
+pub fn encode_initialize_hooks_with_matcher_test() {
+  // Test hook with filter becomes matcher
+  let hooks = [
+    HookRegistration(
+      hook_id: "hook_0",
+      event: "PreToolUse",
+      filter: Some("Bash"),
+    ),
+  ]
+  let req =
+    Initialize(
+      request_id: "req_0",
+      hooks: hooks,
+      mcp_servers: [],
+      enable_file_checkpointing: False,
+    )
+  let json_str = control_encoder.encode_request(req)
+
+  // Verify matcher contains the filter value
+  json_str |> string.contains("\"matcher\":\"Bash\"") |> should.be_true
+}
+
+pub fn encode_initialize_multiple_hooks_same_event_test() {
+  // Multiple hooks for same event should group together
+  let hooks = [
+    HookRegistration(hook_id: "hook_0", event: "PreToolUse", filter: None),
+    HookRegistration(
+      hook_id: "hook_1",
+      event: "PreToolUse",
+      filter: Some("Read"),
+    ),
+  ]
+  let req =
+    Initialize(
+      request_id: "req_0",
+      hooks: hooks,
+      mcp_servers: [],
+      enable_file_checkpointing: False,
+    )
+  let json_str = control_encoder.encode_request(req)
+
+  // Both hook IDs should be present under PreToolUse
+  json_str |> string.contains("\"hook_0\"") |> should.be_true
+  json_str |> string.contains("\"hook_1\"") |> should.be_true
 }
 
 pub fn encode_interrupt_request_test() {
@@ -140,6 +214,10 @@ pub fn encode_hook_response_success_test() {
   let assert Ok(response) = get_object(parsed, "response")
   response |> get_string("subtype") |> should.equal(Ok("success"))
   response |> get_string("request_id") |> should.equal(Ok("cli_1"))
+
+  // Verify the response contains continue:true (as boolean, not string)
+  let assert Ok(inner_response) = get_object(response, "response")
+  inner_response |> get_bool("continue") |> should.equal(Ok(True))
 }
 
 pub fn encode_hook_response_error_test() {
@@ -155,6 +233,7 @@ pub fn encode_hook_response_error_test() {
 }
 
 pub fn encode_hook_response_skip_test() {
+  // HookSkip encodes as success with continue:false and stopReason
   let resp =
     HookResponse(request_id: "cli_3", result: HookSkip("User cancelled"))
   let json_str = control_encoder.encode_response(resp)
@@ -163,8 +242,16 @@ pub fn encode_hook_response_skip_test() {
   parsed |> get_string("type") |> should.equal(Ok("control_response"))
 
   let assert Ok(response) = get_object(parsed, "response")
-  response |> get_string("subtype") |> should.equal(Ok("skip"))
-  response |> get_string("reason") |> should.equal(Ok("User cancelled"))
+  // HookSkip now encodes as success subtype
+  response |> get_string("subtype") |> should.equal(Ok("success"))
+  response |> get_string("request_id") |> should.equal(Ok("cli_3"))
+
+  // Verify response contains continue:false and stopReason
+  let assert Ok(inner_response) = get_object(response, "response")
+  inner_response |> get_bool("continue") |> should.equal(Ok(False))
+  inner_response
+  |> get_string("stopReason")
+  |> should.equal(Ok("User cancelled"))
 }
 
 pub fn encode_permission_response_allow_test() {
@@ -234,54 +321,34 @@ pub fn encode_mcp_response_test() {
 }
 
 // ============================================================================
-// Hook Registration Encoding Tests
+// Dynamic Encoding Tests (verify FFI handles Gleam types correctly)
 // ============================================================================
 
-pub fn encode_hook_registration_with_filter_test() {
-  let hooks = [
-    HookRegistration(
-      hook_id: "hook_0",
-      event: "PreToolUse",
-      filter: Some("Bash"),
-    ),
-  ]
-  let req =
-    Initialize(
-      request_id: "req_0",
-      hooks: hooks,
-      mcp_servers: [],
-      enable_file_checkpointing: False,
-    )
-  let json_str = control_encoder.encode_request(req)
+pub fn encode_dynamic_boolean_test() {
+  // Verify booleans are encoded as JSON booleans, not strings
+  let output = to_dynamic([#("flag", True)])
+  let resp = HookResponse(request_id: "test", result: HookSuccess(output))
+  let json_str = control_encoder.encode_response(resp)
 
-  // Verify the hook registration includes the filter
-  json_str |> string.contains("\"filter\"") |> should.be_true
-  json_str |> string.contains("\"Bash\"") |> should.be_true
+  // Should contain true as JSON boolean, not "true" as string
+  json_str |> string.contains(":true") |> should.be_true
+  // Should NOT contain the string "true" (with quotes)
+  json_str |> string.contains(":\"true\"") |> should.be_false
 }
 
-pub fn encode_hook_registration_without_filter_test() {
-  let hooks = [
-    HookRegistration(hook_id: "hook_1", event: "PostToolUse", filter: None),
-  ]
-  let req =
-    Initialize(
-      request_id: "req_0",
-      hooks: hooks,
-      mcp_servers: [],
-      enable_file_checkpointing: False,
-    )
-  let json_str = control_encoder.encode_request(req)
+pub fn encode_dynamic_null_test() {
+  // Verify nil encodes as JSON null
+  let output = to_dynamic([#("value", Nil)])
+  let resp = HookResponse(request_id: "test", result: HookSuccess(output))
+  let json_str = control_encoder.encode_response(resp)
 
-  // Verify hook is encoded (filter should be null)
-  json_str |> string.contains("\"hook_id\"") |> should.be_true
-  json_str |> string.contains("\"hook_1\"") |> should.be_true
+  // Should contain null as JSON null
+  json_str |> string.contains(":null") |> should.be_true
 }
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
-
-import gleam/dynamic/decode
 
 fn dynamic_decoder() -> decode.Decoder(Dynamic) {
   decode.dynamic
@@ -312,6 +379,17 @@ fn get_bool(dyn: Dynamic, key: String) -> Result(Bool, Nil) {
 fn get_object(dyn: Dynamic, key: String) -> Result(Dynamic, Nil) {
   let decoder = {
     use value <- decode.field(key, decode.dynamic)
+    decode.success(value)
+  }
+  case decode.run(dyn, decoder) {
+    Ok(v) -> Ok(v)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn get_array(dyn: Dynamic, key: String) -> Result(List(Dynamic), Nil) {
+  let decoder = {
+    use value <- decode.field(key, decode.list(decode.dynamic))
     decode.success(value)
   }
   case decode.run(dyn, decoder) {

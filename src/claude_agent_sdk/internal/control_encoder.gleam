@@ -2,8 +2,11 @@
 ///
 /// Produces NDJSON format for wire transmission to Claude CLI.
 /// Each encoded message is a single-line JSON string without trailing newline.
+import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/json.{type Json}
+import gleam/list
+import gleam/option.{None, Some}
 
 import claude_agent_sdk/control.{
   type HookRegistration, type HookResult, type OutgoingControlRequest,
@@ -64,18 +67,53 @@ fn encode_initialize_inner(
 ) -> Json {
   json.object([
     #("subtype", json.string("initialize")),
-    #("hooks", json.array(hooks, encode_hook_registration)),
+    #("hooks", encode_hooks_object(hooks)),
     #("mcp_servers", json.array(mcp_servers, json.string)),
     #("enable_file_checkpointing", json.bool(enable_file_checkpointing)),
   ])
 }
 
-fn encode_hook_registration(reg: HookRegistration) -> Json {
-  let HookRegistration(hook_id, event, filter) = reg
+/// Encode hooks as an object keyed by event name.
+/// Wire format: {"PreToolUse":[{"matcher":null,"hookCallbackIds":["hook_0"]}]}
+fn encode_hooks_object(hooks: List(HookRegistration)) -> Json {
+  // Group hooks by event name
+  let grouped = group_hooks_by_event(hooks, dict.new())
+
+  // Convert to JSON object
+  grouped
+  |> dict.to_list
+  |> list.map(fn(pair) {
+    let #(event, regs) = pair
+    #(event, json.array(regs, encode_hook_entry))
+  })
+  |> json.object
+}
+
+/// Group hooks by their event name
+fn group_hooks_by_event(
+  hooks: List(HookRegistration),
+  acc: Dict(String, List(HookRegistration)),
+) -> Dict(String, List(HookRegistration)) {
+  case hooks {
+    [] -> acc
+    [hook, ..rest] -> {
+      let HookRegistration(_, event, _) = hook
+      let existing = case dict.get(acc, event) {
+        Ok(list) -> list
+        Error(_) -> []
+      }
+      let new_acc = dict.insert(acc, event, list.append(existing, [hook]))
+      group_hooks_by_event(rest, new_acc)
+    }
+  }
+}
+
+/// Encode a single hook entry with matcher and hookCallbackIds
+fn encode_hook_entry(reg: HookRegistration) -> Json {
+  let HookRegistration(hook_id, _, filter) = reg
   json.object([
-    #("hook_id", json.string(hook_id)),
-    #("event", json.string(event)),
-    #("filter", json.nullable(filter, json.string)),
+    #("matcher", json.nullable(filter, json.string)),
+    #("hookCallbackIds", json.array([hook_id], json.string)),
   ])
 }
 
@@ -145,10 +183,17 @@ fn encode_hook_response_inner(request_id: String, result: HookResult) -> Json {
         #("message", json.string(message)),
       ])
     HookSkip(reason) ->
+      // HookSkip encodes as success with continue:false and stopReason
       json.object([
-        #("subtype", json.string("skip")),
+        #("subtype", json.string("success")),
         #("request_id", json.string(request_id)),
-        #("reason", json.string(reason)),
+        #(
+          "response",
+          json.object([
+            #("continue", json.bool(False)),
+            #("stopReason", json.string(reason)),
+          ]),
+        ),
       ])
   }
 }
