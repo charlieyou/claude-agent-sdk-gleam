@@ -62,9 +62,23 @@ fn make_pending_request(id: String) -> PendingRequest {
 }
 
 /// Create a PendingHook with given callback ID.
-fn make_pending_hook(id: String) -> PendingHook {
-  PendingHook(callback_id: id, request_id: "req-" <> id, received_at: 0)
+/// Uses stub values for task_pid and monitor_ref since they're only needed for running hooks.
+fn make_pending_hook(_id: String) -> PendingHook {
+  PendingHook(
+    task_pid: stub_pid(),
+    monitor_ref: stub_monitor(),
+    callback_id: "test",
+    request_id: "req-test",
+    received_at: 0,
+  )
 }
+
+// FFI stubs for test - creates dummy Pid/Monitor that won't be used
+@external(erlang, "backpressure_test_ffi", "stub_pid")
+fn stub_pid() -> process.Pid
+
+@external(erlang, "backpressure_test_ffi", "stub_monitor")
+fn stub_monitor() -> process.Monitor
 
 // =============================================================================
 // queued_ops Tests (max 16)

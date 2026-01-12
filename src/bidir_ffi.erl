@@ -1,5 +1,6 @@
 -module(bidir_ffi).
--export([schedule_init_timeout/1, schedule_request_timeout/2, cancel_timer/1]).
+-export([schedule_init_timeout/1, schedule_request_timeout/2, cancel_timer/1,
+         spawn_hook_task/4, demonitor_hook/1]).
 
 %% Schedule an init timeout message to be sent to the calling process.
 %%
@@ -36,3 +37,25 @@ cancel_timer(TimerRef) ->
         false -> false;
         _ -> true
     end.
+
+%% Spawn a linked task to execute a hook callback.
+%%
+%% Spawns a new process that:
+%% 1. Executes the handler function with the input
+%% 2. Sends {hook_done, RequestId, Result} back to the parent
+%%
+%% Returns {Pid, MonitorRef} tuple for tracking.
+spawn_hook_task(Parent, RequestId, Handler, Input) ->
+    Pid = erlang:spawn_link(fun() ->
+        Result = Handler(Input),
+        Parent ! {hook_done, RequestId, Result}
+    end),
+    MonitorRef = erlang:monitor(process, Pid),
+    {Pid, MonitorRef}.
+
+%% Demonitor a hook task.
+%%
+%% Removes the monitor and flushes any DOWN message from the mailbox.
+demonitor_hook(MonitorRef) ->
+    erlang:demonitor(MonitorRef, [flush]),
+    nil.

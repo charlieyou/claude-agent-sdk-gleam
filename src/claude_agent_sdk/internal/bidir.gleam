@@ -217,6 +217,10 @@ pub type RequestResult {
 /// Tracks CLI-initiated hook requests that need SDK handler execution.
 pub type PendingHook {
   PendingHook(
+    /// The PID of the spawned task executing the callback.
+    task_pid: process.Pid,
+    /// Monitor reference for crash detection.
+    monitor_ref: process.Monitor,
     /// The callback ID from the CLI.
     callback_id: String,
     /// The request ID for the response.
@@ -439,6 +443,8 @@ pub type ActorMessage {
   )
   /// Request timeout fired.
   RequestTimeoutFired(request_id: String)
+  /// Hook task completed with result.
+  HookDone(request_id: String, result: Dynamic)
 }
 
 /// Responses from synchronous operations.
@@ -576,8 +582,10 @@ fn start_internal(
       // 1. Messages on the actor's subject (via process.selecting)
       // 2. Init timeout message {init_timeout, nil} (via select_record)
       // 3. Request timeout message {request_timeout, request_id} (via select_record)
+      // 4. Hook done message {hook_done, request_id, result} (via select_record)
       let init_timeout_tag = atom.create("init_timeout")
       let request_timeout_tag = atom.create("request_timeout")
+      let hook_done_tag = atom.create("hook_done")
       let selector =
         process.new_selector()
         |> process.select_map(self_subject, fn(msg) { msg })
@@ -598,6 +606,26 @@ fn start_internal(
               Error(_) -> "unknown"
             }
             RequestTimeoutFired(request_id)
+          },
+        )
+        |> process.select_record(
+          hook_done_tag,
+          2,
+          fn(msg_dyn: Dynamic) -> ActorMessage {
+            // msg_dyn = {hook_done, RequestId, Result} (3-element tuple)
+            let request_id = case
+              decode.run(msg_dyn, decode.at([1], decode.string))
+            {
+              Ok(id) -> id
+              Error(_) -> "unknown"
+            }
+            let result = case
+              decode.run(msg_dyn, decode.at([2], decode.dynamic))
+            {
+              Ok(r) -> r
+              Error(_) -> dynamic.nil()
+            }
+            HookDone(request_id, result)
           },
         )
 
@@ -674,6 +702,22 @@ fn schedule_request_timeout(timeout_ms: Int, request_id: String) -> Dynamic
 @external(erlang, "bidir_ffi", "cancel_timer")
 fn cancel_timer(timer_ref: Dynamic) -> Bool
 
+/// Spawn a hook task to execute callback in separate process.
+///
+/// The task executes the handler with input and sends {hook_done, request_id, result}
+/// back to parent. Returns {Pid, MonitorRef} tuple.
+@external(erlang, "bidir_ffi", "spawn_hook_task")
+fn spawn_hook_task(
+  parent: process.Pid,
+  request_id: String,
+  handler: fn(Dynamic) -> Dynamic,
+  input: Dynamic,
+) -> #(process.Pid, process.Monitor)
+
+/// Demonitor a hook task (cleanup after completion).
+@external(erlang, "bidir_ffi", "demonitor_hook")
+fn demonitor_hook(monitor_ref: process.Monitor) -> Nil
+
 /// Handle incoming messages to the actor.
 ///
 /// This is the main message loop. Handles synchronous requests with replies.
@@ -713,6 +757,39 @@ fn handle_message(
     }
     RequestTimeoutFired(request_id) -> {
       handle_request_timeout(state, request_id)
+    }
+    HookDone(request_id, result) -> {
+      handle_hook_done(state, request_id, result)
+    }
+  }
+}
+
+/// Handle hook task completion.
+///
+/// Called when a spawned hook task sends back its result. Looks up the
+/// pending hook, demonitors the task, sends response to CLI, and removes
+/// from pending_hooks.
+fn handle_hook_done(
+  state: SessionState,
+  request_id: String,
+  result: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  case dict.get(state.pending_hooks, request_id) {
+    Ok(pending) -> {
+      // Demonitor the task (cleanup)
+      demonitor_hook(pending.monitor_ref)
+
+      // Send success response to CLI
+      let response = HookResponse(request_id, HookSuccess(result))
+      send_control_response(state, response)
+
+      // Remove from pending_hooks
+      let new_pending = dict.delete(state.pending_hooks, request_id)
+      actor.continue(SessionState(..state, pending_hooks: new_pending))
+    }
+    Error(Nil) -> {
+      // Already handled (timeout won), ignore
+      actor.continue(state)
     }
   }
 }
@@ -986,13 +1063,23 @@ fn dispatch_hook_callback(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.hooks.handlers, callback_id) {
     Ok(handler) -> {
-      // Invoke the handler and wrap result in HookSuccess
-      let result = handler(input)
-      let response = HookResponse(request_id, HookSuccess(result))
+      // Spawn a task to execute the handler asynchronously
+      // The task will send HookDone message back when complete
+      let parent_pid = process.self()
+      let #(task_pid, monitor_ref) =
+        spawn_hook_task(parent_pid, request_id, handler, input)
 
-      // Send response to CLI
-      send_control_response(state, response)
-      actor.continue(state)
+      // Record the pending hook
+      let pending =
+        PendingHook(
+          task_pid: task_pid,
+          monitor_ref: monitor_ref,
+          callback_id: callback_id,
+          request_id: request_id,
+          received_at: 0,
+        )
+      let new_pending = dict.insert(state.pending_hooks, request_id, pending)
+      actor.continue(SessionState(..state, pending_hooks: new_pending))
     }
     Error(Nil) -> {
       // Unknown callback_id - send fail-open success response
@@ -1359,6 +1446,12 @@ pub fn get_lifecycle(
   timeout: Int,
 ) -> SessionLifecycle {
   actor.call(session, timeout, GetLifecycle)
+}
+
+/// Get the PID of the session actor.
+pub fn get_pid(session: Subject(ActorMessage)) -> process.Pid {
+  let assert Ok(pid) = process.subject_owner(session)
+  pid
 }
 
 /// Call the actor synchronously with a ping.
