@@ -349,7 +349,7 @@ fn decode_can_use_tool(input: Dynamic) -> Result(HookInput, HookDecodeError) {
     use blocked_path <- decode.optional_field(
       "blocked_path",
       None,
-      decode.optional(decode.string),
+      decode.map(decode.string, Some),
     )
     decode.success(CanUseToolContext(
       tool_name:,
