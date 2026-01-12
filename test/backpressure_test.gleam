@@ -15,8 +15,9 @@ import gleeunit/should
 import claude_agent_sdk/internal/bidir.{
   type PendingHook, type PendingRequest, type SessionState,
   type SubscriberMessage, InitQueueOverflow, PendingHook, PendingRequest,
-  QueuedRequest, SessionState, Starting, TooManyPendingRequests,
-  add_pending_hook, add_pending_request, empty_hook_config, queue_operation,
+  QueuedRequest, RequestError, SessionState, Starting, TooManyPendingRequests,
+  add_pending_hook, add_pending_request, empty_hook_config, flush_queued_ops,
+  queue_operation,
 }
 import support/mock_bidir_runner
 
@@ -247,4 +248,107 @@ pub fn add_pending_hook_overflow_preserves_existing_test() {
 
   // Original state should still have exactly 32
   should.equal(dict.size(state.pending_hooks), 32)
+}
+
+// =============================================================================
+// flush_queued_ops Tests (enforces max 64 pending_requests)
+// =============================================================================
+
+pub fn flush_queued_ops_respects_pending_limit_test() {
+  // Start with 60 pending requests (near capacity of 64)
+  let state =
+    list.range(1, 60)
+    |> list.fold(test_state(), fn(s, i) {
+      let id = "req-" <> int.to_string(i)
+      let pending = make_pending_request(id)
+      let assert Ok(new_state) = add_pending_request(s, id, pending)
+      new_state
+    })
+
+  // Queue 10 operations (only 4 should fit: 64 - 60 = 4)
+  let reply_subjects =
+    list.range(1, 10)
+    |> list.map(fn(i) {
+      let subj: process.Subject(bidir.RequestResult) = process.new_subject()
+      #("queued-" <> int.to_string(i), subj)
+    })
+
+  let state_with_queued =
+    list.fold(reply_subjects, state, fn(s, pair) {
+      let #(id, reply_to) = pair
+      let op = QueuedRequest(id, "{}", reply_to)
+      let assert Ok(new_state) = queue_operation(s, op)
+      new_state
+    })
+
+  // Flush queued ops
+  let flushed_state = flush_queued_ops(state_with_queued)
+
+  // Should have exactly 64 pending requests (60 existing + 4 new)
+  should.equal(dict.size(flushed_state.pending_requests), 64)
+
+  // Queued ops should be cleared
+  should.equal(list.length(flushed_state.queued_ops), 0)
+
+  // First 4 subjects should NOT have received error (they were added successfully)
+  // Last 6 subjects should have received RequestError
+  let overflow_subjects = list.drop(reply_subjects, 4)
+  list.each(overflow_subjects, fn(pair) {
+    let #(_id, reply_to) = pair
+    case process.receive(reply_to, 100) {
+      Ok(RequestError(msg)) -> {
+        should.be_true(string.contains(msg, "64"))
+      }
+      _ -> should.fail()
+    }
+  })
+}
+
+pub fn flush_queued_ops_all_fit_when_space_available_test() {
+  // Start with 50 pending requests (room for 14 more)
+  let state =
+    list.range(1, 50)
+    |> list.fold(test_state(), fn(s, i) {
+      let id = "req-" <> int.to_string(i)
+      let pending = make_pending_request(id)
+      let assert Ok(new_state) = add_pending_request(s, id, pending)
+      new_state
+    })
+
+  // Queue 10 operations (all should fit)
+  let reply_subjects =
+    list.range(1, 10)
+    |> list.map(fn(i) {
+      let subj: process.Subject(bidir.RequestResult) = process.new_subject()
+      #("queued-" <> int.to_string(i), subj)
+    })
+
+  let state_with_queued =
+    list.fold(reply_subjects, state, fn(s, pair) {
+      let #(id, reply_to) = pair
+      let op = QueuedRequest(id, "{}", reply_to)
+      let assert Ok(new_state) = queue_operation(s, op)
+      new_state
+    })
+
+  // Flush queued ops
+  let flushed_state = flush_queued_ops(state_with_queued)
+
+  // Should have exactly 60 pending requests (50 existing + 10 new)
+  should.equal(dict.size(flushed_state.pending_requests), 60)
+
+  // Queued ops should be cleared
+  should.equal(list.length(flushed_state.queued_ops), 0)
+
+  // None of the subjects should have received an error
+  list.each(reply_subjects, fn(pair) {
+    let #(_id, reply_to) = pair
+    case process.receive(reply_to, 0) {
+      Error(Nil) -> {
+        // No message received - correct, request is pending
+        Nil
+      }
+      Ok(_) -> should.fail()
+    }
+  })
 }

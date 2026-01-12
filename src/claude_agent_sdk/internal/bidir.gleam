@@ -995,7 +995,7 @@ fn handle_init_timeout(
 ///
 /// Sends all queued operations to CLI without blocking.
 /// Each operation gets its own pending request entry.
-fn flush_queued_ops(state: SessionState) -> SessionState {
+pub fn flush_queued_ops(state: SessionState) -> SessionState {
   // Reverse to process in FIFO order (queue_operation prepends)
   let ops_in_order = list.reverse(state.queued_ops)
 
@@ -1008,20 +1008,34 @@ fn flush_queued_ops(state: SessionState) -> SessionState {
         let #(pending, runner) = acc
         case op {
           QueuedRequest(request_id, json_payload, reply_to) -> {
-            // Send pre-encoded JSON to CLI (payload is already a String)
-            let write_fn = runner.write
-            let _result = write_fn(json_payload <> "\n")
+            // Enforce max_pending_requests backpressure limit
+            case dict.size(pending) >= max_pending_requests {
+              True -> {
+                // At capacity: send error to caller, don't insert pending entry
+                process.send(
+                  reply_to,
+                  RequestError("Too many pending control requests (max 64)"),
+                )
+                #(pending, runner)
+              }
+              False -> {
+                // Send pre-encoded JSON to CLI (payload is already a String)
+                let write_fn = runner.write
+                let _result = write_fn(json_payload <> "\n")
 
-            // Register in pending_requests for response correlation
-            // Note: sent_at=0 is acceptable since timeout logic is not yet implemented
-            let pending_req =
-              PendingRequest(
-                request_id: request_id,
-                reply_to: reply_to,
-                sent_at: 0,
-              )
-            let updated_pending = dict.insert(pending, request_id, pending_req)
-            #(updated_pending, runner)
+                // Register in pending_requests for response correlation
+                // Note: sent_at=0 is acceptable since timeout logic is not yet implemented
+                let pending_req =
+                  PendingRequest(
+                    request_id: request_id,
+                    reply_to: reply_to,
+                    sent_at: 0,
+                  )
+                let updated_pending =
+                  dict.insert(pending, request_id, pending_req)
+                #(updated_pending, runner)
+              }
+            }
           }
         }
       },
