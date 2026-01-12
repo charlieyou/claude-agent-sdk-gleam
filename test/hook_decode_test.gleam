@@ -274,6 +274,41 @@ pub fn decode_can_use_tool_no_blocked_path_test() {
 }
 
 // =============================================================================
+// WrongType Error Tests
+// =============================================================================
+
+pub fn decode_wrong_type_session_id_test() {
+  // session_id should be string, not number
+  let json_str =
+    "{\"hook_event_name\":\"PreToolUse\",\"session_id\":123,\"tool_name\":\"Bash\",\"tool_input\":{}}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreToolUse, input)
+
+  case result {
+    Error(WrongType(field, expected)) -> {
+      should.equal(field, "session_id")
+      should.equal(expected, "String")
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn decode_wrong_type_tool_name_test() {
+  // tool_name should be string, not array
+  let json_str =
+    "{\"hook_event_name\":\"PreToolUse\",\"session_id\":\"abc\",\"tool_name\":[\"Bash\"],\"tool_input\":{}}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreToolUse, input)
+
+  case result {
+    Error(WrongType(field, _)) -> should.equal(field, "tool_name")
+    _ -> should.fail()
+  }
+}
+
+// =============================================================================
 // Forward Compatibility Tests
 // =============================================================================
 

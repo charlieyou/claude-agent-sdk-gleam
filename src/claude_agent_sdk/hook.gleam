@@ -366,16 +366,20 @@ fn decode_can_use_tool(input: Dynamic) -> Result(HookInput, HookDecodeError) {
 }
 
 /// Convert decode errors to HookDecodeError.
-/// Extracts the first missing field from decode errors.
+/// Distinguishes between missing fields and type mismatches.
 fn decode_errors_to_hook_error(
   errors: List(decode.DecodeError),
 ) -> HookDecodeError {
   case errors {
-    [decode.DecodeError(expected: _, found: _, path: path), ..] -> {
-      // Path gives field name(s), e.g. ["tool_name"]
-      case path {
-        [field, ..] -> MissingField(field)
-        [] -> MissingField("unknown")
+    [decode.DecodeError(expected: expected, found: found, path: path), ..] -> {
+      let field = case path {
+        [f, ..] -> f
+        [] -> "unknown"
+      }
+      // "nothing" indicates the field was missing entirely
+      case found {
+        "nothing" -> MissingField(field)
+        _ -> WrongType(field: field, expected: expected)
       }
     }
     [] -> MissingField("unknown")
