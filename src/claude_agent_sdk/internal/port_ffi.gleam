@@ -93,13 +93,18 @@ fn ffi_port_write_raw(port: Dynamic, data: String) -> Dynamic
 /// Returns Ok(Nil) on success, Error(PortClosed) if the port is closed.
 pub fn port_write(port: Port, data: String) -> Result(Nil, WriteError) {
   let result = ffi_port_write_raw(port_to_dynamic(port), data)
+  // Decode both tuple fields: tag and payload
   let result_decoder = {
     use tag <- decode.field(0, decode.string)
-    decode.success(tag)
+    use payload <- decode.field(1, decode.dynamic)
+    decode.success(#(tag, payload))
   }
   case decode.run(result, result_decoder) {
-    Ok("ok") -> Ok(Nil)
-    Ok("error") -> Error(PortClosed)
+    // Success: expect {<<"ok">>, nil}
+    Ok(#("ok", _)) -> Ok(Nil)
+    // Error: expect {<<"error">>, <<"port_closed">>}
+    Ok(#("error", _)) -> Error(PortClosed)
+    // Unknown tag or decode failure
     Ok(_) -> Error(PortClosed)
     Error(_) -> Error(PortClosed)
   }
