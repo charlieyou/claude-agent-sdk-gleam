@@ -72,19 +72,21 @@ demonitor_hook(MonitorRef) ->
 %% Schedule a hook timeout message to be sent to the calling process.
 %%
 %% Uses erlang:send_after/3 to send a tagged tuple message after the
-%% specified delay. The message includes request_id and timer_ref for
-%% first-event-wins verification (prevents stale timeouts from killing
+%% specified delay. The message includes request_id and a verification ref
+%% for first-event-wins verification (prevents stale timeouts from killing
 %% a new task that reuses the same request_id).
 %%
-%% The message format {hook_timeout, RequestId, TimerRef} can be received
+%% The message format {hook_timeout, RequestId, VerifyRef} can be received
 %% by a selector using select_record with tag=hook_timeout and arity=2.
 %%
-%% Returns the timer reference for later cancellation and verification.
+%% Returns {TimerRef, VerifyRef} tuple where:
+%% - TimerRef is passed to cancel_timer/1 for cancellation
+%% - VerifyRef is stored in PendingHook and compared against message
 schedule_hook_timeout(TimeoutMs, RequestId) ->
     Self = self(),
-    TimerRef = erlang:make_ref(),
-    erlang:send_after(TimeoutMs, Self, {hook_timeout, RequestId, TimerRef}),
-    TimerRef.
+    VerifyRef = erlang:make_ref(),
+    TimerRef = erlang:send_after(TimeoutMs, Self, {hook_timeout, RequestId, VerifyRef}),
+    {TimerRef, VerifyRef}.
 
 %% Kill a task process immediately.
 %%

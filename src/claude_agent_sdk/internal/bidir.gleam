@@ -277,8 +277,10 @@ pub type PendingHook {
     task_pid: process.Pid,
     /// Monitor reference for crash detection.
     monitor_ref: process.Monitor,
-    /// Timer reference for timeout (for first-event-wins cancellation).
+    /// Timer reference for cancellation (passed to cancel_timer).
     timer_ref: Dynamic,
+    /// Verification reference for first-event-wins (compared against message).
+    verify_ref: Dynamic,
     /// The callback ID from the CLI.
     callback_id: String,
     /// The request ID for the response.
@@ -828,10 +830,13 @@ fn cancel_timer(timer_ref: Dynamic) -> Bool
 /// Schedule hook timeout by sending HookTimeout message after delay.
 ///
 /// Uses erlang:send_after/3 to schedule the timeout message.
-/// The message includes request_id for correlation.
-/// Returns the timer reference for later cancellation.
+/// The message includes request_id and verify_ref for correlation.
+/// Returns {TimerRef, VerifyRef} tuple for cancellation and verification.
 @external(erlang, "bidir_ffi", "schedule_hook_timeout")
-fn schedule_hook_timeout(timeout_ms: Int, request_id: String) -> Dynamic
+fn schedule_hook_timeout(
+  timeout_ms: Int,
+  request_id: String,
+) -> #(Dynamic, Dynamic)
 
 /// Kill a task process immediately.
 ///
@@ -987,12 +992,12 @@ fn handle_hook_error(
 fn handle_hook_timeout(
   state: SessionState,
   request_id: String,
-  msg_timer_ref: Dynamic,
+  msg_verify_ref: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Verify timer_ref matches to prevent stale timeouts from killing wrong task
-      case dynamic_equals(pending.timer_ref, msg_timer_ref) {
+      // Verify ref matches to prevent stale timeouts from killing wrong task
+      case dynamic_equals(pending.verify_ref, msg_verify_ref) {
         True -> {
           // Kill the task (timeout won the race)
           kill_task(pending.task_pid)
@@ -1309,15 +1314,17 @@ fn dispatch_hook_callback(
             spawn_hook_task(parent_pid, request_id, handler, input)
 
           // Schedule timeout for first-event-wins protocol
-          let timer_ref =
+          // Returns {TimerRef, VerifyRef} tuple
+          let #(timer_ref, verify_ref) =
             schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
 
-          // Record the pending hook with timer reference
+          // Record the pending hook with timer and verify references
           let pending =
             PendingHook(
               task_pid: task_pid,
               monitor_ref: monitor_ref,
               timer_ref: timer_ref,
+              verify_ref: verify_ref,
               callback_id: callback_id,
               request_id: request_id,
               received_at: 0,

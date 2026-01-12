@@ -71,6 +71,7 @@ fn make_pending_hook(id: String) -> PendingHook {
     task_pid: stub_pid(),
     monitor_ref: stub_monitor(),
     timer_ref: dynamic.nil(),
+    verify_ref: dynamic.nil(),
     callback_id: "cb-" <> id,
     request_id: "req-" <> id,
     received_at: 0,
