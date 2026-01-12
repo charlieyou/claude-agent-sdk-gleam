@@ -203,11 +203,7 @@ fn encode_permission_response_inner(
   result: PermissionResult,
 ) -> Json {
   let response_obj = case result {
-    Allow ->
-      json.object([
-        #("behavior", json.string("allow")),
-        #("updatedInput", json.null()),
-      ])
+    Allow -> json.object([#("behavior", json.string("allow"))])
     Deny(message) -> {
       let base = [
         #("behavior", json.string("deny")),
@@ -219,16 +215,8 @@ fn encode_permission_response_inner(
         None -> json.object(base)
       }
     }
-    AllowOnce ->
-      json.object([
-        #("behavior", json.string("allowOnce")),
-        #("updatedInput", json.null()),
-      ])
-    AllowAll ->
-      json.object([
-        #("behavior", json.string("allowAll")),
-        #("updatedInput", json.null()),
-      ])
+    AllowOnce -> json.object([#("behavior", json.string("allowOnce"))])
+    AllowAll -> json.object([#("behavior", json.string("allowAll"))])
     Edit(modified_input) ->
       json.object([
         #("behavior", json.string("edit")),
