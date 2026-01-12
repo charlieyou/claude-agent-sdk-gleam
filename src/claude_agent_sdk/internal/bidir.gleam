@@ -43,9 +43,9 @@ import gleam/otp/actor
 import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
   type IncomingMessage, type OutgoingControlRequest,
-  type OutgoingControlResponse, CanUseTool, ControlRequest, ControlResponse,
-  Error as ControlError, HookCallback, HookResponse, HookSuccess, Interrupt,
-  McpMessage, RegularMessage, Success,
+  type OutgoingControlResponse, type PermissionMode, CanUseTool, ControlRequest,
+  ControlResponse, Error as ControlError, HookCallback, HookResponse,
+  HookSuccess, Interrupt, McpMessage, RegularMessage, SetPermissionMode, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -222,6 +222,18 @@ pub type InterruptError {
   InterruptTimeout
   /// Session was stopped or not running.
   SessionStopped
+}
+
+/// Error type for set_permission_mode() operation.
+///
+/// Represents the possible failure modes when changing permission mode.
+pub type SetPermissionModeError {
+  /// CLI returned an error response.
+  SetPermissionModeCliError(message: String)
+  /// Request timed out (5000ms default).
+  SetPermissionModeTimeout
+  /// Session was stopped or not running.
+  SetPermissionModeSessionStopped
 }
 
 /// A pending hook callback awaiting SDK response.
@@ -1627,6 +1639,68 @@ pub fn interrupt(session: Subject(ActorMessage)) -> Result(Nil, InterruptError) 
     Ok(RequestTimeout) -> Error(InterruptTimeout)
     Ok(RequestSessionStopped) -> Error(SessionStopped)
     Error(Nil) -> Error(InterruptTimeout)
+  }
+}
+
+/// Default timeout for set_permission_mode operation (5000ms).
+const set_permission_mode_timeout_ms: Int = 5000
+
+/// Set the permission mode for the session.
+///
+/// Changes how the CLI handles permission requests. This is a synchronous call
+/// that blocks until the CLI responds or times out.
+///
+/// ## Permission Modes
+///
+/// - `Default` - Normal permission prompting behavior
+/// - `AcceptEdits` - Auto-accept file edits
+/// - `BypassPermissions` - Bypass all permission checks
+/// - `Plan` - Plan mode (read-only exploration)
+///
+/// ## Timeout
+///
+/// Uses a 5000ms timeout. Configuration changes should complete quickly.
+///
+/// ## Returns
+///
+/// - `Ok(Nil)` - Permission mode changed successfully
+/// - `Error(SetPermissionModeCliError(message))` - CLI returned an error
+/// - `Error(SetPermissionModeTimeout)` - No response within 5000ms
+/// - `Error(SetPermissionModeSessionStopped)` - Session is not running
+///
+/// ## Example
+///
+/// ```gleam
+/// import claude_agent_sdk/control.{AcceptEdits}
+///
+/// case bidir.set_permission_mode(session, AcceptEdits) {
+///   Ok(Nil) -> io.println("Permission mode set to AcceptEdits")
+///   Error(SetPermissionModeCliError(msg)) -> io.println("Failed: " <> msg)
+///   Error(SetPermissionModeTimeout) -> io.println("Timed out")
+///   Error(SetPermissionModeSessionStopped) -> io.println("Session not running")
+/// }
+/// ```
+pub fn set_permission_mode(
+  session: Subject(ActorMessage),
+  mode: PermissionMode,
+) -> Result(Nil, SetPermissionModeError) {
+  // Generate a request ID for this operation
+  let request_id = generate_request_id()
+  let request = SetPermissionMode(request_id, mode)
+
+  // Create subject to receive the result
+  let result_subject: Subject(RequestResult) = process.new_subject()
+
+  // Send the request
+  send_control_request(session, request, result_subject)
+
+  // Wait for response with 5000ms timeout
+  case process.receive(result_subject, set_permission_mode_timeout_ms) {
+    Ok(RequestSuccess(_)) -> Ok(Nil)
+    Ok(RequestError(message)) -> Error(SetPermissionModeCliError(message))
+    Ok(RequestTimeout) -> Error(SetPermissionModeTimeout)
+    Ok(RequestSessionStopped) -> Error(SetPermissionModeSessionStopped)
+    Error(Nil) -> Error(SetPermissionModeTimeout)
   }
 }
 
