@@ -65,7 +65,7 @@ Allowed:
 
 ## Gating and Environment Variables
 - Unit tests: default `gleam test`
-- Phase 0 runtime tests: `PHASE0_RUNTIME=1`
+- Phase 0 runtime tests: run with `gleam test`
 - Integration tests: `CLAUDE_INTEGRATION_TEST=1`
 - Decoder tests: should run by default once decoders are implemented; avoid permanent skip gates
 

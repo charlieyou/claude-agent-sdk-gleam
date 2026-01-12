@@ -1,4 +1,4 @@
-/// Phase 0 Compile Check Tests (Suite A)
+/// Compile Check Tests
 ///
 /// These tests verify that required APIs exist at the pinned dependency versions.
 /// Suite A validates: gleam build succeeds, FFI bindings exist and typecheck.

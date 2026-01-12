@@ -1,8 +1,6 @@
-/// Phase 0 Runtime Port Validation Tests
+/// Runtime Port Validation Tests
 ///
 /// These tests validate actual port spawn/read/close operations.
-/// Opt-in only via PHASE0_RUNTIME=1 environment variable to avoid
-/// failures in restricted environments.
 import gleam/bit_array
 import gleam/erlang/atom
 import gleam/io
@@ -36,7 +34,7 @@ fn decode_os_family() -> OsFamily {
 
 /// Get platform-specific test command
 /// Returns #(executable, args, expected_output_bytes)
-fn phase0_test_command() -> #(String, List(String), Int) {
+fn runtime_test_command() -> #(String, List(String), Int) {
   case decode_os_family() {
     Win32 -> #("cmd.exe", ["/c", "echo test"], 6)
     Unix -> #("/bin/echo", ["test"], 5)
@@ -44,12 +42,12 @@ fn phase0_test_command() -> #(String, List(String), Int) {
 }
 
 /// Runtime test: spawn -> read -> exit_status -> close flow
-pub fn phase0_runtime_spawn_test() {
+pub fn runtime_spawn_test() {
   run_spawn_test()
 }
 
 fn run_spawn_test() -> Nil {
-  let #(executable, args, expected_bytes) = phase0_test_command()
+  let #(executable, args, expected_bytes) = runtime_test_command()
 
   // Spawn the port
   let port = port_ffi.ffi_open_port(executable, args, "")
@@ -123,12 +121,12 @@ fn run_spawn_test_body(
 }
 
 /// Runtime test: receive_timeout returns Timeout after process exits
-pub fn phase0_timed_receive_test() {
+pub fn runtime_timed_receive_test() {
   run_timed_receive_test()
 }
 
 fn run_timed_receive_test() -> Nil {
-  let #(executable, args, _) = phase0_test_command()
+  let #(executable, args, _) = runtime_test_command()
 
   // Spawn the port
   let port = port_ffi.ffi_open_port(executable, args, "")

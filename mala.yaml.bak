@@ -1,0 +1,4 @@
+preset: gleam
+evidence_check:
+  required:
+  - test

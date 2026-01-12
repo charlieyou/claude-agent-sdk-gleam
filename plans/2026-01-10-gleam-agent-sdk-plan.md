@@ -678,15 +678,15 @@ Phase 0 is explicitly divided into two suites with different requirements:
 | `gleam build` succeeds | ✅ REQUIRED | Project structure, dependencies |
 | `gleam test test/phase0_compile_check_test.gleam` | ✅ REQUIRED | FFI bindings exist and typecheck |
 
-**Suite B: Runtime Spawn Checks (OPT-IN, SKIP-ONLY)**
+**Suite B: Runtime Spawn Checks**
 | Check | Status | Skip Mechanism |
 |-------|--------|----------------|
-| port_ffi spawn/read/close | ⚠️ OPT-IN | `[SKIP:PHASE0]` stdout line |
-| Timed receive validation | ⚠️ OPT-IN | `[SKIP:PHASE0]` stdout line |
+| port_ffi spawn/read/close | ✅ REQUIRED | `[SKIP:PHASE0]` stdout line |
+| Timed receive validation | ✅ REQUIRED | `[SKIP:PHASE0]` stdout line |
 
 **Execution rules**:
 1. Suite A MUST pass in ALL environments (compile-only, no subprocess spawning)
-2. Suite B runs ONLY when `PHASE0_RUNTIME=1` is set
+2. Suite B runs with the standard test suite
 3. Suite B NEVER writes to filesystem (no `file.write()` calls)
 4. Suite B skips emit `[SKIP:PHASE0] reason` to stdout only
 
@@ -712,10 +712,7 @@ fn record_phase0_skip(test_name: String, reason: String) -> Nil {
 }
 
 pub fn phase0_runtime_spawn_test() {
-  case get_env("PHASE0_RUNTIME") {
-    Ok("1") -> run_spawn_test()
-    _ -> record_phase0_skip("phase0_runtime_spawn_test", "PHASE0_RUNTIME not set")
-  }
+  run_spawn_test()
 }
 ```
 

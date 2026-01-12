@@ -27,7 +27,7 @@ Verified modules:
 
 ## Runtime Port Test: SKIP
 
-Runtime tests (Suite B) are opt-in via `PHASE0_RUNTIME=1` to avoid failures in restricted CI environments.
+Runtime tests (Suite B) run with the standard test suite.
 
 When enabled, these tests validate:
 - Port spawn via `erlang:open_port/2`

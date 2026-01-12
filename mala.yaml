@@ -1,6 +1,34 @@
+preset: gleam
+
 commands:
-  build: gleam build
-  test: gleam test
-  format: gleam format
-  typecheck: gleam check
-  e2e: gleam test -- --e2e
+  e2e: "gleam test -- --e2e"
+
+evidence_check:
+  required:
+  - build
+  - format
+  - test
+
+per_issue_review:
+  enabled: true
+  reviewer_type: cerberus
+  max_retries: 5
+  finding_threshold: P1
+
+validation_triggers:
+  run_end:
+    fire_on: both
+    failure_mode: remediate 
+    max_retries: 3
+    commands:
+    - ref: setup
+    - ref: format
+    - ref: build
+    - ref: test
+    - ref: e2e
+    
+    code_review:
+      enabled: true
+      reviewer_type: cerberus
+      baseline: since_last_review
+      finding_threshold: P0

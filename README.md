@@ -174,22 +174,11 @@ gleam test  # Run the tests
 
 ## Testing
 
-### Test Categories
-
-| Category | Description | External Dependencies |
-|----------|-------------|----------------------|
-| **Unit tests** | Schema parsing, type construction, CLI arg building | None |
-| **Phase 0 tests** | FFI/runtime validation (opt-in) | Erlang runtime |
-| **E2E tests** | Real CLI interaction and streaming | Claude CLI + auth |
-
 ### Running Tests
 
 ```bash
 # Unit tests only (default, no CLI required)
 gleam test
-
-# Phase 0 FFI validation tests (opt-in)
-PHASE0_RUNTIME=1 gleam test
 
 # E2E tests (requires Claude CLI + auth)
 gleam test -- --e2e
@@ -207,7 +196,6 @@ gleam test -- --e2e --output-dir artifacts/e2e/manual
 | Variable | Purpose |
 |----------|---------|
 | `ANTHROPIC_API_KEY` | API key for CLI authentication |
-| `PHASE0_RUNTIME` | Set to `1` to enable Phase 0 FFI validation tests |
 
 ### Prerequisites for E2E Tests
 
