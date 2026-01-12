@@ -65,20 +65,10 @@ pub fn decode_port_message(msg: Dynamic, port: Port) -> Result(PortMessage, Nil)
 
 /// Compare a Dynamic port value with a typed Port
 fn ports_equal(dynamic_port: Dynamic, port: Port) -> Bool {
-  // Port is opaque type Port(inner: Dynamic), runtime shape is {port, InnerValue}
-  // Use element(2, ...) to extract the inner port value (1-indexed in Erlang)
-  let port_inner = extract_port_inner(port)
+  // Use public accessor to get raw port from wrapper
+  let port_inner = port_ffi.port_to_dynamic(port)
   exact_equals(dynamic_port, port_inner)
 }
-
-/// FFI to extract inner Dynamic from opaque Port type
-/// Port runtime shape is {port, InnerDynamic}, so element(2, Port) gets the raw port
-fn extract_port_inner(port: Port) -> Dynamic {
-  ffi_element(2, port)
-}
-
-@external(erlang, "erlang", "element")
-fn ffi_element(index: Int, tuple: Port) -> Dynamic
 
 /// FFI to compare two dynamic values for exact equality
 @external(erlang, "claude_agent_sdk_ffi", "exact_equals")

@@ -19,14 +19,10 @@ pub fn main() -> Nil {
 fn to_dynamic(value: a) -> Dynamic
 
 /// Extract raw Erlang port from Port wrapper for constructing test messages.
-/// Port runtime shape is {port, RawPort}, so element(2, Port) gets the raw port.
 /// Real Erlang port messages contain the raw port, not the Gleam wrapper.
 fn extract_raw_port(port: port_ffi.Port) -> Dynamic {
-  ffi_element(2, port)
+  port_ffi.port_to_dynamic(port)
 }
-
-@external(erlang, "erlang", "element")
-fn ffi_element(index: Int, tuple: port_ffi.Port) -> Dynamic
 
 /// Create a mock port for testing by spawning a quick command
 fn create_mock_port() -> port_ffi.Port {

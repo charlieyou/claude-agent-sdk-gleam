@@ -61,8 +61,9 @@ pub fn ffi_open_port_safe(
   }
 }
 
-/// Extract inner Dynamic for FFI calls
-fn port_to_dynamic(port: Port) -> Dynamic {
+/// Extract raw Erlang port reference from the Port wrapper.
+/// Used for FFI calls and comparing port references in decoded messages.
+pub fn port_to_dynamic(port: Port) -> Dynamic {
   let Port(inner) = port
   inner
 }
