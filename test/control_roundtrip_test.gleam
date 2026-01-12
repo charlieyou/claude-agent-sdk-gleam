@@ -66,6 +66,20 @@ pub fn roundtrip_initialize_request_test() {
   pre_tool |> list_length |> should.equal(1)
   let assert Ok(post_tool) = get_array(hooks_obj, "PostToolUse")
   post_tool |> list_length |> should.equal(1)
+
+  // Verify hook entry content for PreToolUse (filter: None -> matcher: null)
+  let assert Ok(pre_hook_entry) = list_first(pre_tool)
+  pre_hook_entry |> is_null("matcher") |> should.be_true
+  let assert Ok(pre_callback_ids) =
+    get_string_array(pre_hook_entry, "hookCallbackIds")
+  pre_callback_ids |> should.equal(["hook_0"])
+
+  // Verify hook entry content for PostToolUse (filter: Some("Bash") -> matcher: "Bash")
+  let assert Ok(post_hook_entry) = list_first(post_tool)
+  post_hook_entry |> get_string("matcher") |> should.equal(Ok("Bash"))
+  let assert Ok(post_callback_ids) =
+    get_string_array(post_hook_entry, "hookCallbackIds")
+  post_callback_ids |> should.equal(["hook_1"])
 }
 
 pub fn roundtrip_initialize_empty_hooks_test() {
@@ -424,6 +438,13 @@ pub fn integration_encode_decode_hook_error_test() {
   let outgoing = HookResponse(request_id: "int_2", result: HookError("Failed"))
   let encoded = control_encoder.encode_response(outgoing)
 
+  // Verify encoder uses "message" field (not "error") before decoding
+  let assert Ok(parsed_json) = json.parse(encoded, decode.dynamic)
+  let assert Ok(response_obj) = get_object(parsed_json, "response")
+  response_obj |> get_string("subtype") |> should.equal(Ok("error"))
+  response_obj |> get_string("message") |> should.equal(Ok("Failed"))
+
+  // Verify decoder's "message" field tolerance path works
   let assert Ok(ControlResponse(ControlError(req_id, msg))) =
     control_decoder.decode_line(encoded)
 
@@ -586,5 +607,23 @@ fn list_length(list: List(a)) -> Int {
   case list {
     [] -> 0
     [_, ..rest] -> 1 + list_length(rest)
+  }
+}
+
+fn list_first(list: List(a)) -> Result(a, Nil) {
+  case list {
+    [first, ..] -> Ok(first)
+    [] -> Error(Nil)
+  }
+}
+
+fn is_null(dyn: Dynamic, key: String) -> Bool {
+  let decoder = {
+    use value <- decode.field(key, decode.dynamic)
+    decode.success(value)
+  }
+  case decode.run(dyn, decoder) {
+    Ok(value) -> dynamic.classify(value) == "Nil"
+    Error(_) -> False
   }
 }
