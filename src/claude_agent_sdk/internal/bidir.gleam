@@ -393,6 +393,8 @@ pub type SessionState {
     inject_subject: Option(Subject(String)),
     /// Timeout for initialization handshake (ms).
     init_timeout_ms: Int,
+    /// Timer reference for init timeout (for cancellation on cleanup).
+    init_timer_ref: Option(Dynamic),
   )
 }
 
@@ -534,6 +536,7 @@ fn start_internal(
           init_request_id: Some(init_request_id),
           inject_subject: None,
           init_timeout_ms: config.init_timeout_ms,
+          init_timer_ref: None,
         )
 
       // Perform the initialization handshake
@@ -592,18 +595,28 @@ fn perform_init_handshake(state: SessionState) -> SessionState {
   let _result = write_fn(json_line)
 
   // Schedule init timeout (send message to self after delay)
-  // Note: This uses process.send_after via the inject mechanism for now
-  // Full implementation would use OTP timers
-  schedule_init_timeout(state.init_timeout_ms)
+  // Store the timer reference for later cancellation
+  let timer_ref = schedule_init_timeout(state.init_timeout_ms)
 
-  SessionState(..state, lifecycle: new_lifecycle)
+  SessionState(
+    ..state,
+    lifecycle: new_lifecycle,
+    init_timer_ref: Some(timer_ref),
+  )
 }
 
 /// Schedule init timeout by sending InitTimeoutFired message after delay.
 ///
 /// Uses erlang:send_after/3 to schedule the timeout message.
+/// Returns the timer reference for later cancellation.
 @external(erlang, "bidir_ffi", "schedule_init_timeout")
-fn schedule_init_timeout(timeout_ms: Int) -> Nil
+fn schedule_init_timeout(timeout_ms: Int) -> Dynamic
+
+/// Cancel a timer by its reference.
+///
+/// Returns True if the timer was cancelled, False if it had already fired.
+@external(erlang, "bidir_ffi", "cancel_timer")
+fn cancel_timer(timer_ref: Dynamic) -> Bool
 
 /// Handle incoming messages to the actor.
 ///
@@ -749,13 +762,21 @@ fn handle_init_success(
       // Parse capabilities from payload (basic extraction)
       let capabilities = parse_capabilities(payload)
 
-      // Clear init_request_id since init is complete
+      // Cancel init timeout timer and clear init state
+      case state.init_timer_ref {
+        Some(timer_ref) -> {
+          let _ = cancel_timer(timer_ref)
+          Nil
+        }
+        None -> Nil
+      }
       let new_state =
         SessionState(
           ..state,
           lifecycle: new_lifecycle,
           capabilities: Some(capabilities),
           init_request_id: None,
+          init_timer_ref: None,
         )
 
       // Flush queued operations (non-blocking)
@@ -885,7 +906,16 @@ fn handle_implicit_confirmation(
   // Transition to Running
   let assert Ok(new_lifecycle) = transition(state.lifecycle, InitSuccess)
 
-  // Clear init_request_id since init is implicitly confirmed
+  // Cancel init timeout timer
+  case state.init_timer_ref {
+    Some(timer_ref) -> {
+      let _ = cancel_timer(timer_ref)
+      Nil
+    }
+    None -> Nil
+  }
+
+  // Clear init state since init is implicitly confirmed
   // Use default capabilities since we didn't get explicit response
   let new_state =
     SessionState(
@@ -898,6 +928,7 @@ fn handle_implicit_confirmation(
         mcp_sdk_servers_supported: True,
       )),
       init_request_id: None,
+      init_timer_ref: None,
     )
 
   // Flush queued operations (non-blocking)
@@ -1020,22 +1051,31 @@ fn forward_to_subscriber(
 /// Clean up session resources when stopping.
 ///
 /// This function performs the full cleanup sequence:
-/// 1. Resolve all pending_requests with RequestSessionStopped
-/// 2. Resolve all queued_ops with RequestSessionStopped
-/// 3. Close the runner (terminates CLI process)
-/// 4. Notify subscriber with SessionEnded
+/// 1. Cancel init timeout timer (if active)
+/// 2. Resolve all pending_requests with RequestSessionStopped
+/// 3. Resolve all queued_ops with RequestSessionStopped
+/// 4. Close the runner (terminates CLI process)
+/// 5. Notify subscriber with SessionEnded
 ///
-/// Note: Timer cancellation will be added when timers are implemented.
 /// State maps are not explicitly cleared since actor.stop() is called
 /// immediately after cleanup, terminating the actor process.
 fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
-  // 1. Resolve all pending SDK-initiated requests with session stopped error
+  // 1. Cancel init timeout timer if active
+  case state.init_timer_ref {
+    Some(timer_ref) -> {
+      let _ = cancel_timer(timer_ref)
+      Nil
+    }
+    None -> Nil
+  }
+
+  // 2. Resolve all pending SDK-initiated requests with session stopped error
   let _ =
     dict.each(state.pending_requests, fn(_request_id, pending) {
       process.send(pending.reply_to, RequestSessionStopped)
     })
 
-  // 2. Resolve all queued operations with session stopped error
+  // 3. Resolve all queued operations with session stopped error
   list.each(state.queued_ops, fn(op) {
     case op {
       QueuedRequest(_request_id, _payload, reply_to) -> {
@@ -1044,11 +1084,11 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
     }
   })
 
-  // 3. Close the runner (terminates CLI process)
+  // 4. Close the runner (terminates CLI process)
   let close_fn = state.runner.close
   close_fn()
 
-  // 4. Notify subscriber that session has ended
+  // 5. Notify subscriber that session has ended
   process.send(state.subscriber, SessionEnded(reason))
 
   Nil

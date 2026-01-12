@@ -46,6 +46,7 @@ fn test_state() -> SessionState {
     init_request_id: None,
     inject_subject: None,
     init_timeout_ms: 10_000,
+    init_timer_ref: None,
   )
 }
 
