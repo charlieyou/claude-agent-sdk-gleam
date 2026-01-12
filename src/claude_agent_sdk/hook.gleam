@@ -342,8 +342,9 @@ fn decode_can_use_tool(input: Dynamic) -> Result(HookInput, HookDecodeError) {
     use tool_name <- decode.field("tool_name", decode.string)
     use tool_input <- decode.field("tool_input", decode.dynamic)
     use session_id <- decode.field("session_id", decode.string)
-    use permission_suggestions <- decode.field(
+    use permission_suggestions <- decode.optional_field(
       "permission_suggestions",
+      [],
       decode.list(decode.string),
     )
     use blocked_path <- decode.optional_field(
