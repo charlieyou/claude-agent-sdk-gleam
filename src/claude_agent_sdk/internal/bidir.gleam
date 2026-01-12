@@ -514,8 +514,8 @@ pub type ActorMessage {
   /// Hook task crashed with error.
   HookError(request_id: String, reason: Dynamic)
   /// Hook timeout fired (first-event-wins protocol).
-  /// Includes timer_ref for verification against stale timeouts.
-  HookTimeout(request_id: String, timer_ref: Dynamic)
+  /// Includes verify_ref for verification against stale timeouts.
+  HookTimeout(request_id: String, verify_ref: Dynamic)
   /// Cancel a pending request (for client-side timeout cleanup).
   CancelPendingRequest(request_id: String)
 }
@@ -737,20 +737,20 @@ fn start_internal(
           hook_timeout_tag,
           2,
           fn(msg_dyn: Dynamic) -> ActorMessage {
-            // msg_dyn = {hook_timeout, RequestId, TimerRef} (3-element tuple)
+            // msg_dyn = {hook_timeout, RequestId, VerifyRef} (3-element tuple)
             let request_id = case
               decode.run(msg_dyn, decode.at([1], decode.string))
             {
               Ok(id) -> id
               Error(_) -> "unknown"
             }
-            let timer_ref = case
+            let verify_ref = case
               decode.run(msg_dyn, decode.at([2], decode.dynamic))
             {
               Ok(r) -> r
               Error(_) -> dynamic.nil()
             }
-            HookTimeout(request_id, timer_ref)
+            HookTimeout(request_id, verify_ref)
           },
         )
 
@@ -911,8 +911,8 @@ fn handle_message(
     HookError(request_id, _reason) -> {
       handle_hook_error(state, request_id)
     }
-    HookTimeout(request_id, timer_ref) -> {
-      handle_hook_timeout(state, request_id, timer_ref)
+    HookTimeout(request_id, verify_ref) -> {
+      handle_hook_timeout(state, request_id, verify_ref)
     }
     CancelPendingRequest(request_id) -> {
       handle_cancel_pending_request(state, request_id)
