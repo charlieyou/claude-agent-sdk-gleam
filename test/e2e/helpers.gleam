@@ -5,10 +5,20 @@
 /// - Stream consumption utilities
 /// - Protocol invariant assertions
 import claude_agent_sdk
-import claude_agent_sdk/error.{EndOfStream, Message}
-import claude_agent_sdk/message.{type MessageEnvelope, System}
+import claude_agent_sdk/error.{EndOfStream, Message, WarningEvent}
+import claude_agent_sdk/message.{
+  type MessageEnvelope, Assistant, Result, System, User,
+}
 import gleam/list
 import gleam/option.{type Option, None, Some}
+
+/// Convert Result to Option (helper to avoid qualified module reference).
+fn option_from_result(result: Result(a, b)) -> Option(a) {
+  case result {
+    Ok(value) -> Some(value)
+    Error(_) -> None
+  }
+}
 
 /// Check if E2E SDK tests are enabled.
 /// Returns Ok(Nil) if E2E_SDK_TEST=1, Error with skip message otherwise.
@@ -57,13 +67,25 @@ fn consume_stream_loop(
         Ok(Message(envelope)) ->
           consume_stream_loop(updated_stream, [envelope, ..acc], False)
         Ok(EndOfStream) -> consume_stream_loop(updated_stream, acc, True)
-        Ok(error.WarningEvent(_)) ->
+        Ok(WarningEvent(_)) ->
           // Skip warnings, continue iteration
           consume_stream_loop(updated_stream, acc, False)
-        Error(_) -> {
-          // On error, close and return what we have
-          let _ = claude_agent_sdk.close(updated_stream)
-          ConsumeResult(messages: list.reverse(acc), terminated_normally: False)
+        Error(err) -> {
+          // Check if error is terminal (stream closed)
+          case claude_agent_sdk.is_terminal(err) {
+            True -> {
+              // Terminal error - close and return what we have
+              let _ = claude_agent_sdk.close(updated_stream)
+              ConsumeResult(
+                messages: list.reverse(acc),
+                terminated_normally: False,
+              )
+            }
+            False ->
+              // Non-terminal error (JsonDecodeError, UnexpectedMessageError)
+              // Continue iteration - stream may still yield more items
+              consume_stream_loop(updated_stream, acc, False)
+          }
         }
       }
     }
@@ -95,14 +117,14 @@ pub fn extract_session_id(messages: List(MessageEnvelope)) -> Option(String) {
       _ -> Error(Nil)
     }
   })
-  |> option.from_result
+  |> option_from_result
 }
 
 /// Check if messages contain a Result message (success or error).
 pub fn has_result_message(messages: List(MessageEnvelope)) -> Bool {
   list.any(messages, fn(envelope) {
     case envelope.message {
-      message.Result(_) -> True
+      Result(_) -> True
       _ -> False
     }
   })
@@ -117,11 +139,10 @@ pub type MessageCounts {
 pub fn count_message_types(messages: List(MessageEnvelope)) -> MessageCounts {
   list.fold(messages, MessageCounts(0, 0, 0, 0), fn(counts, envelope) {
     case envelope.message {
-      message.System(_) -> MessageCounts(..counts, system: counts.system + 1)
-      message.Assistant(_) ->
-        MessageCounts(..counts, assistant: counts.assistant + 1)
-      message.User(_) -> MessageCounts(..counts, user: counts.user + 1)
-      message.Result(_) -> MessageCounts(..counts, result: counts.result + 1)
+      System(_) -> MessageCounts(..counts, system: counts.system + 1)
+      Assistant(_) -> MessageCounts(..counts, assistant: counts.assistant + 1)
+      User(_) -> MessageCounts(..counts, user: counts.user + 1)
+      Result(_) -> MessageCounts(..counts, result: counts.result + 1)
     }
   })
 }
