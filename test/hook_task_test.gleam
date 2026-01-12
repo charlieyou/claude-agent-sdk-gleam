@@ -40,6 +40,7 @@ pub fn hook_callback_runs_in_separate_process_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -96,6 +97,7 @@ pub fn hook_done_triggers_response_test() {
           )
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -151,6 +153,7 @@ pub fn response_only_sent_after_callback_completes_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()

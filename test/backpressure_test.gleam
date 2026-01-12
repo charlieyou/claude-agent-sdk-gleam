@@ -15,10 +15,10 @@ import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
   type PendingHook, type PendingRequest, type SessionState,
-  type SubscriberMessage, InitQueueOverflow, PendingHook, PendingRequest,
-  QueuedRequest, RequestError, SessionState, Starting, TooManyPendingRequests,
-  add_pending_hook, add_pending_request, empty_hook_config, flush_queued_ops,
-  queue_operation,
+  type SubscriberMessage, HookType, InitQueueOverflow, PendingHook,
+  PendingRequest, QueuedRequest, RequestError, SessionState, Starting,
+  TooManyPendingRequests, add_pending_hook, add_pending_request,
+  empty_hook_config, flush_queued_ops, queue_operation,
 }
 import support/mock_bidir_runner
 
@@ -66,15 +66,16 @@ fn make_pending_request(id: String) -> PendingRequest {
 
 /// Create a PendingHook with given ID (used as request_id for map key).
 /// Uses stub values for task_pid and monitor_ref since they're only needed for running hooks.
-fn make_pending_hook(id: String) -> PendingHook {
+fn make_pending_hook(_id: String) -> PendingHook {
   PendingHook(
     task_pid: stub_pid(),
     monitor_ref: stub_monitor(),
     timer_ref: dynamic.nil(),
     verify_ref: dynamic.nil(),
-    callback_id: "cb-" <> id,
-    request_id: "req-" <> id,
+    callback_id: "test_callback",
+    request_id: "test_request",
     received_at: 0,
+    callback_type: HookType,
   )
 }
 

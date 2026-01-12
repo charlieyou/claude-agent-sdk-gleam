@@ -36,6 +36,7 @@ pub fn fast_callback_completes_before_timeout_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -102,6 +103,7 @@ pub fn slow_callback_times_out_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -172,6 +174,7 @@ pub fn late_hook_done_ignored_after_timeout_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()

@@ -47,9 +47,9 @@ import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
   type IncomingMessage, type OutgoingControlRequest,
   type OutgoingControlResponse, type PermissionMode, CanUseTool, ControlRequest,
-  ControlResponse, Error as ControlError, HookCallback, HookResponse,
-  HookSuccess, Interrupt, McpMessage, RegularMessage, SetModel,
-  SetPermissionMode, Success,
+  ControlResponse, Deny, Error as ControlError, HookCallback, HookResponse,
+  HookSuccess, Interrupt, McpMessage, PermissionResponse, RegularMessage,
+  SetModel, SetPermissionMode, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -271,6 +271,18 @@ pub type RewindFilesError {
   RewindFilesSessionStopped
 }
 
+/// Callback type discriminator for fail-open vs fail-deny behavior.
+///
+/// Determines how timeout/crash errors are handled:
+/// - HookType: fail-open (allow operation to continue)
+/// - PermissionType: fail-deny (deny operation for security)
+pub type CallbackType {
+  /// Hook callbacks use fail-open semantics.
+  HookType
+  /// Permission callbacks use fail-deny semantics.
+  PermissionType
+}
+
 /// A pending hook callback awaiting SDK response.
 ///
 /// Tracks CLI-initiated hook requests that need SDK handler execution.
@@ -290,6 +302,8 @@ pub type PendingHook {
     request_id: String,
     /// When the hook was received (monotonic ms).
     received_at: Int,
+    /// Callback type for fail-open vs fail-deny behavior.
+    callback_type: CallbackType,
   )
 }
 
@@ -314,17 +328,20 @@ pub type QueuedOperation {
 // Hook Configuration
 // =============================================================================
 
-/// Configuration for registered hooks.
+/// Configuration for registered hooks and permission handlers.
 pub type HookConfig {
   HookConfig(
-    /// Map of callback_id -> handler function.
+    /// Map of callback_id -> handler function for hooks.
     handlers: Dict(String, fn(Dynamic) -> Dynamic),
+    /// Map of tool_name -> permission handler for can_use_tool.
+    /// Handler returns PermissionResult (Allow, Deny, etc.)
+    permission_handlers: Dict(String, fn(Dynamic) -> Dynamic),
   )
 }
 
 /// Create an empty hook configuration.
 pub fn empty_hook_config() -> HookConfig {
-  HookConfig(handlers: dict.new())
+  HookConfig(handlers: dict.new(), permission_handlers: dict.new())
 }
 
 // =============================================================================
@@ -958,8 +975,9 @@ fn handle_hook_done(
 
 /// Handle hook task crash/error.
 ///
-/// Called when a spawned hook task crashes. Sends a fail-open response
-/// to the CLI to prevent hanging, then cleans up the pending hook entry.
+/// Called when a spawned hook task crashes. Response depends on callback type:
+/// - HookCallback: fail-open (send continue: true)
+/// - PermissionCallback: fail-deny (send behavior: "deny")
 /// Logs an error with the callback_id and crash reason.
 fn handle_hook_error(
   state: SessionState,
@@ -968,31 +986,47 @@ fn handle_hook_error(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Log error with callback_id and crash reason (using string.inspect for full details)
-      io.println_error(
-        "Hook callback crashed: "
-        <> string.inspect(reason)
-        <> " for "
-        <> pending.callback_id,
-      )
-
       // Cancel the timeout timer (we won the race)
       let _ = cancel_timer(pending.timer_ref)
 
       // Demonitor the task (cleanup)
       demonitor_hook(pending.monitor_ref)
 
-      // Send fail-open response to CLI (allow continuation despite error)
-      // Include reason field for debugging as per spec
-      let fail_open_result =
-        to_dynamic(
-          dict.from_list([
-            #("continue", to_dynamic(True)),
-            #("reason", to_dynamic("crash")),
-          ]),
-        )
-      let response = HookResponse(request_id, HookSuccess(fail_open_result))
-      send_control_response(state, response)
+      // Branch response based on callback type
+      case pending.callback_type {
+        HookType -> {
+          // Log error with callback_id and crash reason
+          io.println_error(
+            "Hook callback crashed: "
+            <> string.inspect(reason)
+            <> " for "
+            <> pending.callback_id,
+          )
+
+          // Send fail-open response to CLI (allow continuation despite error)
+          let fail_open_result =
+            to_dynamic(
+              dict.from_list([
+                #("continue", to_dynamic(True)),
+                #("reason", to_dynamic("crash")),
+              ]),
+            )
+          let response = HookResponse(request_id, HookSuccess(fail_open_result))
+          send_control_response(state, response)
+        }
+        PermissionType -> {
+          // Log security warning with SECURITY: prefix for log filtering
+          io.println_error(
+            "SECURITY: Permission callback crashed for "
+            <> pending.callback_id
+            <> " - denying tool use",
+          )
+
+          // Send fail-deny response to CLI (deny operation for security)
+          let response = PermissionResponse(request_id, Deny)
+          send_control_response(state, response)
+        }
+      }
 
       // Remove from pending_hooks
       let new_pending = dict.delete(state.pending_hooks, request_id)
@@ -1008,8 +1042,9 @@ fn handle_hook_error(
 /// Handle hook timeout (first-event-wins protocol).
 ///
 /// Called when the timeout fires before hook task completes. Kills the task,
-/// sends fail-open response, and removes from pending_hooks. Logs a warning
-/// with the callback_id and elapsed time.
+/// sends response based on callback type, and removes from pending_hooks.
+/// - HookCallback: fail-open (send continue: true)
+/// - PermissionCallback: fail-deny (send behavior: "deny")
 fn handle_hook_timeout(
   state: SessionState,
   request_id: String,
@@ -1023,31 +1058,50 @@ fn handle_hook_timeout(
           // Calculate elapsed time for logging
           let elapsed_ms = port_ffi.monotonic_time_ms() - pending.received_at
 
-          // Log warning with callback_id and duration
-          io.println_error(
-            "Hook callback timed out after "
-            <> int.to_string(elapsed_ms)
-            <> "ms for "
-            <> pending.callback_id,
-          )
-
           // Kill the task (timeout won the race)
           kill_task(pending.task_pid)
 
           // Demonitor with flush to clear any DOWN message
           demonitor_hook(pending.monitor_ref)
 
-          // Send fail-open response to CLI (allow continuation despite timeout)
-          // Include reason field for debugging as per spec
-          let fail_open_result =
-            to_dynamic(
-              dict.from_list([
-                #("continue", to_dynamic(True)),
-                #("reason", to_dynamic("timeout")),
-              ]),
-            )
-          let response = HookResponse(request_id, HookSuccess(fail_open_result))
-          send_control_response(state, response)
+          // Branch response based on callback type
+          case pending.callback_type {
+            HookType -> {
+              // Log warning with callback_id and duration
+              io.println_error(
+                "Hook callback timed out after "
+                <> int.to_string(elapsed_ms)
+                <> "ms for "
+                <> pending.callback_id,
+              )
+
+              // Send fail-open response to CLI (allow continuation despite timeout)
+              let fail_open_result =
+                to_dynamic(
+                  dict.from_list([
+                    #("continue", to_dynamic(True)),
+                    #("reason", to_dynamic("timeout")),
+                  ]),
+                )
+              let response =
+                HookResponse(request_id, HookSuccess(fail_open_result))
+              send_control_response(state, response)
+            }
+            PermissionType -> {
+              // Log security warning with SECURITY: prefix for log filtering
+              io.println_error(
+                "SECURITY: Permission callback timed out after "
+                <> int.to_string(elapsed_ms)
+                <> "ms for "
+                <> pending.callback_id
+                <> " - denying tool use",
+              )
+
+              // Send fail-deny response to CLI (deny operation for security)
+              let response = PermissionResponse(request_id, Deny)
+              send_control_response(state, response)
+            }
+          }
 
           // Remove from pending_hooks
           let new_pending = dict.delete(state.pending_hooks, request_id)
@@ -1309,8 +1363,25 @@ fn handle_control_request(
         HookCallback(request_id, callback_id, input, _tool_use_id) -> {
           dispatch_hook_callback(state, request_id, callback_id, input)
         }
-        CanUseTool(..) | McpMessage(..) -> {
-          // TODO: Implement can_use_tool and mcp_message handlers
+        CanUseTool(
+          request_id,
+          tool_name,
+          _tool_input,
+          permission_suggestions,
+          _blocked_path,
+        ) -> {
+          // Convert to Dynamic input for handler
+          let input =
+            to_dynamic(
+              dict.from_list([
+                #("tool_name", to_dynamic(tool_name)),
+                #("permission_suggestions", to_dynamic(permission_suggestions)),
+              ]),
+            )
+          dispatch_permission_callback(state, request_id, tool_name, input)
+        }
+        McpMessage(..) -> {
+          // TODO: Implement mcp_message handler
           actor.continue(state)
         }
       }
@@ -1369,6 +1440,7 @@ fn dispatch_hook_callback(
               callback_id: callback_id,
               request_id: request_id,
               received_at: started_at,
+              callback_type: HookType,
             )
           let new_pending =
             dict.insert(state.pending_hooks, request_id, pending)
@@ -1380,6 +1452,68 @@ fn dispatch_hook_callback(
           let fail_open_result =
             to_dynamic(dict.from_list([#("continue", True)]))
           let response = HookResponse(request_id, HookSuccess(fail_open_result))
+          send_control_response(state, response)
+          actor.continue(state)
+        }
+      }
+    }
+  }
+}
+
+/// Dispatch a can_use_tool request to the registered permission handler.
+///
+/// Looks up the tool_name in permission_handlers and invokes the handler.
+/// Sends PermissionResponse back to CLI with the result.
+/// Unknown tool_names send fail-deny response (deny for security).
+fn dispatch_permission_callback(
+  state: SessionState,
+  request_id: String,
+  tool_name: String,
+  input: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Check backpressure limit before spawning task
+  case dict.size(state.pending_hooks) >= max_pending_hooks {
+    True -> {
+      // At capacity - send fail-deny response (security-first)
+      let response = PermissionResponse(request_id, Deny)
+      send_control_response(state, response)
+      actor.continue(state)
+    }
+    False -> {
+      case dict.get(state.hooks.permission_handlers, tool_name) {
+        Ok(handler) -> {
+          // Record start time for timeout duration logging
+          let started_at = port_ffi.monotonic_time_ms()
+
+          // Spawn a task to execute the handler asynchronously
+          let parent_pid = process.self()
+          let #(task_pid, monitor_ref) =
+            spawn_hook_task(parent_pid, request_id, handler, input)
+
+          // Schedule timeout for first-event-wins protocol
+          let #(timer_ref, verify_ref) =
+            schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
+
+          // Record the pending hook with PermissionCallback type
+          let pending =
+            PendingHook(
+              task_pid: task_pid,
+              monitor_ref: monitor_ref,
+              timer_ref: timer_ref,
+              verify_ref: verify_ref,
+              callback_id: tool_name,
+              request_id: request_id,
+              received_at: started_at,
+              callback_type: PermissionType,
+            )
+          let new_pending =
+            dict.insert(state.pending_hooks, request_id, pending)
+          actor.continue(SessionState(..state, pending_hooks: new_pending))
+        }
+        Error(Nil) -> {
+          // Unknown tool_name - send fail-deny response (security-first)
+          // Unlike hooks, unknown permission handlers deny rather than allow
+          let response = PermissionResponse(request_id, Deny)
           send_control_response(state, response)
           actor.continue(state)
         }
@@ -1450,8 +1584,25 @@ fn handle_implicit_confirmation(
     HookCallback(request_id, callback_id, input, _tool_use_id) -> {
       dispatch_hook_callback(flushed_state, request_id, callback_id, input)
     }
-    CanUseTool(..) | McpMessage(..) -> {
-      // TODO: Implement can_use_tool and mcp_message handlers
+    CanUseTool(
+      request_id,
+      tool_name,
+      _tool_input,
+      permission_suggestions,
+      _blocked_path,
+    ) -> {
+      // Convert to Dynamic input for handler
+      let input =
+        to_dynamic(
+          dict.from_list([
+            #("tool_name", to_dynamic(tool_name)),
+            #("permission_suggestions", to_dynamic(permission_suggestions)),
+          ]),
+        )
+      dispatch_permission_callback(flushed_state, request_id, tool_name, input)
+    }
+    McpMessage(..) -> {
+      // TODO: Implement mcp_message handler
       actor.continue(flushed_state)
     }
   }

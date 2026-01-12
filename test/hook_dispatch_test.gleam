@@ -43,6 +43,7 @@ pub fn hook_callback_invokes_registered_handler_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -91,7 +92,7 @@ pub fn hook_callback_unknown_callback_id_ignored_test() {
   let mock = mock_bidir_runner.new()
 
   // Create empty hook config (no handlers registered)
-  let hooks = HookConfig(handlers: dict.new())
+  let hooks = HookConfig(handlers: dict.new(), permission_handlers: dict.new())
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config = bidir.default_config(subscriber)
@@ -150,6 +151,7 @@ pub fn hook_callback_response_has_correct_structure_test() {
           )
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()

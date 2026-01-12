@@ -66,6 +66,7 @@ pub fn crashing_callback_returns_continue_true_test() {
           panic as "Simulated hook crash"
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -137,6 +138,7 @@ pub fn session_continues_after_crash_fail_open_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -214,6 +216,7 @@ pub fn timeout_returns_continue_true_test() {
           to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }),
       ]),
+      permission_handlers: dict.from_list([]),
     )
 
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
