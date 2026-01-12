@@ -16,3 +16,16 @@ simplifile = "== 2.2.0"
 
 [dev-dependencies]
 gleeunit = "== 1.9.0"
+
+[documentation]
+pages = [
+  { title = "Overview", path = "index.html", source = "docs/README.md" },
+  { title = "Quickstart", path = "quickstart.html", source = "docs/quickstart.md" },
+  { title = "Building an App", path = "building-an-app.html", source = "docs/building-an-app.md" },
+  { title = "Streaming API", path = "streaming.html", source = "docs/streaming.md" },
+  { title = "Options", path = "options.html", source = "docs/options.md" },
+  { title = "Messages and Content", path = "messages-and-content.html", source = "docs/messages-and-content.md" },
+  { title = "Tools and Permissions", path = "tools-and-permissions.html", source = "docs/tools-and-permissions.md" },
+  { title = "Errors and Troubleshooting", path = "errors-and-troubleshooting.html", source = "docs/errors-and-troubleshooting.md" },
+  { title = "Testing", path = "testing.html", source = "docs/testing.md" },
+]

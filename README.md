@@ -52,6 +52,18 @@ fn consume_stream(stream) {
 }
 ```
 
+## Documentation
+
+- [Docs index](docs/README.md)
+- [Quickstart](docs/quickstart.md)
+- [Building an app](docs/building-an-app.md)
+- [Streaming API](docs/streaming.md)
+- [Options and configuration](docs/options.md)
+- [Messages and content](docs/messages-and-content.md)
+- [Tools and permissions](docs/tools-and-permissions.md)
+- [Errors and troubleshooting](docs/errors-and-troubleshooting.md)
+- [Testing](docs/testing.md)
+
 ## API Overview
 
 ### Core Functions
