@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1, otp_version/0, check_stderr_support/0, exact_equals/2]).
+-export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1, otp_version/0, check_stderr_support/0, exact_equals/2]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -36,6 +36,39 @@ open_port_safe(Executable, Args, WorkingDir) ->
             exit_status,
             use_stdio
         ] ++ Opts),
+        {<<"ok">>, Port}
+    catch
+        error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}
+    end.
+
+%% Opens a port for bidirectional protocol communication.
+%% Uses spawn_executable with options optimized for streaming JSON:
+%% - binary: receive data as binary, not list
+%% - {packet, 0}: raw binary mode, no framing (we handle line parsing)
+%% - exit_status: receive {Port, {exit_status, Code}} on process exit
+%% - use_stdio: communicate via stdin/stdout
+%% - stderr_to_stdout: merge stderr into stdout (OTP >= 25 only)
+%% Returns {ok, Port} | {error, Reason}.
+open_port_bidir(Executable, Args) ->
+    ExecStr = binary_to_list(Executable),
+    ArgsStr = [binary_to_list(A) || A <- Args],
+    %% Build base options
+    BaseOpts = [
+        {args, ArgsStr},
+        binary,
+        {packet, 0},
+        exit_status,
+        use_stdio
+    ],
+    %% Add stderr_to_stdout if OTP >= 25
+    Opts = case otp_version() of
+        {<<"ok">>, Version} when Version >= 25 ->
+            BaseOpts ++ [stderr_to_stdout];
+        _ ->
+            BaseOpts
+    end,
+    try
+        Port = erlang:open_port({spawn_executable, ExecStr}, Opts),
         {<<"ok">>, Port}
     catch
         error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}

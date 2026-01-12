@@ -68,6 +68,12 @@ pub fn port_to_dynamic(port: Port) -> Dynamic {
   inner
 }
 
+/// Wrap a Dynamic value as a Port.
+/// Used when decoding port references from FFI responses.
+pub fn wrap_port(dynamic: Dynamic) -> Port {
+  Port(dynamic)
+}
+
 @external(erlang, "claude_agent_sdk_ffi", "receive_port_msg_blocking")
 fn ffi_receive_blocking_raw(port: Dynamic) -> Dynamic
 

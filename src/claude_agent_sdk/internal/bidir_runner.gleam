@@ -4,7 +4,9 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom
 
-import claude_agent_sdk/internal/port_ffi.{type Port, type WriteError}
+import claude_agent_sdk/internal/port_ffi.{
+  type Port, type WriteError, find_cli_path, port_write, wrap_port,
+}
 
 /// Push-based runner for start_session() (bidir mode only).
 /// This is INTERNAL - not exported from the public API.
@@ -24,12 +26,77 @@ pub type StartError {
   SpawnFailed(String)
 }
 
+/// FFI binding for open_port_bidir - spawns executable with bidir options.
+/// Returns {ok, Port} | {error, Reason}.
+@external(erlang, "claude_agent_sdk_ffi", "open_port_bidir")
+fn ffi_open_port_bidir(executable: String, args: List(String)) -> Dynamic
+
+/// Open a port with bidirectional protocol options.
+/// Uses spawn_executable with binary, {packet, 0}, exit_status, use_stdio,
+/// and stderr_to_stdout (on OTP >= 25).
+fn open_port_bidir(
+  executable: String,
+  args: List(String),
+) -> Result(Port, String) {
+  let result = ffi_open_port_bidir(executable, args)
+  // Decode the tuple: element 0 is tag (ok/error), element 1 is payload
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    use payload <- decode.field(1, decode.dynamic)
+    decode.success(#(tag, payload))
+  }
+  case decode.run(result, result_decoder) {
+    Ok(#("ok", port_dynamic)) -> Ok(wrap_port(port_dynamic))
+    Ok(#("error", reason_dynamic)) ->
+      case decode.run(reason_dynamic, decode.string) {
+        Ok(reason) -> Error(reason)
+        Error(_) -> Error("unknown spawn error")
+      }
+    Ok(_) -> Error("invalid FFI response tag")
+    Error(_) -> Error("invalid FFI response format")
+  }
+}
+
 /// Start a BidirRunner with the given CLI arguments.
+/// Spawns the Claude CLI with --output-format stream-json --input-format stream-json.
 ///
-/// NOTE: This is a stub that returns Error(NotImplemented).
-/// Actual implementation will come in a subsequent task.
-pub fn start(_args: List(String)) -> Result(BidirRunner, StartError) {
-  Error(NotImplemented)
+/// IMPORTANT: This function must be called inside an actor.init callback
+/// to ensure the port is owned by the GenServer process.
+pub fn start(args: List(String)) -> Result(BidirRunner, StartError) {
+  // Find the Claude CLI executable
+  case find_cli_path("claude") {
+    Error(reason) -> Error(SpawnFailed("claude not found: " <> reason))
+    Ok(claude_path) -> start_with_path(claude_path, args)
+  }
+}
+
+/// Start a BidirRunner with an explicit executable path.
+/// Used for testing with non-claude executables.
+pub fn start_with_path(
+  executable_path: String,
+  args: List(String),
+) -> Result(BidirRunner, StartError) {
+  // Build full args: --output-format stream-json --input-format stream-json + user args
+  let full_args = [
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
+    ..args
+  ]
+
+  case open_port_bidir(executable_path, full_args) {
+    Error(reason) -> Error(SpawnFailed(reason))
+    Ok(port) -> {
+      // Create the write function that sends data to the port
+      let write_fn = fn(data: String) -> Result(Nil, WriteError) {
+        port_write(port, data)
+      }
+      // Create the close function that closes the port
+      let close_fn = fn() -> Nil { port_ffi.ffi_close_port(port) }
+      Ok(BidirRunner(port: port, write: write_fn, close: close_fn))
+    }
+  }
 }
 
 /// Port message type for native Erlang port tuples.
