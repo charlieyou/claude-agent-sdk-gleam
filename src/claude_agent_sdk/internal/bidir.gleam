@@ -47,6 +47,11 @@ import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 import claude_agent_sdk/internal/control_decoder
 import claude_agent_sdk/internal/control_encoder
+import claude_agent_sdk/message
+
+// FFI: Convert any value to Dynamic (identity function at runtime)
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> Dynamic
 
 // =============================================================================
 // Session Lifecycle
@@ -643,20 +648,37 @@ fn handle_injected_message(
 ) -> actor.Next(SessionState, ActorMessage) {
   // Decode the JSON line
   case control_decoder.decode_line(json) {
-    Ok(control.ControlResponse(response)) -> {
-      handle_control_response(state, response)
-    }
-    Ok(ControlRequest(request)) -> {
-      // Handle control request - may trigger implicit confirmation during InitSent
-      handle_control_request(state, request)
-    }
-    Ok(RegularMessage(_)) -> {
-      // Regular messages do NOT trigger implicit confirmation
-      // CLI may emit system/assistant messages before processing our init
-      actor.continue(state)
+    Ok(incoming) -> {
+      // Use route_incoming to determine dispatch destination
+      case route_incoming(incoming) {
+        RouteResponse(_request_id) -> {
+          // Control response - handle via response correlation
+          case incoming {
+            ControlResponse(response) ->
+              handle_control_response(state, response)
+            _ -> actor.continue(state)
+          }
+        }
+        RouteHookCallback(_) | RoutePermission(_) | RouteMcp(_) -> {
+          // Control request - may trigger implicit confirmation during InitSent
+          case incoming {
+            ControlRequest(request) -> handle_control_request(state, request)
+            _ -> actor.continue(state)
+          }
+        }
+        RouteSubscriber -> {
+          // Regular message - forward to subscriber
+          case incoming {
+            RegularMessage(msg) -> {
+              forward_to_subscriber(state, msg)
+            }
+            _ -> actor.continue(state)
+          }
+        }
+      }
     }
     Error(_decode_error) -> {
-      // Invalid JSON - ignore
+      // Invalid JSON - log and drop (fail-safe)
       actor.continue(state)
     }
   }
@@ -690,9 +712,24 @@ fn handle_success_response(
       handle_init_success(state, payload)
     }
     _ -> {
-      // Not init response - check pending_requests
-      // (Will be implemented in future task)
-      actor.continue(state)
+      // Not init response - correlate with pending_requests
+      case dict.get(state.pending_requests, request_id) {
+        Ok(pending) -> {
+          // Found matching request - resolve it
+          resolve_pending(pending, Success(request_id, payload))
+          // Remove from pending_requests
+          let new_state =
+            SessionState(
+              ..state,
+              pending_requests: dict.delete(state.pending_requests, request_id),
+            )
+          actor.continue(new_state)
+        }
+        Error(Nil) -> {
+          // No matching pending request - ignore (stale/duplicate)
+          actor.continue(state)
+        }
+      }
     }
   }
 }
@@ -757,9 +794,24 @@ fn handle_error_response(
       handle_init_error(state, message)
     }
     _ -> {
-      // Not init response - check pending_requests
-      // (Will be implemented in future task)
-      actor.continue(state)
+      // Not init response - correlate with pending_requests
+      case dict.get(state.pending_requests, request_id) {
+        Ok(pending) -> {
+          // Found matching request - resolve with error
+          resolve_pending(pending, ControlError(request_id, message))
+          // Remove from pending_requests
+          let new_state =
+            SessionState(
+              ..state,
+              pending_requests: dict.delete(state.pending_requests, request_id),
+            )
+          actor.continue(new_state)
+        }
+        Error(Nil) -> {
+          // No matching pending request - ignore (stale/duplicate)
+          actor.continue(state)
+        }
+      }
     }
   }
 }
@@ -910,6 +962,19 @@ fn flush_queued_ops(state: SessionState) -> SessionState {
   // For now, just clear the queue
   // Full implementation will send queued requests in T5+
   SessionState(..state, queued_ops: [])
+}
+
+/// Forward a regular message to the subscriber.
+///
+/// Wraps the message in CliMessage envelope and sends to subscriber Subject.
+fn forward_to_subscriber(
+  state: SessionState,
+  msg: message.Message,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Convert Message to Dynamic for CliMessage envelope
+  let payload = to_dynamic(msg)
+  process.send(state.subscriber, CliMessage(payload))
+  actor.continue(state)
 }
 
 /// Clean up session resources when stopping.
