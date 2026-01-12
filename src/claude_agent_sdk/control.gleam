@@ -183,8 +183,9 @@ pub type HookResult {
 pub type PermissionResult {
   /// Permission granted.
   Allow
-  /// Permission denied by user.
-  Deny
+  /// Permission denied by user or system.
+  /// Optional message explains the reason (e.g., "timeout", "crash").
+  Deny(message: Option(String))
   /// Permission granted for this session only.
   AllowOnce
   /// Permission granted for all matching operations this session.

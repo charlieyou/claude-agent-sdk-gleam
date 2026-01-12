@@ -267,8 +267,8 @@ pub fn hook_result_skip_test() {
 
 pub fn permission_result_all_variants_test() {
   // Test Allow, Deny, AllowOnce, AllowAll
-  let results: List(PermissionResult) = [Allow, Deny, AllowOnce, AllowAll]
-  results |> should.equal([Allow, Deny, AllowOnce, AllowAll])
+  let results: List(PermissionResult) = [Allow, Deny(None), AllowOnce, AllowAll]
+  results |> should.equal([Allow, Deny(None), AllowOnce, AllowAll])
 }
 
 pub fn permission_result_edit_variant_test() {

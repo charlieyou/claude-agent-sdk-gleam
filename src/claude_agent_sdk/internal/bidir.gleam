@@ -1023,7 +1023,11 @@ fn handle_hook_error(
           )
 
           // Send fail-deny response to CLI (deny operation for security)
-          let response = PermissionResponse(request_id, Deny)
+          let response =
+            PermissionResponse(
+              request_id,
+              Deny(Some("Permission callback crashed")),
+            )
           send_control_response(state, response)
         }
       }
@@ -1098,7 +1102,11 @@ fn handle_hook_timeout(
               )
 
               // Send fail-deny response to CLI (deny operation for security)
-              let response = PermissionResponse(request_id, Deny)
+              let response =
+                PermissionResponse(
+                  request_id,
+                  Deny(Some("Permission callback timed out")),
+                )
               send_control_response(state, response)
             }
           }
@@ -1475,7 +1483,8 @@ fn dispatch_permission_callback(
   case dict.size(state.pending_hooks) >= max_pending_hooks {
     True -> {
       // At capacity - send fail-deny response (security-first)
-      let response = PermissionResponse(request_id, Deny)
+      let response =
+        PermissionResponse(request_id, Deny(Some("Too many pending requests")))
       send_control_response(state, response)
       actor.continue(state)
     }
@@ -1513,7 +1522,8 @@ fn dispatch_permission_callback(
         Error(Nil) -> {
           // Unknown tool_name - send fail-deny response (security-first)
           // Unlike hooks, unknown permission handlers deny rather than allow
-          let response = PermissionResponse(request_id, Deny)
+          let response =
+            PermissionResponse(request_id, Deny(Some("Unknown tool")))
           send_control_response(state, response)
           actor.continue(state)
         }
@@ -2372,10 +2382,14 @@ pub fn add_pending_request(
 
 /// Add a pending hook with backpressure limit.
 ///
+/// @internal Test helper only - used by backpressure tests to populate state.
+/// Real hook/permission dispatch uses dispatch_hook_callback/dispatch_permission_callback.
+///
 /// Returns (state, None) on success.
 /// Returns (state, Some(immediate_response)) if at capacity (32).
 /// When at capacity, the hook is NOT added and an immediate fail-open response
-/// should be sent to CLI without spawning a handler task.
+/// is returned. Note: this helper always returns fail-open; actual permission
+/// dispatch handles fail-deny via dispatch_permission_callback.
 pub fn add_pending_hook(
   state: SessionState,
   _callback_id: String,

@@ -6,6 +6,7 @@ import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 import gleam/json.{type Json}
 import gleam/list
+import gleam/option.{None, Some}
 
 import claude_agent_sdk/control.{
   type HookRegistration, type HookResult, type OutgoingControlRequest,
@@ -202,14 +203,36 @@ fn encode_permission_response_inner(
   result: PermissionResult,
 ) -> Json {
   let response_obj = case result {
-    Allow -> json.object([#("behavior", json.string("allow"))])
-    Deny -> json.object([#("behavior", json.string("deny"))])
-    AllowOnce -> json.object([#("behavior", json.string("allowOnce"))])
-    AllowAll -> json.object([#("behavior", json.string("allowAll"))])
+    Allow ->
+      json.object([
+        #("behavior", json.string("allow")),
+        #("updatedInput", json.null()),
+      ])
+    Deny(message) -> {
+      let base = [
+        #("behavior", json.string("deny")),
+        #("updatedInput", json.null()),
+      ]
+      case message {
+        Some(msg) ->
+          json.object(list.append(base, [#("message", json.string(msg))]))
+        None -> json.object(base)
+      }
+    }
+    AllowOnce ->
+      json.object([
+        #("behavior", json.string("allowOnce")),
+        #("updatedInput", json.null()),
+      ])
+    AllowAll ->
+      json.object([
+        #("behavior", json.string("allowAll")),
+        #("updatedInput", json.null()),
+      ])
     Edit(modified_input) ->
       json.object([
         #("behavior", json.string("edit")),
-        #("modified_input", dynamic_to_json(modified_input)),
+        #("updatedInput", dynamic_to_json(modified_input)),
       ])
   }
 

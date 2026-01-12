@@ -227,7 +227,7 @@ pub fn roundtrip_hook_response_skip_test() {
 pub fn roundtrip_permission_response_all_variants_test() {
   // Test all permission results
   roundtrip_permission_result(Allow, "allow")
-  roundtrip_permission_result(Deny, "deny")
+  roundtrip_permission_result(Deny(option.None), "deny")
   roundtrip_permission_result(AllowOnce, "allowOnce")
   roundtrip_permission_result(AllowAll, "allowAll")
 }
@@ -260,9 +260,9 @@ pub fn roundtrip_permission_response_edit_test() {
   let assert Ok(inner) = get_object(response, "response")
   inner |> get_string("behavior") |> should.equal(Ok("edit"))
 
-  let assert Ok(modified_input) = get_object(inner, "modified_input")
-  modified_input |> get_string("command") |> should.equal(Ok("ls -la"))
-  modified_input |> get_bool("safe") |> should.equal(Ok(True))
+  let assert Ok(updated_input) = get_object(inner, "updatedInput")
+  updated_input |> get_string("command") |> should.equal(Ok("ls -la"))
+  updated_input |> get_bool("safe") |> should.equal(Ok(True))
 }
 
 pub fn roundtrip_mcp_response_test() {

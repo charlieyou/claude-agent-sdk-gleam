@@ -267,13 +267,28 @@ pub fn encode_permission_response_allow_test() {
 }
 
 pub fn encode_permission_response_deny_test() {
-  let resp = PermissionResponse(request_id: "cli_5", result: Deny)
+  let resp = PermissionResponse(request_id: "cli_5", result: Deny(None))
   let json_str = control_encoder.encode_response(resp)
 
   let assert Ok(parsed) = json.parse(json_str, dynamic_decoder())
   let assert Ok(response) = get_object(parsed, "response")
   let assert Ok(inner_resp) = get_object(response, "response")
   inner_resp |> get_string("behavior") |> should.equal(Ok("deny"))
+}
+
+pub fn encode_permission_response_deny_with_message_test() {
+  let resp =
+    PermissionResponse(
+      request_id: "cli_6",
+      result: Deny(Some("Callback timed out")),
+    )
+  let json_str = control_encoder.encode_response(resp)
+
+  let assert Ok(parsed) = json.parse(json_str, dynamic_decoder())
+  let assert Ok(response) = get_object(parsed, "response")
+  let assert Ok(inner_resp) = get_object(response, "response")
+  inner_resp |> get_string("behavior") |> should.equal(Ok("deny"))
+  inner_resp |> get_string("message") |> should.equal(Ok("Callback timed out"))
 }
 
 pub fn encode_permission_response_allow_once_test() {
