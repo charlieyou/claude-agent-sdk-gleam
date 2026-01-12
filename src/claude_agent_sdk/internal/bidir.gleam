@@ -32,6 +32,7 @@
 /// ```
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/json
@@ -41,9 +42,10 @@ import gleam/otp/actor
 
 import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
-  type IncomingMessage, type OutgoingControlResponse, CanUseTool, ControlRequest,
-  ControlResponse, Error as ControlError, HookCallback, HookResponse,
-  HookSuccess, McpMessage, RegularMessage, Success,
+  type IncomingMessage, type OutgoingControlRequest,
+  type OutgoingControlResponse, CanUseTool, ControlRequest, ControlResponse,
+  Error as ControlError, HookCallback, HookResponse, HookSuccess, McpMessage,
+  RegularMessage, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -193,6 +195,8 @@ pub type PendingRequest {
     reply_to: Subject(RequestResult),
     /// When the request was sent (monotonic ms).
     sent_at: Int,
+    /// Timer reference for timeout cancellation.
+    timer_ref: Option(Dynamic),
   )
 }
 
@@ -428,6 +432,13 @@ pub type ActorMessage {
   InjectedPortClosed
   /// Init timeout fired.
   InitTimeoutFired
+  /// Send a control request to CLI.
+  SendControlRequest(
+    request: OutgoingControlRequest,
+    reply_to: Subject(RequestResult),
+  )
+  /// Request timeout fired.
+  RequestTimeoutFired(request_id: String)
 }
 
 /// Responses from synchronous operations.
@@ -564,13 +575,30 @@ fn start_internal(
       // Build a selector that handles:
       // 1. Messages on the actor's subject (via process.selecting)
       // 2. Init timeout message {init_timeout, nil} (via select_record)
+      // 3. Request timeout message {request_timeout, request_id} (via select_record)
       let init_timeout_tag = atom.create("init_timeout")
+      let request_timeout_tag = atom.create("request_timeout")
       let selector =
         process.new_selector()
         |> process.select_map(self_subject, fn(msg) { msg })
         |> process.select_record(init_timeout_tag, 1, fn(_dyn) {
           InitTimeoutFired
         })
+        |> process.select_record(
+          request_timeout_tag,
+          1,
+          fn(msg_dyn: Dynamic) -> ActorMessage {
+            // msg_dyn is the entire tuple {request_timeout, RequestId}
+            // Extract request_id (the second element, index 1)
+            let request_id = case
+              decode.run(msg_dyn, decode.at([1], decode.string))
+            {
+              Ok(id) -> id
+              Error(_) -> "unknown"
+            }
+            RequestTimeoutFired(request_id)
+          },
+        )
 
       // Return the actor's subject to the caller with custom selector
       Ok(
@@ -631,6 +659,14 @@ fn perform_init_handshake(state: SessionState) -> SessionState {
 @external(erlang, "bidir_ffi", "schedule_init_timeout")
 fn schedule_init_timeout(timeout_ms: Int) -> Dynamic
 
+/// Schedule request timeout by sending RequestTimeoutFired message after delay.
+///
+/// Uses erlang:send_after/3 to schedule the timeout message.
+/// The message includes request_id for correlation.
+/// Returns the timer reference for later cancellation.
+@external(erlang, "bidir_ffi", "schedule_request_timeout")
+fn schedule_request_timeout(timeout_ms: Int, request_id: String) -> Dynamic
+
 /// Cancel a timer by its reference.
 ///
 /// Returns True if the timer was cancelled, False if it had already fired.
@@ -670,6 +706,12 @@ fn handle_message(
     }
     InitTimeoutFired -> {
       handle_init_timeout(state)
+    }
+    SendControlRequest(request, reply_to) -> {
+      handle_send_control_request(state, request, reply_to)
+    }
+    RequestTimeoutFired(request_id) -> {
+      handle_request_timeout(state, request_id)
     }
   }
 }
@@ -748,6 +790,14 @@ fn handle_success_response(
       // Not init response - correlate with pending_requests
       case dict.get(state.pending_requests, request_id) {
         Ok(pending) -> {
+          // Cancel timeout timer
+          case pending.timer_ref {
+            Some(timer_ref) -> {
+              let _ = cancel_timer(timer_ref)
+              Nil
+            }
+            None -> Nil
+          }
           // Found matching request - resolve it
           resolve_pending(pending, Success(request_id, payload))
           // Remove from pending_requests
@@ -838,6 +888,14 @@ fn handle_error_response(
       // Not init response - correlate with pending_requests
       case dict.get(state.pending_requests, request_id) {
         Ok(pending) -> {
+          // Cancel timeout timer
+          case pending.timer_ref {
+            Some(timer_ref) -> {
+              let _ = cancel_timer(timer_ref)
+              Nil
+            }
+            None -> Nil
+          }
           // Found matching request - resolve with error
           resolve_pending(pending, ControlError(request_id, message))
           // Remove from pending_requests
@@ -1051,6 +1109,115 @@ fn handle_init_timeout(
   }
 }
 
+/// Handle SDK-initiated control request.
+///
+/// If Running, encodes the request, sends to CLI, schedules timeout, and
+/// registers pending request. If not Running, queues the request for later.
+fn handle_send_control_request(
+  state: SessionState,
+  request: OutgoingControlRequest,
+  reply_to: Subject(RequestResult),
+) -> actor.Next(SessionState, ActorMessage) {
+  // Extract request_id from the request
+  let request_id = get_request_id(request)
+
+  case state.lifecycle {
+    Running -> {
+      // Check backpressure limit
+      case dict.size(state.pending_requests) >= max_pending_requests {
+        True -> {
+          // At capacity - reject immediately
+          process.send(
+            reply_to,
+            RequestError("Too many pending control requests (max 64)"),
+          )
+          actor.continue(state)
+        }
+        False -> {
+          // Encode and send request to CLI
+          let json_payload = control_encoder.encode_request(request)
+          let write_fn = state.runner.write
+          let _result = write_fn(json_payload <> "\n")
+
+          // Schedule timeout timer
+          let timer_ref =
+            schedule_request_timeout(state.default_timeout_ms, request_id)
+
+          // Register pending request
+          let pending_req =
+            PendingRequest(
+              request_id: request_id,
+              reply_to: reply_to,
+              sent_at: 0,
+              timer_ref: Some(timer_ref),
+            )
+          let new_pending =
+            dict.insert(state.pending_requests, request_id, pending_req)
+          let new_state = SessionState(..state, pending_requests: new_pending)
+          actor.continue(new_state)
+        }
+      }
+    }
+    InitSent -> {
+      // Queue request for later
+      let json_payload = control_encoder.encode_request(request)
+      let queued_op = QueuedRequest(request_id, json_payload, reply_to)
+      case queue_operation(state, queued_op) {
+        Ok(new_state) -> actor.continue(new_state)
+        Error(err) -> {
+          // Queue overflow - reject request
+          case err {
+            InitQueueOverflow(msg) -> process.send(reply_to, RequestError(msg))
+            _ -> process.send(reply_to, RequestError("Queue overflow"))
+          }
+          actor.continue(state)
+        }
+      }
+    }
+    _ -> {
+      // Session not ready - reject immediately
+      process.send(reply_to, RequestSessionStopped)
+      actor.continue(state)
+    }
+  }
+}
+
+/// Extract request_id from an OutgoingControlRequest.
+fn get_request_id(request: OutgoingControlRequest) -> String {
+  case request {
+    control.Initialize(id, _, _, _) -> id
+    control.Interrupt(id) -> id
+    control.SetPermissionMode(id, _) -> id
+    control.SetModel(id, _) -> id
+    control.RewindFiles(id, _) -> id
+  }
+}
+
+/// Handle request timeout.
+///
+/// If the request is still pending, sends RequestTimeout to the caller
+/// and removes from pending_requests. If not found, the response already
+/// arrived and this timeout is stale.
+fn handle_request_timeout(
+  state: SessionState,
+  request_id: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  case dict.get(state.pending_requests, request_id) {
+    Ok(pending) -> {
+      // Request still pending - send timeout to caller
+      process.send(pending.reply_to, RequestTimeout)
+      // Remove from pending (timer already fired, no need to cancel)
+      let new_pending = dict.delete(state.pending_requests, request_id)
+      let new_state = SessionState(..state, pending_requests: new_pending)
+      actor.continue(new_state)
+    }
+    Error(Nil) -> {
+      // Request already handled - stale timeout, ignore
+      actor.continue(state)
+    }
+  }
+}
+
 /// Flush queued operations after successful init.
 ///
 /// Sends all queued operations to CLI without blocking.
@@ -1083,13 +1250,17 @@ pub fn flush_queued_ops(state: SessionState) -> SessionState {
                 let write_fn = runner.write
                 let _result = write_fn(json_payload <> "\n")
 
+                // Schedule timeout timer for the flushed request
+                let timer_ref =
+                  schedule_request_timeout(state.default_timeout_ms, request_id)
+
                 // Register in pending_requests for response correlation
-                // Note: sent_at=0 is acceptable since timeout logic is not yet implemented
                 let pending_req =
                   PendingRequest(
                     request_id: request_id,
                     reply_to: reply_to,
                     sent_at: 0,
+                    timer_ref: Some(timer_ref),
                   )
                 let updated_pending =
                   dict.insert(pending, request_id, pending_req)
@@ -1138,9 +1309,18 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
     None -> Nil
   }
 
-  // 2. Resolve all pending SDK-initiated requests with session stopped error
+  // 2. Cancel timers and resolve all pending SDK-initiated requests
   let _ =
     dict.each(state.pending_requests, fn(_request_id, pending) {
+      // Cancel timeout timer
+      case pending.timer_ref {
+        Some(timer_ref) -> {
+          let _ = cancel_timer(timer_ref)
+          Nil
+        }
+        None -> Nil
+      }
+      // Send session stopped to caller
       process.send(pending.reply_to, RequestSessionStopped)
     })
 
@@ -1192,6 +1372,22 @@ pub fn shutdown(session: Subject(ActorMessage)) -> Nil {
 /// Send an InjectedPortClosed message to the actor (for testing).
 pub fn inject_port_closed(session: Subject(ActorMessage)) -> Nil {
   actor.send(session, InjectedPortClosed)
+}
+
+/// Send a control request to the CLI.
+///
+/// The request will be encoded and sent immediately if session is Running.
+/// If session is in InitSent state, the request is queued and will be sent
+/// after initialization completes.
+///
+/// Results are delivered asynchronously to the reply_to Subject as RequestResult.
+/// A timeout timer is automatically scheduled based on default_timeout_ms.
+pub fn send_control_request(
+  session: Subject(ActorMessage),
+  request: OutgoingControlRequest,
+  reply_to: Subject(RequestResult),
+) -> Nil {
+  actor.send(session, SendControlRequest(request, reply_to))
 }
 
 // =============================================================================

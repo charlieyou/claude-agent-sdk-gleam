@@ -128,6 +128,7 @@ pub fn correlate_response_matches_pending_request_test() {
           request_id: "req-100",
           reply_to: reply_subject,
           sent_at: 0,
+          timer_ref: None,
         ),
       ),
     ])
@@ -150,6 +151,7 @@ pub fn correlate_response_unmatched_request_id_test() {
           request_id: "req-100",
           reply_to: reply_subject,
           sent_at: 0,
+          timer_ref: None,
         ),
       ),
     ])
@@ -248,7 +250,12 @@ pub fn resolve_pending_sends_success_to_reply_subject_test() {
   let reply_subject: process.Subject(bidir.RequestResult) =
     process.new_subject()
   let pending_req =
-    PendingRequest(request_id: "req-1", reply_to: reply_subject, sent_at: 0)
+    PendingRequest(
+      request_id: "req-1",
+      reply_to: reply_subject,
+      sent_at: 0,
+      timer_ref: None,
+    )
 
   // Resolve with success
   let response = Success(request_id: "req-1", payload: to_dynamic("result"))
@@ -269,7 +276,12 @@ pub fn resolve_pending_sends_error_to_reply_subject_test() {
   let reply_subject: process.Subject(bidir.RequestResult) =
     process.new_subject()
   let pending_req =
-    PendingRequest(request_id: "req-1", reply_to: reply_subject, sent_at: 0)
+    PendingRequest(
+      request_id: "req-1",
+      reply_to: reply_subject,
+      sent_at: 0,
+      timer_ref: None,
+    )
 
   // Resolve with error
   let response = ControlError(request_id: "req-1", message: "failed")

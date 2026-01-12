@@ -53,7 +53,12 @@ fn test_state() -> SessionState {
 /// Create a PendingRequest with given ID.
 fn make_pending_request(id: String) -> PendingRequest {
   let reply_to: process.Subject(bidir.RequestResult) = process.new_subject()
-  PendingRequest(request_id: id, reply_to: reply_to, sent_at: 0)
+  PendingRequest(
+    request_id: id,
+    reply_to: reply_to,
+    sent_at: 0,
+    timer_ref: None,
+  )
 }
 
 /// Create a PendingHook with given callback ID.
