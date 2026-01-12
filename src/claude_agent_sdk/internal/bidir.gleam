@@ -41,8 +41,9 @@ import gleam/otp/actor
 
 import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
-  type IncomingMessage, CanUseTool, ControlRequest, ControlResponse,
-  Error as ControlError, HookCallback, McpMessage, RegularMessage, Success,
+  type IncomingMessage, type OutgoingControlResponse, CanUseTool, ControlRequest,
+  ControlResponse, Error as ControlError, HookCallback, HookResponse,
+  HookSuccess, McpMessage, RegularMessage, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -486,7 +487,7 @@ pub fn start(
   runner: BidirRunner,
   config: StartConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
-  start_internal(runner, config, None)
+  start_internal(runner, config, None, empty_hook_config())
 }
 
 /// Start a bidirectional session actor for testing.
@@ -498,7 +499,19 @@ pub fn start_for_testing(
   runner: BidirRunner,
   config: StartConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
-  start_internal(runner, config, None)
+  start_internal(runner, config, None, empty_hook_config())
+}
+
+/// Start a bidirectional session actor with pre-configured hooks.
+///
+/// This allows tests to register hook handlers that will be invoked
+/// when the CLI sends hook_callback control requests.
+pub fn start_with_hooks(
+  runner: BidirRunner,
+  config: StartConfig,
+  hooks: HookConfig,
+) -> Result(Subject(ActorMessage), StartError) {
+  start_internal(runner, config, None, hooks)
 }
 
 /// Inject a JSON message to the actor as if it came from the CLI.
@@ -514,6 +527,7 @@ fn start_internal(
   runner: BidirRunner,
   config: StartConfig,
   _inject_subject: Option(Subject(String)),
+  hooks: HookConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
   // Generate the init request ID
   let init_request_id = "req_0"
@@ -529,7 +543,7 @@ fn start_internal(
           pending_requests: dict.new(),
           pending_hooks: dict.new(),
           queued_ops: [],
-          hooks: empty_hook_config(),
+          hooks: hooks,
           mcp_handlers: dict.new(),
           next_request_id: 1,
           // Start at 1 since req_0 is used for init
@@ -883,15 +897,61 @@ fn handle_control_request(
     }
     Running -> {
       // Normal request processing in Running state
-      // TODO: Process hook_callback, can_use_tool, mcp_message
-      // For now, just acknowledge we received it
-      actor.continue(state)
+      case request {
+        HookCallback(request_id, callback_id, input, _tool_use_id) -> {
+          dispatch_hook_callback(state, request_id, callback_id, input)
+        }
+        CanUseTool(..) | McpMessage(..) -> {
+          // TODO: Implement can_use_tool and mcp_message handlers
+          actor.continue(state)
+        }
+      }
     }
     _ -> {
       // Not in a state to handle requests - ignore
       actor.continue(state)
     }
   }
+}
+
+/// Dispatch a hook callback to the registered handler.
+///
+/// Looks up the callback_id in HookConfig and invokes the handler.
+/// Sends control_response back to CLI with the result.
+/// Unknown callback_ids are logged and ignored (fail-open).
+fn dispatch_hook_callback(
+  state: SessionState,
+  request_id: String,
+  callback_id: String,
+  input: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  case dict.get(state.hooks.handlers, callback_id) {
+    Ok(handler) -> {
+      // Invoke the handler and wrap result in HookSuccess
+      let result = handler(input)
+      let response = HookResponse(request_id, HookSuccess(result))
+
+      // Send response to CLI
+      send_control_response(state, response)
+      actor.continue(state)
+    }
+    Error(Nil) -> {
+      // Unknown callback_id - log warning and continue (fail-open)
+      // TODO: Add proper logging
+      actor.continue(state)
+    }
+  }
+}
+
+/// Send a control response to the CLI via the runner.
+fn send_control_response(
+  state: SessionState,
+  response: OutgoingControlResponse,
+) -> Nil {
+  let json_line = control_encoder.encode_response(response) <> "\n"
+  let write_fn = state.runner.write
+  let _result = write_fn(json_line)
+  Nil
 }
 
 /// Handle implicit confirmation during InitSent.
