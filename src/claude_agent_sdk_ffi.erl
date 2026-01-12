@@ -157,15 +157,29 @@ os_cmd(Command) ->
     CommandStr = binary_to_list(Command),
     list_to_binary(os:cmd(CommandStr)).
 
-%% Returns OTP major version as an integer.
+%% Returns OTP major version as {<<"ok">>, Version} or {<<"error">>, Reason}.
 %% Uses erlang:system_info(otp_release) which returns a string like "27".
+%% Uses string:to_integer/1 for safe parsing to avoid badarg on non-numeric values.
 otp_version() ->
     Release = erlang:system_info(otp_release),
-    list_to_integer(Release).
+    case string:to_integer(Release) of
+        {Version, _Rest} when is_integer(Version) ->
+            {<<"ok">>, Version};
+        {error, Reason} ->
+            {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))};
+        _ ->
+            {<<"error">>, <<"parse_failed">>}
+    end.
 
 %% Checks if stderr_to_stdout port option is supported (OTP >= 25).
 %% Returns {supported, true} or {supported, false}.
+%% If OTP version cannot be determined, defaults to unsupported (false).
 check_stderr_support() ->
-    Version = otp_version(),
-    Supported = Version >= 25,
-    {<<"supported">>, Supported}.
+    case otp_version() of
+        {<<"ok">>, Version} ->
+            Supported = Version >= 25,
+            {<<"supported">>, Supported};
+        {<<"error">>, _} ->
+            %% Cannot determine version, assume unsupported
+            {<<"supported">>, false}
+    end.

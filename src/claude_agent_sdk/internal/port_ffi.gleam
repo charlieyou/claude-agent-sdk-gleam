@@ -210,10 +210,45 @@ pub fn monotonic_time_ms() -> Int
 // OTP Version Detection
 // ============================================================================
 
+/// FFI binding for otp_version - returns {ok, Int} | {error, Reason}
+@external(erlang, "claude_agent_sdk_ffi", "otp_version")
+fn ffi_otp_version() -> Dynamic
+
+/// Returns the OTP major version as a Result.
+/// Uses safe parsing that handles non-standard OTP release strings.
+/// Returns Error with reason if the version cannot be parsed.
+pub fn get_otp_version_safe() -> Result(Int, String) {
+  let result = ffi_otp_version()
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    use payload <- decode.field(1, decode.dynamic)
+    decode.success(#(tag, payload))
+  }
+  case decode.run(result, result_decoder) {
+    Ok(#("ok", version_dynamic)) ->
+      case decode.run(version_dynamic, decode.int) {
+        Ok(version) -> Ok(version)
+        Error(_) -> Error("invalid version format")
+      }
+    Ok(#("error", reason_dynamic)) ->
+      case decode.run(reason_dynamic, decode.string) {
+        Ok(reason) -> Error(reason)
+        Error(_) -> Error("unknown parse error")
+      }
+    Ok(_) -> Error("invalid FFI response tag")
+    Error(_) -> Error("invalid FFI response format")
+  }
+}
+
 /// Returns the OTP major version as an integer (e.g., 25, 26, 27).
 /// Use this to check runtime capabilities that depend on OTP version.
-@external(erlang, "claude_agent_sdk_ffi", "otp_version")
-pub fn get_otp_version() -> Int
+/// Returns 0 if the version cannot be determined (indicates unknown/unsupported).
+pub fn get_otp_version() -> Int {
+  case get_otp_version_safe() {
+    Ok(version) -> version
+    Error(_) -> 0
+  }
+}
 
 /// FFI binding for check_stderr_support - returns {supported, Bool}
 @external(erlang, "claude_agent_sdk_ffi", "check_stderr_support")
