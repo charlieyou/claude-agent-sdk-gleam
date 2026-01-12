@@ -163,8 +163,10 @@ os_cmd(Command) ->
 otp_version() ->
     Release = erlang:system_info(otp_release),
     case string:to_integer(Release) of
-        {Version, _Rest} when is_integer(Version) ->
+        {Version, []} when is_integer(Version) ->
             {<<"ok">>, Version};
+        {_Version, [_|_]} ->
+            {<<"error">>, <<"non_numeric_suffix">>};
         {error, Reason} ->
             {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))};
         _ ->
