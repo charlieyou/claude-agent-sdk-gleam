@@ -1,0 +1,127 @@
+/// Shared helpers for E2E SDK tests.
+///
+/// This module provides common functions for:
+/// - Test skipping based on environment variables
+/// - Stream consumption utilities
+/// - Protocol invariant assertions
+import claude_agent_sdk
+import claude_agent_sdk/error.{EndOfStream, Message}
+import claude_agent_sdk/message.{type MessageEnvelope, System}
+import gleam/list
+import gleam/option.{type Option, None, Some}
+
+/// Check if E2E SDK tests are enabled.
+/// Returns Ok(Nil) if E2E_SDK_TEST=1, Error with skip message otherwise.
+pub fn skip_if_no_e2e() -> Result(Nil, String) {
+  case get_env("E2E_SDK_TEST") {
+    Ok("1") -> Ok(Nil)
+    Ok(_) -> Error("[SKIP] E2E_SDK_TEST is set but not '1'")
+    Error(_) -> Error("[SKIP] E2E_SDK_TEST not set; skipping E2E test")
+  }
+}
+
+/// Get environment variable value via FFI.
+/// Returns Ok(value) if set, Error(Nil) if not set.
+@external(erlang, "e2e_helpers_ffi", "get_env")
+fn get_env(name: String) -> Result(String, Nil)
+
+/// Result of consuming a stream.
+pub type ConsumeResult {
+  ConsumeResult(
+    /// All message envelopes collected (in order received).
+    messages: List(MessageEnvelope),
+    /// True if stream terminated normally (EndOfStream).
+    terminated_normally: Bool,
+  )
+}
+
+/// Consume entire stream and return all messages.
+/// Closes the stream after consuming.
+pub fn consume_stream(stream: claude_agent_sdk.QueryStream) -> ConsumeResult {
+  consume_stream_loop(stream, [], False)
+}
+
+fn consume_stream_loop(
+  stream: claude_agent_sdk.QueryStream,
+  acc: List(MessageEnvelope),
+  terminated: Bool,
+) -> ConsumeResult {
+  case terminated {
+    True -> {
+      let _ = claude_agent_sdk.close(stream)
+      ConsumeResult(messages: list.reverse(acc), terminated_normally: True)
+    }
+    False -> {
+      let #(result, updated_stream) = claude_agent_sdk.next(stream)
+      case result {
+        Ok(Message(envelope)) ->
+          consume_stream_loop(updated_stream, [envelope, ..acc], False)
+        Ok(EndOfStream) -> consume_stream_loop(updated_stream, acc, True)
+        Ok(error.WarningEvent(_)) ->
+          // Skip warnings, continue iteration
+          consume_stream_loop(updated_stream, acc, False)
+        Error(_) -> {
+          // On error, close and return what we have
+          let _ = claude_agent_sdk.close(updated_stream)
+          ConsumeResult(messages: list.reverse(acc), terminated_normally: False)
+        }
+      }
+    }
+  }
+}
+
+/// Assert stream produces at least one message before termination.
+/// Returns the consumed result for further inspection.
+pub fn assert_stream_produces_items(
+  stream: claude_agent_sdk.QueryStream,
+) -> ConsumeResult {
+  let result = consume_stream(stream)
+  case result.messages != [] {
+    True -> result
+    False -> panic as "Stream produced no messages"
+  }
+}
+
+/// Extract session_id from the first SystemMessage in a list of envelopes.
+/// Returns None if no SystemMessage found or if session_id is not set.
+pub fn extract_session_id(messages: List(MessageEnvelope)) -> Option(String) {
+  list.find_map(messages, fn(envelope) {
+    case envelope.message {
+      System(sys_msg) ->
+        case sys_msg.session_id {
+          Some(id) -> Ok(id)
+          None -> Error(Nil)
+        }
+      _ -> Error(Nil)
+    }
+  })
+  |> option.from_result
+}
+
+/// Check if messages contain a Result message (success or error).
+pub fn has_result_message(messages: List(MessageEnvelope)) -> Bool {
+  list.any(messages, fn(envelope) {
+    case envelope.message {
+      message.Result(_) -> True
+      _ -> False
+    }
+  })
+}
+
+/// Count messages by type.
+pub type MessageCounts {
+  MessageCounts(system: Int, assistant: Int, user: Int, result: Int)
+}
+
+/// Count messages by type for protocol validation.
+pub fn count_message_types(messages: List(MessageEnvelope)) -> MessageCounts {
+  list.fold(messages, MessageCounts(0, 0, 0, 0), fn(counts, envelope) {
+    case envelope.message {
+      message.System(_) -> MessageCounts(..counts, system: counts.system + 1)
+      message.Assistant(_) ->
+        MessageCounts(..counts, assistant: counts.assistant + 1)
+      message.User(_) -> MessageCounts(..counts, user: counts.user + 1)
+      message.Result(_) -> MessageCounts(..counts, result: counts.result + 1)
+    }
+  })
+}

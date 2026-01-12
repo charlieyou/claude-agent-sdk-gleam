@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "echo": {
+      "command": "npx",
+      "args": ["-y", "@anthropic/mcp-test-server"]
+    }
+  }
+}
