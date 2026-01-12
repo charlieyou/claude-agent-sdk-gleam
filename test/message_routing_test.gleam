@@ -8,10 +8,14 @@
 /// - Regular messages -> subscriber Subject
 /// - Malformed messages -> logged and dropped
 import gleam/dict
-import gleam/dynamic
+import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process
 import gleam/option.{None, Some}
 import gleeunit/should
+
+// Helper to convert any value to Dynamic (identity function in Erlang)
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> Dynamic
 
 import claude_agent_sdk/control.{
   CanUseTool, ControlRequest, ControlResponse, Error as ControlError,
@@ -129,7 +133,7 @@ pub fn correlate_response_matches_pending_request_test() {
     ])
 
   // Simulate response correlation
-  let response = Success(request_id: "req-100", payload: dynamic.from("ok"))
+  let response = Success(request_id: "req-100", payload: to_dynamic("ok"))
   let matched = dict.get(pending, response.request_id)
   should.be_ok(matched)
 }
@@ -165,7 +169,7 @@ pub fn route_incoming_identifies_hook_callback_test() {
     ControlRequest(HookCallback(
       request_id: "req-1",
       callback_id: "cb-1",
-      input: dynamic.from(Nil),
+      input: to_dynamic(Nil),
       tool_use_id: None,
     ))
   let route = bidir.route_incoming(msg)
@@ -178,7 +182,7 @@ pub fn route_incoming_identifies_permission_request_test() {
     ControlRequest(CanUseTool(
       request_id: "req-2",
       tool_name: "bash",
-      input: dynamic.from(Nil),
+      input: to_dynamic(Nil),
       permission_suggestions: [],
       blocked_path: None,
     ))
@@ -192,7 +196,7 @@ pub fn route_incoming_identifies_mcp_message_test() {
     ControlRequest(McpMessage(
       request_id: "req-3",
       server_name: "test-server",
-      message: dynamic.from(Nil),
+      message: to_dynamic(Nil),
     ))
   let route = bidir.route_incoming(msg)
   should.equal(route, RouteMcp("test-server"))
@@ -201,7 +205,7 @@ pub fn route_incoming_identifies_mcp_message_test() {
 pub fn route_incoming_identifies_control_response_test() {
   // Test route_incoming correctly identifies control_response
   let msg =
-    ControlResponse(Success(request_id: "req-4", payload: dynamic.from(Nil)))
+    ControlResponse(Success(request_id: "req-4", payload: to_dynamic(Nil)))
   let route = bidir.route_incoming(msg)
   should.equal(route, RouteResponse("req-4"))
 }
@@ -217,11 +221,18 @@ pub fn route_incoming_identifies_regular_message_test() {
   // Test route_incoming correctly identifies regular message
   let sys_msg =
     SystemMessage(
-      subtype: "init",
-      session_id: "sess-1",
-      tools: [],
-      mcp_servers: [],
+      subtype: Some("init"),
+      uuid: None,
+      session_id: Some("sess-1"),
+      cwd: None,
       model: Some("claude-3"),
+      tools: Some([]),
+      mcp_servers: Some([]),
+      permission_mode: None,
+      api_key_source: None,
+      slash_commands: None,
+      agents: None,
+      claude_code_version: None,
     )
   let msg = RegularMessage(System(sys_msg))
   let route = bidir.route_incoming(msg)
@@ -240,7 +251,7 @@ pub fn resolve_pending_sends_success_to_reply_subject_test() {
     PendingRequest(request_id: "req-1", reply_to: reply_subject, sent_at: 0)
 
   // Resolve with success
-  let response = Success(request_id: "req-1", payload: dynamic.from("result"))
+  let response = Success(request_id: "req-1", payload: to_dynamic("result"))
   bidir.resolve_pending(pending_req, response)
 
   // Check reply was sent
