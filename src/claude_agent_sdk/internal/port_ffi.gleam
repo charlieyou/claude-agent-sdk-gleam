@@ -80,6 +80,31 @@ pub fn ffi_close_port(port: Port) -> Nil {
   ffi_close_port_raw(port_to_dynamic(port))
 }
 
+/// Error type for port write operations
+pub type WriteError {
+  PortClosed
+}
+
+/// FFI binding for port_write - returns {ok, nil} | {error, reason}
+@external(erlang, "claude_agent_sdk_ffi", "port_write")
+fn ffi_port_write_raw(port: Dynamic, data: String) -> Dynamic
+
+/// Write data to a port's stdin.
+/// Returns Ok(Nil) on success, Error(PortClosed) if the port is closed.
+pub fn port_write(port: Port, data: String) -> Result(Nil, WriteError) {
+  let result = ffi_port_write_raw(port_to_dynamic(port), data)
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    decode.success(tag)
+  }
+  case decode.run(result, result_decoder) {
+    Ok("ok") -> Ok(Nil)
+    Ok("error") -> Error(PortClosed)
+    Ok(_) -> Error(PortClosed)
+    Error(_) -> Error(PortClosed)
+  }
+}
+
 /// Blocking receive - returns Result to propagate decode errors
 pub fn receive_blocking(port: Port) -> Result(PortMessage, String) {
   ffi_receive_blocking_raw(port_to_dynamic(port)) |> decode_port_message

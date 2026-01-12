@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -65,6 +65,17 @@ receive_port_msg_timeout(Port, TimeoutMs) ->
             {<<"eof">>, nil}
     after TimeoutMs ->
         {<<"timeout">>, nil}
+    end.
+
+%% Writes data to a port's stdin.
+%% Returns {ok, nil} on success, {error, <<"port_closed">>} if port is closed.
+%% Data should be a binary (Gleam String/BitArray).
+port_write(Port, Data) ->
+    try
+        erlang:port_command(Port, Data),
+        {<<"ok">>, nil}
+    catch
+        error:badarg -> {<<"error">>, <<"port_closed">>}
     end.
 
 %% Closes the port and drains any remaining messages.
