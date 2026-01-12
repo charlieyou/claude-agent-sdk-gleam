@@ -35,6 +35,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/otp/actor
@@ -1156,7 +1157,7 @@ const max_pending_hooks: Int = 32
 /// Queue an operation during initialization with backpressure limit.
 ///
 /// Returns Error(InitQueueOverflow) if the queue is at capacity (16).
-/// Operations are queued in LIFO order (prepended to list).
+/// Operations are prepended for O(1) insert; flush_queued_ops reverses to send in FIFO order.
 pub fn queue_operation(
   state: SessionState,
   op: QueuedOperation,
@@ -1209,11 +1210,20 @@ pub fn add_pending_hook(
   case dict.size(state.pending_hooks) >= max_pending_hooks {
     True -> {
       // Return immediate fail-open response using hook.request_id for correlation
-      // Format matches control_encoder output for HookSuccess with continue:true
+      // Use proper JSON encoding to handle special characters in request_id
       let response =
-        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\""
-        <> hook.request_id
-        <> "\",\"response\":{\"continue\":true}}}"
+        json.object([
+          #("type", json.string("control_response")),
+          #(
+            "response",
+            json.object([
+              #("subtype", json.string("success")),
+              #("request_id", json.string(hook.request_id)),
+              #("response", json.object([#("continue", json.bool(True))])),
+            ]),
+          ),
+        ])
+        |> json.to_string
       #(state, Some(response))
     }
     False -> #(
