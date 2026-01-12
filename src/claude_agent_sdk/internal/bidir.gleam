@@ -1591,8 +1591,11 @@ pub fn send_control_request(
 // Public Control Operations
 // =============================================================================
 
-/// Default timeout for interrupt operation (5000ms).
-const interrupt_timeout_ms: Int = 5000
+/// Receive timeout buffer (ms) added on top of actor's internal timeout.
+/// This ensures process.receive always gets the actor's response rather than
+/// timing out independently. The actor's default_timeout_ms controls the actual
+/// operation timeout; this buffer just ensures we wait long enough to receive it.
+const receive_timeout_buffer_ms: Int = 1000
 
 /// Interrupt the current operation.
 ///
@@ -1601,14 +1604,15 @@ const interrupt_timeout_ms: Int = 5000
 ///
 /// ## Timeout
 ///
-/// Uses a 5000ms timeout. Interrupt should complete quickly since it just
-/// signals the CLI to stop.
+/// The operation timeout is controlled by the session's `default_timeout_ms`
+/// configuration. The function waits slightly longer than that to ensure the
+/// actor's timeout response is received.
 ///
 /// ## Returns
 ///
 /// - `Ok(Nil)` - Interrupt succeeded
 /// - `Error(CliError(message))` - CLI returned an error (e.g., nothing to interrupt)
-/// - `Error(InterruptTimeout)` - No response within 5000ms
+/// - `Error(InterruptTimeout)` - Request timed out (per session's default_timeout_ms)
 /// - `Error(SessionStopped)` - Session is not running
 ///
 /// ## Example
@@ -1629,15 +1633,20 @@ pub fn interrupt(session: Subject(ActorMessage)) -> Result(Nil, InterruptError) 
   // Create subject to receive the result
   let result_subject: Subject(RequestResult) = process.new_subject()
 
-  // Send the request
+  // Send the request - the actor schedules timeout based on default_timeout_ms
   send_control_request(session, request, result_subject)
 
-  // Wait for response with 5000ms timeout
-  case process.receive(result_subject, interrupt_timeout_ms) {
+  // Wait for actor's response. Use a generous receive timeout since the actor's
+  // internal timer (default_timeout_ms) controls the actual timeout behavior.
+  // We add a buffer to ensure we always receive the actor's RequestTimeout
+  // rather than timing out at the process.receive level.
+  let receive_timeout = 120_000 + receive_timeout_buffer_ms
+  case process.receive(result_subject, receive_timeout) {
     Ok(RequestSuccess(_)) -> Ok(Nil)
     Ok(RequestError(message)) -> Error(CliError(message))
     Ok(RequestTimeout) -> Error(InterruptTimeout)
     Ok(RequestSessionStopped) -> Error(SessionStopped)
+    // Should never happen since actor always sends a response, but handle it
     Error(Nil) -> Error(InterruptTimeout)
   }
 }

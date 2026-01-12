@@ -215,8 +215,9 @@ pub fn interrupt_timeout_test() {
 
 /// Test: interrupt() returns InterruptTimeout on timeout
 ///
-/// The synchronous interrupt() function uses a 5000ms timeout by default.
-/// For testing, we use a short default_timeout_ms config.
+/// The interrupt() timeout is controlled by the session's default_timeout_ms.
+/// With default_timeout_ms: 100, the actor's internal timer fires at ~100ms
+/// and sends RequestTimeout to the caller.
 pub fn interrupt_api_timeout_test() {
   // Arrange: start session with short timeout
   let mock = mock_bidir_runner.new()
