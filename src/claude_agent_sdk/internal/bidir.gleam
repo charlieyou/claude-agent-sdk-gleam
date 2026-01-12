@@ -47,6 +47,25 @@ import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 ///
 /// The session progresses through these states:
 /// - Starting: Actor started, port not yet spawned
+/// Specific error variants for session failures.
+///
+/// These variants enable programmatic error handling rather than string parsing.
+pub type SessionError {
+  /// Initialization handshake timed out.
+  InitializationTimeout
+  /// CLI returned error during initialization.
+  InitializationError(message: String)
+  /// CLI exited before initialization completed.
+  CliExitedDuringInit
+  /// CLI exited during startup (before spawn completed).
+  CliExitedDuringStartup
+  /// A runtime error occurred with the given reason.
+  RuntimeError(reason: String)
+}
+
+/// Session lifecycle states.
+///
+/// - Starting: Actor started, CLI port not yet spawned
 /// - InitSent: Initialize request sent, awaiting response
 /// - Running: Fully operational, processing messages
 /// - Stopped: Clean shutdown completed
@@ -61,7 +80,7 @@ pub type SessionLifecycle {
   /// Clean shutdown completed.
   Stopped
   /// Unrecoverable error occurred.
-  Failed(String)
+  Failed(SessionError)
 }
 
 /// Events that trigger lifecycle state transitions.
@@ -108,21 +127,21 @@ pub fn transition(
 
     // Starting state transitions
     Starting, CliSpawned -> Ok(InitSent)
-    Starting, ErrorOccurred(reason) -> Ok(Failed(reason))
-    Starting, PortClosed -> Ok(Failed("CLI exited during startup"))
+    Starting, ErrorOccurred(reason) -> Ok(Failed(RuntimeError(reason)))
+    Starting, PortClosed -> Ok(Failed(CliExitedDuringStartup))
     Starting, _ -> Error(InvalidTransition(from, event))
 
     // InitSent state transitions
     InitSent, InitSuccess -> Ok(Running)
-    InitSent, ErrorOccurred(reason) -> Ok(Failed(reason))
-    InitSent, InitTimeout -> Ok(Failed("initialization timeout"))
-    InitSent, PortClosed -> Ok(Failed("CLI exited during initialization"))
+    InitSent, ErrorOccurred(reason) -> Ok(Failed(InitializationError(reason)))
+    InitSent, InitTimeout -> Ok(Failed(InitializationTimeout))
+    InitSent, PortClosed -> Ok(Failed(CliExitedDuringInit))
     InitSent, _ -> Error(InvalidTransition(from, event))
 
     // Running state transitions
     Running, StopRequested -> Ok(Stopped)
     Running, PortClosed -> Ok(Stopped)
-    Running, ErrorOccurred(reason) -> Ok(Failed(reason))
+    Running, ErrorOccurred(reason) -> Ok(Failed(RuntimeError(reason)))
     Running, _ -> Error(InvalidTransition(from, event))
   }
 }

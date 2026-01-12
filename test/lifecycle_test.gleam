@@ -7,9 +7,11 @@
 import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
-  type InvalidTransition, type LifecycleEvent, type SessionLifecycle, CliSpawned,
-  ErrorOccurred, Failed, InitSent, InitSuccess, InitTimeout, InvalidTransition,
-  PortClosed, Running, Starting, StopRequested, Stopped, transition,
+  type InvalidTransition, type LifecycleEvent, type SessionLifecycle,
+  CliExitedDuringInit, CliExitedDuringStartup, CliSpawned, ErrorOccurred, Failed,
+  InitSent, InitSuccess, InitTimeout, InitializationError, InitializationTimeout,
+  InvalidTransition, PortClosed, Running, RuntimeError, Starting, StopRequested,
+  Stopped, transition,
 }
 
 // =============================================================================
@@ -42,22 +44,22 @@ pub fn running_to_stopped_on_port_closed_test() {
 
 pub fn init_sent_to_failed_on_error_test() {
   let result = transition(InitSent, ErrorOccurred("init error"))
-  should.equal(result, Ok(Failed("init error")))
+  should.equal(result, Ok(Failed(InitializationError("init error"))))
 }
 
 pub fn init_sent_to_failed_on_timeout_test() {
   let result = transition(InitSent, InitTimeout)
-  should.equal(result, Ok(Failed("initialization timeout")))
+  should.equal(result, Ok(Failed(InitializationTimeout)))
 }
 
 pub fn init_sent_to_failed_on_port_closed_test() {
   let result = transition(InitSent, PortClosed)
-  should.equal(result, Ok(Failed("CLI exited during initialization")))
+  should.equal(result, Ok(Failed(CliExitedDuringInit)))
 }
 
 pub fn running_to_failed_on_error_test() {
   let result = transition(Running, ErrorOccurred("runtime error"))
-  should.equal(result, Ok(Failed("runtime error")))
+  should.equal(result, Ok(Failed(RuntimeError("runtime error"))))
 }
 
 // =============================================================================
@@ -76,7 +78,7 @@ pub fn stopped_rejects_all_events_test() {
 
 pub fn failed_rejects_all_events_test() {
   // Failed is terminal - no transitions allowed
-  let failed = Failed("previous error")
+  let failed = Failed(RuntimeError("previous error"))
   should.be_error(transition(failed, CliSpawned))
   should.be_error(transition(failed, InitSuccess))
   should.be_error(transition(failed, StopRequested))
@@ -99,13 +101,13 @@ pub fn starting_only_accepts_cli_spawned_test() {
 pub fn starting_accepts_error_to_fail_test() {
   // Starting can fail on error
   let result = transition(Starting, ErrorOccurred("spawn error"))
-  should.equal(result, Ok(Failed("spawn error")))
+  should.equal(result, Ok(Failed(RuntimeError("spawn error"))))
 }
 
 pub fn starting_accepts_port_closed_to_fail_test() {
   // Port closing during start is a failure
   let result = transition(Starting, PortClosed)
-  should.equal(result, Ok(Failed("CLI exited during startup")))
+  should.equal(result, Ok(Failed(CliExitedDuringStartup)))
 }
 
 pub fn init_sent_rejects_cli_spawned_test() {

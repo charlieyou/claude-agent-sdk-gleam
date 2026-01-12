@@ -9,7 +9,7 @@ import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
   type SessionLifecycle, type SubscriberMessage, Failed, InitSent, Pong, Running,
-  Starting, Stopped,
+  RuntimeError, Starting, Stopped,
 }
 import support/mock_bidir_runner
 
@@ -23,7 +23,7 @@ pub fn session_lifecycle_variants_exist_test() {
   let _init_sent: SessionLifecycle = InitSent
   let _running: SessionLifecycle = Running
   let _stopped: SessionLifecycle = Stopped
-  let _failed: SessionLifecycle = Failed("test error")
+  let _failed: SessionLifecycle = Failed(RuntimeError("test error"))
 
   should.be_true(True)
 }
