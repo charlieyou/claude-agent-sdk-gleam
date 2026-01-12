@@ -11,9 +11,10 @@
 /// Running these tests in parallel would cause race conditions and flaky tests.
 ///
 /// ## Running Tests
+/// Run these tests in isolation to avoid race conditions with other E2E tests:
 /// ```bash
 /// export E2E_SDK_TEST=1
-/// gleam test
+/// gleam test -- --only sdk_error_serial
 /// ```
 import claude_agent_sdk
 import claude_agent_sdk/error
@@ -239,30 +240,45 @@ type StreamConsumeResult {
 }
 
 /// Consume stream items until a terminal error or EndOfStream.
+/// Uses a max iteration counter to prevent infinite loops on repeated non-terminal errors.
 fn consume_until_error_or_end(
   stream: claude_agent_sdk.QueryStream,
 ) -> StreamConsumeResult {
-  consume_loop(stream)
+  // Max 100 iterations to prevent infinite loop on pathological non-terminal errors
+  consume_loop(stream, 100)
 }
 
-fn consume_loop(stream: claude_agent_sdk.QueryStream) -> StreamConsumeResult {
-  let #(result, updated_stream) = claude_agent_sdk.next(stream)
-  case result {
-    Ok(error.EndOfStream) -> {
-      let _ = claude_agent_sdk.close(updated_stream)
+fn consume_loop(
+  stream: claude_agent_sdk.QueryStream,
+  remaining: Int,
+) -> StreamConsumeResult {
+  case remaining <= 0 {
+    True -> {
+      // Safety limit reached - close and return as completed
+      let _ = claude_agent_sdk.close(stream)
       StreamCompleted
     }
-    Ok(error.Message(_)) | Ok(error.WarningEvent(_)) -> {
-      // Continue consuming
-      consume_loop(updated_stream)
-    }
-    Error(err) -> {
-      let _ = claude_agent_sdk.close(updated_stream)
-      case claude_agent_sdk.is_terminal(err) {
-        True -> StreamErrored(err)
-        False -> {
-          // Non-terminal error, continue
-          consume_loop(updated_stream)
+    False -> {
+      let #(result, updated_stream) = claude_agent_sdk.next(stream)
+      case result {
+        Ok(error.EndOfStream) -> {
+          let _ = claude_agent_sdk.close(updated_stream)
+          StreamCompleted
+        }
+        Ok(error.Message(_)) | Ok(error.WarningEvent(_)) -> {
+          consume_loop(updated_stream, remaining - 1)
+        }
+        Error(err) -> {
+          case claude_agent_sdk.is_terminal(err) {
+            True -> {
+              let _ = claude_agent_sdk.close(updated_stream)
+              StreamErrored(err)
+            }
+            False -> {
+              // Non-terminal error, continue (decrement counter)
+              consume_loop(updated_stream, remaining - 1)
+            }
+          }
         }
       }
     }
