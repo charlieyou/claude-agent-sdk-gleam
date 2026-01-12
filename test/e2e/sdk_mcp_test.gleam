@@ -99,9 +99,9 @@ pub fn sdk_51_mcp_tools_test() {
                   "MCP server: " <> server.name <> " status: " <> server.status,
                 )
               })
-              // At minimum, we should see the configured server
-              list.length(servers)
-              |> should.not_equal(0)
+              // Verify the configured "echo" server is reported
+              list.any(servers, fn(s) { s.name == "echo" })
+              |> should.be_true
             }
             None -> {
               // mcp_servers may be None if MCP server failed to connect
@@ -165,8 +165,9 @@ pub fn sdk_52_mcp_failure_test() {
             "Query completed with bad MCP config, messages: "
             <> string.inspect(list.length(result.messages)),
           )
-          // Just verify we got some response
-          Nil
+          // Verify the CLI didn't crash (exit code 0)
+          result.terminated_normally
+          |> should.be_true
         }
         Error(err) -> {
           // Error should be clear about MCP config issue
