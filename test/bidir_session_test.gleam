@@ -7,8 +7,6 @@
 import gleam/erlang/process
 import gleeunit/should
 
-import gleam/dynamic
-
 import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SessionLifecycle, type SubscriberMessage, Failed,
   InitSent, Pong, QueuedRequest, RequestSessionStopped, Running, RuntimeError,
@@ -241,7 +239,7 @@ pub fn shutdown_resolves_queued_operations_test() {
   let queued_op =
     QueuedRequest(
       request_id: "test-req-1",
-      payload: to_dynamic(Nil),
+      payload: "",
       reply_to: reply_subject,
     )
 
@@ -269,7 +267,3 @@ pub fn shutdown_resolves_queued_operations_test() {
     Error(_) -> should.fail()
   }
 }
-
-// Helper to convert any value to Dynamic
-@external(erlang, "gleam_stdlib", "identity")
-fn to_dynamic(a: a) -> dynamic.Dynamic

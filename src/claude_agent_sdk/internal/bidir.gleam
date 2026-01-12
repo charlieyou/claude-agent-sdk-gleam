@@ -32,7 +32,6 @@
 /// ```
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
-import gleam/dynamic/decode
 import gleam/erlang/atom
 import gleam/erlang/process.{type Subject}
 import gleam/json
@@ -228,13 +227,13 @@ pub type PendingHook {
 pub type QueuedOperation {
   /// A control request to send once Running.
   ///
-  /// The payload must be a pre-encoded JSON string (without trailing newline),
+  /// The payload is a pre-encoded JSON string (without trailing newline),
   /// created via control_encoder.encode_request. This ensures wire format
   /// consistency with directly-sent requests.
   QueuedRequest(
     request_id: String,
-    /// Pre-encoded JSON string (use control_encoder.encode_request).
-    payload: Dynamic,
+    /// Pre-encoded JSON string from control_encoder.encode_request.
+    payload: String,
     reply_to: Subject(RequestResult),
   )
 }
@@ -996,10 +995,6 @@ fn handle_init_timeout(
 ///
 /// Sends all queued operations to CLI without blocking.
 /// Each operation gets its own pending request entry.
-///
-/// Note: QueuedRequest.payload must be a pre-encoded JSON string (without
-/// trailing newline). Callers should encode via control_encoder.encode_request
-/// before queuing. This is consistent with the wire format used elsewhere.
 fn flush_queued_ops(state: SessionState) -> SessionState {
   // Reverse to process in FIFO order (queue_operation prepends)
   let ops_in_order = list.reverse(state.queued_ops)
@@ -1012,37 +1007,21 @@ fn flush_queued_ops(state: SessionState) -> SessionState {
       fn(acc, op) {
         let #(pending, runner) = acc
         case op {
-          QueuedRequest(request_id, payload, reply_to) -> {
-            // Extract the pre-encoded JSON string from payload
-            case decode.run(payload, decode.string) {
-              Ok(json_str) -> {
-                // Send to CLI
-                let write_fn = runner.write
-                let _result = write_fn(json_str <> "\n")
+          QueuedRequest(request_id, json_payload, reply_to) -> {
+            // Send pre-encoded JSON to CLI (payload is already a String)
+            let write_fn = runner.write
+            let _result = write_fn(json_payload <> "\n")
 
-                // Register in pending_requests for response correlation
-                // Note: sent_at=0 is acceptable since timeout logic is not yet implemented
-                let pending_req =
-                  PendingRequest(
-                    request_id: request_id,
-                    reply_to: reply_to,
-                    sent_at: 0,
-                  )
-                let updated_pending =
-                  dict.insert(pending, request_id, pending_req)
-                #(updated_pending, runner)
-              }
-              Error(_) -> {
-                // Invalid payload - caller didn't pre-encode as JSON string
-                process.send(
-                  reply_to,
-                  RequestError(
-                    "Invalid queued request payload: expected pre-encoded JSON string",
-                  ),
-                )
-                #(pending, runner)
-              }
-            }
+            // Register in pending_requests for response correlation
+            // Note: sent_at=0 is acceptable since timeout logic is not yet implemented
+            let pending_req =
+              PendingRequest(
+                request_id: request_id,
+                reply_to: reply_to,
+                sent_at: 0,
+              )
+            let updated_pending = dict.insert(pending, request_id, pending_req)
+            #(updated_pending, runner)
           }
         }
       },

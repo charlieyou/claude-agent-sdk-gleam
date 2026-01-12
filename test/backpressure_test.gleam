@@ -5,7 +5,6 @@
 /// - pending_requests: max 64, returns TooManyPendingRequests
 /// - pending_hooks: max 32, returns immediate fail response (no spawn)
 import gleam/dict
-import gleam/dynamic
 import gleam/erlang/process
 import gleam/int
 import gleam/list
@@ -71,8 +70,7 @@ pub fn queue_operation_accepts_up_to_16_test() {
   let state =
     list.range(1, 16)
     |> list.fold(test_state(), fn(s, i) {
-      let op =
-        QueuedRequest("req-" <> int.to_string(i), dynamic.nil(), reply_to)
+      let op = QueuedRequest("req-" <> int.to_string(i), "", reply_to)
       let assert Ok(new_state) = queue_operation(s, op)
       new_state
     })
@@ -87,14 +85,13 @@ pub fn queue_operation_rejects_17th_with_overflow_error_test() {
   let state =
     list.range(1, 16)
     |> list.fold(test_state(), fn(s, i) {
-      let op =
-        QueuedRequest("req-" <> int.to_string(i), dynamic.nil(), reply_to)
+      let op = QueuedRequest("req-" <> int.to_string(i), "", reply_to)
       let assert Ok(new_state) = queue_operation(s, op)
       new_state
     })
 
   // 17th should fail
-  let op17 = QueuedRequest("req-17", dynamic.nil(), reply_to)
+  let op17 = QueuedRequest("req-17", "", reply_to)
   let result = queue_operation(state, op17)
 
   case result {
@@ -112,14 +109,13 @@ pub fn queue_operation_overflow_preserves_existing_test() {
   let state =
     list.range(1, 16)
     |> list.fold(test_state(), fn(s, i) {
-      let op =
-        QueuedRequest("req-" <> int.to_string(i), dynamic.nil(), reply_to)
+      let op = QueuedRequest("req-" <> int.to_string(i), "", reply_to)
       let assert Ok(new_state) = queue_operation(s, op)
       new_state
     })
 
   // Try to add 17th (should fail)
-  let op17 = QueuedRequest("req-17", dynamic.nil(), reply_to)
+  let op17 = QueuedRequest("req-17", "", reply_to)
   let _result = queue_operation(state, op17)
 
   // Original state should still have exactly 16
