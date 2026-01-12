@@ -259,6 +259,7 @@ fn decode_success_response(
 
 /// Decode error response.
 /// Tolerant: request_id may be in response or at top level.
+/// Tolerant: error text may be in "error" or "message" field.
 fn decode_error_response(
   raw: Dynamic,
   response: Dynamic,
@@ -268,17 +269,34 @@ fn decode_error_response(
   case request_id {
     None -> Error(MissingField("request_id"))
     Some(req_id) -> {
-      // Get the error message
-      let error_decoder = {
-        use error <- decode.field("error", decode.string)
-        decode.success(error)
+      // Get the error message - try "error" field first, then "message" for tolerance
+      let error_msg = get_error_message(response)
+      case error_msg {
+        None -> Error(MissingField("response.error or response.message"))
+        Some(msg) ->
+          Ok(ControlResponse(ControlError(request_id: req_id, message: msg)))
       }
-      case decode.run(response, error_decoder) {
-        Error(_) -> Error(MissingField("response.error"))
-        Ok(error_msg) ->
-          Ok(
-            ControlResponse(ControlError(request_id: req_id, message: error_msg)),
-          )
+    }
+  }
+}
+
+/// Helper to get error message from "error" or "message" field (tolerant).
+fn get_error_message(response: Dynamic) -> Option(String) {
+  let error_decoder = {
+    use error <- decode.field("error", decode.string)
+    decode.success(error)
+  }
+  case decode.run(response, error_decoder) {
+    Ok(msg) -> Some(msg)
+    Error(_) -> {
+      // Try "message" field as fallback
+      let message_decoder = {
+        use msg <- decode.field("message", decode.string)
+        decode.success(msg)
+      }
+      case decode.run(response, message_decoder) {
+        Ok(msg) -> Some(msg)
+        Error(_) -> None
       }
     }
   }

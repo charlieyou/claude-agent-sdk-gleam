@@ -135,6 +135,19 @@ pub fn decode_success_with_toplevel_request_id_test() {
   }
 }
 
+// Test tolerant decoding: error response with "message" field instead of "error"
+pub fn decode_error_response_with_message_field_test() {
+  let json =
+    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"error\",\"request_id\":\"req_3\",\"message\":\"Alt error format\"}}"
+  case decode_line(json) {
+    Ok(ControlResponse(ControlError(req_id, err_message))) -> {
+      req_id |> should.equal("req_3")
+      err_message |> should.equal("Alt error format")
+    }
+    _ -> should.fail()
+  }
+}
+
 // ============================================================================
 // Regular Message Decoding Tests
 // ============================================================================
