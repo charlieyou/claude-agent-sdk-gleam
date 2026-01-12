@@ -21,6 +21,7 @@
 /// gleam test
 /// ```
 import claude_agent_sdk
+import claude_agent_sdk/error.{error_to_string}
 import claude_agent_sdk/message.{System}
 import claude_agent_sdk/options.{AcceptEdits, BypassPermissions, Default}
 import e2e/helpers.{consume_stream, skip_if_no_e2e}
@@ -83,11 +84,8 @@ pub fn sdk_21_max_turns_test() {
 
       case claude_agent_sdk.query("Say hello", opts) {
         Error(err) -> {
-          // Expected in environments without valid API key/CLI
-          io.println(
-            "[SKIP] query() failed (expected in some envs): "
-            <> string.inspect(err),
-          )
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
         }
         Ok(stream) -> {
           let result = consume_stream(stream)
@@ -122,11 +120,8 @@ pub fn sdk_22_max_budget_test() {
 
       case claude_agent_sdk.query("Hello", opts) {
         Error(err) -> {
-          // Expected in environments without valid API key/CLI
-          io.println(
-            "[SKIP] query() failed (expected in some envs): "
-            <> string.inspect(err),
-          )
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
         }
         Ok(stream) -> {
           let result = consume_stream(stream)
@@ -195,11 +190,8 @@ pub fn sdk_24_allowed_tools_test() {
 
       case claude_agent_sdk.query("Hello", opts) {
         Error(err) -> {
-          // Expected in environments without valid API key/CLI
-          io.println(
-            "[SKIP] query() failed (expected in some envs): "
-            <> string.inspect(err),
-          )
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
         }
         Ok(stream) -> {
           // Consume stream and find SystemMessage (handles WarningEvent first)
@@ -264,11 +256,8 @@ pub fn sdk_25_disallowed_tools_test() {
 
       case claude_agent_sdk.query("Hello", opts) {
         Error(err) -> {
-          // Expected in environments without valid API key/CLI
-          io.println(
-            "[SKIP] query() failed (expected in some envs): "
-            <> string.inspect(err),
-          )
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
         }
         Ok(stream) -> {
           // Consume stream and find SystemMessage (handles WarningEvent first)
