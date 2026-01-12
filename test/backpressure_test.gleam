@@ -61,14 +61,14 @@ fn make_pending_request(id: String) -> PendingRequest {
   )
 }
 
-/// Create a PendingHook with given callback ID.
+/// Create a PendingHook with given ID (used as request_id for map key).
 /// Uses stub values for task_pid and monitor_ref since they're only needed for running hooks.
-fn make_pending_hook(_id: String) -> PendingHook {
+fn make_pending_hook(id: String) -> PendingHook {
   PendingHook(
     task_pid: stub_pid(),
     monitor_ref: stub_monitor(),
-    callback_id: "test",
-    request_id: "req-test",
+    callback_id: "cb-" <> id,
+    request_id: "req-" <> id,
     received_at: 0,
   )
 }

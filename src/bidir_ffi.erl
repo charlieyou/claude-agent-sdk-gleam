@@ -41,14 +41,22 @@ cancel_timer(TimerRef) ->
 %% Spawn a linked task to execute a hook callback.
 %%
 %% Spawns a new process that:
-%% 1. Executes the handler function with the input
+%% 1. Executes the handler function with the input (with crash protection)
 %% 2. Sends {hook_done, RequestId, Result} back to the parent
+%%
+%% On crash, sends {hook_error, RequestId, Reason} instead of {hook_done, ...}
+%% to allow the GenServer to handle failures gracefully.
 %%
 %% Returns {Pid, MonitorRef} tuple for tracking.
 spawn_hook_task(Parent, RequestId, Handler, Input) ->
     Pid = erlang:spawn_link(fun() ->
-        Result = Handler(Input),
-        Parent ! {hook_done, RequestId, Result}
+        try
+            Result = Handler(Input),
+            Parent ! {hook_done, RequestId, Result}
+        catch
+            _Class:Reason:_Stack ->
+                Parent ! {hook_error, RequestId, Reason}
+        end
     end),
     MonitorRef = erlang:monitor(process, Pid),
     {Pid, MonitorRef}.

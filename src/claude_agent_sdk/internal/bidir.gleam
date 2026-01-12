@@ -457,6 +457,8 @@ pub type ActorMessage {
   RequestTimeoutFired(request_id: String)
   /// Hook task completed with result.
   HookDone(request_id: String, result: Dynamic)
+  /// Hook task crashed with error.
+  HookError(request_id: String, reason: Dynamic)
 }
 
 /// Responses from synchronous operations.
@@ -595,9 +597,11 @@ fn start_internal(
       // 2. Init timeout message {init_timeout, nil} (via select_record)
       // 3. Request timeout message {request_timeout, request_id} (via select_record)
       // 4. Hook done message {hook_done, request_id, result} (via select_record)
+      // 5. Hook error message {hook_error, request_id, reason} (via select_record)
       let init_timeout_tag = atom.create("init_timeout")
       let request_timeout_tag = atom.create("request_timeout")
       let hook_done_tag = atom.create("hook_done")
+      let hook_error_tag = atom.create("hook_error")
       let selector =
         process.new_selector()
         |> process.select_map(self_subject, fn(msg) { msg })
@@ -638,6 +642,26 @@ fn start_internal(
               Error(_) -> dynamic.nil()
             }
             HookDone(request_id, result)
+          },
+        )
+        |> process.select_record(
+          hook_error_tag,
+          2,
+          fn(msg_dyn: Dynamic) -> ActorMessage {
+            // msg_dyn = {hook_error, RequestId, Reason} (3-element tuple)
+            let request_id = case
+              decode.run(msg_dyn, decode.at([1], decode.string))
+            {
+              Ok(id) -> id
+              Error(_) -> "unknown"
+            }
+            let reason = case
+              decode.run(msg_dyn, decode.at([2], decode.dynamic))
+            {
+              Ok(r) -> r
+              Error(_) -> dynamic.nil()
+            }
+            HookError(request_id, reason)
           },
         )
 
@@ -773,6 +797,9 @@ fn handle_message(
     HookDone(request_id, result) -> {
       handle_hook_done(state, request_id, result)
     }
+    HookError(request_id, _reason) -> {
+      handle_hook_error(state, request_id)
+    }
   }
 }
 
@@ -793,6 +820,35 @@ fn handle_hook_done(
 
       // Send success response to CLI
       let response = HookResponse(request_id, HookSuccess(result))
+      send_control_response(state, response)
+
+      // Remove from pending_hooks
+      let new_pending = dict.delete(state.pending_hooks, request_id)
+      actor.continue(SessionState(..state, pending_hooks: new_pending))
+    }
+    Error(Nil) -> {
+      // Already handled (timeout won), ignore
+      actor.continue(state)
+    }
+  }
+}
+
+/// Handle hook task crash/error.
+///
+/// Called when a spawned hook task crashes. Sends a fail-open response
+/// to the CLI to prevent hanging, then cleans up the pending hook entry.
+fn handle_hook_error(
+  state: SessionState,
+  request_id: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  case dict.get(state.pending_hooks, request_id) {
+    Ok(pending) -> {
+      // Demonitor the task (cleanup)
+      demonitor_hook(pending.monitor_ref)
+
+      // Send fail-open response to CLI (allow continuation despite error)
+      let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
+      let response = HookResponse(request_id, HookSuccess(fail_open_result))
       send_control_response(state, response)
 
       // Remove from pending_hooks
@@ -1073,33 +1129,47 @@ fn dispatch_hook_callback(
   callback_id: String,
   input: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case dict.get(state.hooks.handlers, callback_id) {
-    Ok(handler) -> {
-      // Spawn a task to execute the handler asynchronously
-      // The task will send HookDone message back when complete
-      let parent_pid = process.self()
-      let #(task_pid, monitor_ref) =
-        spawn_hook_task(parent_pid, request_id, handler, input)
-
-      // Record the pending hook
-      let pending =
-        PendingHook(
-          task_pid: task_pid,
-          monitor_ref: monitor_ref,
-          callback_id: callback_id,
-          request_id: request_id,
-          received_at: 0,
-        )
-      let new_pending = dict.insert(state.pending_hooks, request_id, pending)
-      actor.continue(SessionState(..state, pending_hooks: new_pending))
-    }
-    Error(Nil) -> {
-      // Unknown callback_id - send fail-open success response
-      // This allows the CLI to proceed rather than hang waiting for a response
+  // Check backpressure limit before spawning task
+  case dict.size(state.pending_hooks) >= max_pending_hooks {
+    True -> {
+      // At capacity - send fail-open response without spawning
       let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
       let response = HookResponse(request_id, HookSuccess(fail_open_result))
       send_control_response(state, response)
       actor.continue(state)
+    }
+    False -> {
+      case dict.get(state.hooks.handlers, callback_id) {
+        Ok(handler) -> {
+          // Spawn a task to execute the handler asynchronously
+          // The task will send HookDone message back when complete
+          let parent_pid = process.self()
+          let #(task_pid, monitor_ref) =
+            spawn_hook_task(parent_pid, request_id, handler, input)
+
+          // Record the pending hook
+          let pending =
+            PendingHook(
+              task_pid: task_pid,
+              monitor_ref: monitor_ref,
+              callback_id: callback_id,
+              request_id: request_id,
+              received_at: 0,
+            )
+          let new_pending =
+            dict.insert(state.pending_hooks, request_id, pending)
+          actor.continue(SessionState(..state, pending_hooks: new_pending))
+        }
+        Error(Nil) -> {
+          // Unknown callback_id - send fail-open success response
+          // This allows the CLI to proceed rather than hang waiting for a response
+          let fail_open_result =
+            to_dynamic(dict.from_list([#("continue", True)]))
+          let response = HookResponse(request_id, HookSuccess(fail_open_result))
+          send_control_response(state, response)
+          actor.continue(state)
+        }
+      }
     }
   }
 }
@@ -1637,7 +1707,7 @@ pub fn add_pending_request(
 /// should be sent to CLI without spawning a handler task.
 pub fn add_pending_hook(
   state: SessionState,
-  callback_id: String,
+  _callback_id: String,
   hook: PendingHook,
 ) -> #(SessionState, Option(String)) {
   case dict.size(state.pending_hooks) >= max_pending_hooks {
@@ -1662,7 +1732,8 @@ pub fn add_pending_hook(
     False -> #(
       SessionState(
         ..state,
-        pending_hooks: dict.insert(state.pending_hooks, callback_id, hook),
+        // Key by request_id for lookup in handle_hook_done
+        pending_hooks: dict.insert(state.pending_hooks, hook.request_id, hook),
       ),
       None,
     )
