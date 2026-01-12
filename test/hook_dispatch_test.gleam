@@ -6,7 +6,7 @@
 /// - control_response sent via BidirRunner.write()
 /// - Unknown callback_id logged and ignored (fail-open)
 import gleam/dict
-import gleam/dynamic.{type Dynamic}
+import gleam/dynamic
 import gleam/erlang/process
 import gleam/string
 import gleeunit/should
@@ -18,7 +18,7 @@ import support/mock_bidir_runner
 
 // FFI for creating Dynamic values
 @external(erlang, "gleam_stdlib", "identity")
-fn to_dynamic(a: a) -> Dynamic
+fn to_dynamic(a: a) -> dynamic.Dynamic
 
 // =============================================================================
 // Hook Dispatch Tests - Happy Path
@@ -29,13 +29,14 @@ pub fn hook_callback_invokes_registered_handler_test() {
   let mock = mock_bidir_runner.new()
 
   // Create a subject to receive callback invocation
-  let callback_receiver: process.Subject(Dynamic) = process.new_subject()
+  let callback_receiver: process.Subject(dynamic.Dynamic) =
+    process.new_subject()
 
   // Create hook config with registered handler
   let hooks =
     HookConfig(
       handlers: dict.from_list([
-        #("hook_0", fn(input: Dynamic) -> Dynamic {
+        #("hook_0", fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
           // Send the input to our receiver for verification
           process.send(callback_receiver, input)
           // Return a success result (will be wrapped in HookSuccess)
@@ -139,7 +140,7 @@ pub fn hook_callback_response_has_correct_structure_test() {
   let hooks =
     HookConfig(
       handlers: dict.from_list([
-        #("test_hook", fn(_input: Dynamic) -> Dynamic {
+        #("test_hook", fn(_input: dynamic.Dynamic) -> dynamic.Dynamic {
           // Return HookSuccess-compatible structure
           to_dynamic(
             dict.from_list([
