@@ -2178,6 +2178,11 @@ pub fn queue_operation(
 /// Add a pending request with backpressure limit.
 ///
 /// Returns Error(TooManyPendingRequests) if at capacity (64).
+///
+/// Note: This helper is primarily for testing. Production code in handle_control_request
+/// and flush_queued_ops performs inline capacity checks and sends RequestError to callers,
+/// since reply_to subjects expect RequestResult (not SessionError).
+@internal
 pub fn add_pending_request(
   state: SessionState,
   request_id: String,
