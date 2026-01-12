@@ -1,4 +1,5 @@
 /// Tests for push-based line buffering (LineBuffer + handle_port_data)
+import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/stream.{
   LineBuffer, Lines, PushBufferOverflow, handle_port_data,
 }
@@ -32,8 +33,8 @@ pub fn multiple_lines_in_chunk_test() {
 
 pub fn oversized_line_rejection_test() {
   let buf = LineBuffer(<<>>)
-  // 11 MB > 10 MB limit
-  let huge = string.repeat("x", 11_000_000)
+  // Exceed max_line_size_bytes (10 MiB = 10,485,760 bytes)
+  let huge = string.repeat("x", constants.max_line_size_bytes + 1)
   let result = handle_port_data(buf, bit_array.from_string(huge))
   should.equal(result, PushBufferOverflow)
 }
@@ -88,12 +89,11 @@ pub fn buffer_accumulates_across_calls_test() {
 }
 
 pub fn overflow_with_existing_buffer_test() {
-  // Start with buffer just under limit
-  let initial = string.repeat("x", 10_000_000)
+  // Start with buffer at exactly max_line_size_bytes (10 MiB)
+  let initial = string.repeat("x", constants.max_line_size_bytes)
   let buf = LineBuffer(bit_array.from_string(initial))
 
-  // Add more data that exceeds limit
-  let extra = string.repeat("y", 1_000_000)
-  let result = handle_port_data(buf, bit_array.from_string(extra))
+  // Add 1 more byte to exceed limit
+  let result = handle_port_data(buf, <<"y":utf8>>)
   should.equal(result, PushBufferOverflow)
 }

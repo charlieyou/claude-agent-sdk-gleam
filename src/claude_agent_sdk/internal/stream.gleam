@@ -80,6 +80,7 @@ pub fn handle_port_data(
 }
 
 /// Extract all complete lines from buffer, accumulating in reverse order.
+/// On ReadError (invalid UTF-8), the invalid line is skipped and processing continues.
 fn extract_all_lines(
   buffer: BitArray,
   acc: List(String),
@@ -89,7 +90,9 @@ fn extract_all_lines(
     #(NeedMoreData, remaining) ->
       Lines(lines: list.reverse(acc), new_buffer: LineBuffer(remaining))
     #(BufferOverflow, _) -> PushBufferOverflow
-    // ReadError and other cases treated as incomplete - keep in buffer
+    // ReadError: invalid UTF-8 line is dropped, continue processing rest
+    #(ReadError(_), rest) -> extract_all_lines(rest, acc)
+    // Other cases (PortClosed, ExitReceived): return accumulated lines
     #(_, remaining) ->
       Lines(lines: list.reverse(acc), new_buffer: LineBuffer(remaining))
   }
