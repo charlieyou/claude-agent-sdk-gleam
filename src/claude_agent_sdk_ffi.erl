@@ -49,6 +49,9 @@ open_port_safe(Executable, Args, WorkingDir) ->
 %% - use_stdio: communicate via stdin/stdout
 %% - stderr_to_stdout: merge stderr into stdout (OTP >= 25 only)
 %% Returns {ok, Port} | {error, Reason}.
+%%
+%% Uses try-with-fallback for stderr_to_stdout detection to handle
+%% non-standard OTP release strings that fail version parsing.
 open_port_bidir(Executable, Args) ->
     ExecStr = binary_to_list(Executable),
     ArgsStr = [binary_to_list(A) || A <- Args],
@@ -60,17 +63,20 @@ open_port_bidir(Executable, Args) ->
         exit_status,
         use_stdio
     ],
-    %% Add stderr_to_stdout if OTP >= 25
-    Opts = case otp_version() of
-        {<<"ok">>, Version} when Version >= 25 ->
-            BaseOpts ++ [stderr_to_stdout];
-        _ ->
-            BaseOpts
-    end,
+    %% Try with stderr_to_stdout first (OTP >= 25), fall back without it
+    OptsWithStderr = BaseOpts ++ [stderr_to_stdout],
     try
-        Port = erlang:open_port({spawn_executable, ExecStr}, Opts),
+        Port = erlang:open_port({spawn_executable, ExecStr}, OptsWithStderr),
         {<<"ok">>, Port}
     catch
+        error:badarg ->
+            %% stderr_to_stdout not supported, retry without it
+            try
+                Port2 = erlang:open_port({spawn_executable, ExecStr}, BaseOpts),
+                {<<"ok">>, Port2}
+            catch
+                error:Reason2 -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason2]))}
+            end;
         error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}
     end.
 
