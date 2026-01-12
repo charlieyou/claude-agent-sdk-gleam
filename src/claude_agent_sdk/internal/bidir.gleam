@@ -45,7 +45,8 @@ import claude_agent_sdk/control.{
   type IncomingMessage, type OutgoingControlRequest,
   type OutgoingControlResponse, type PermissionMode, CanUseTool, ControlRequest,
   ControlResponse, Error as ControlError, HookCallback, HookResponse,
-  HookSuccess, Interrupt, McpMessage, RegularMessage, SetPermissionMode, Success,
+  HookSuccess, Interrupt, McpMessage, RegularMessage, SetModel,
+  SetPermissionMode, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
@@ -234,6 +235,18 @@ pub type SetPermissionModeError {
   SetPermissionModeTimeout
   /// Session was stopped or not running.
   SetPermissionModeSessionStopped
+}
+
+/// Error type for set_model() operation.
+///
+/// Represents the possible failure modes when changing the model.
+pub type SetModelError {
+  /// CLI returned an error response.
+  SetModelCliError(message: String)
+  /// Request timed out (5000ms default).
+  SetModelTimeout
+  /// Session was stopped or not running.
+  SetModelSessionStopped
 }
 
 /// A pending hook callback awaiting SDK response.
@@ -1803,6 +1816,64 @@ pub fn set_permission_mode(
     Ok(RequestTimeout) -> Error(SetPermissionModeTimeout)
     Ok(RequestSessionStopped) -> Error(SetPermissionModeSessionStopped)
     Error(Nil) -> Error(SetPermissionModeTimeout)
+  }
+}
+
+/// Default timeout for set_model operation (5000ms).
+const set_model_timeout_ms: Int = 5000
+
+/// Set the model for the session.
+///
+/// Changes the model used by the CLI for subsequent operations. This is a
+/// synchronous call that blocks until the CLI responds or times out.
+///
+/// ## Model Values
+///
+/// Common values: "sonnet", "opus", "haiku", or full model IDs like
+/// "claude-3-5-sonnet-20241022".
+///
+/// ## Timeout
+///
+/// Uses a 5000ms timeout. Configuration changes should complete quickly.
+///
+/// ## Returns
+///
+/// - `Ok(Nil)` - Model changed successfully
+/// - `Error(SetModelCliError(message))` - CLI returned an error (e.g., invalid model)
+/// - `Error(SetModelTimeout)` - No response within 5000ms
+/// - `Error(SetModelSessionStopped)` - Session is not running
+///
+/// ## Example
+///
+/// ```gleam
+/// case bidir.set_model(session, "sonnet") {
+///   Ok(Nil) -> io.println("Model set to sonnet")
+///   Error(SetModelCliError(msg)) -> io.println("Failed: " <> msg)
+///   Error(SetModelTimeout) -> io.println("Timed out")
+///   Error(SetModelSessionStopped) -> io.println("Session not running")
+/// }
+/// ```
+pub fn set_model(
+  session: Subject(ActorMessage),
+  model: String,
+) -> Result(Nil, SetModelError) {
+  // Generate a request ID for this operation
+  let request_id = generate_request_id()
+  let request = SetModel(request_id, model)
+
+  // Create subject to receive the result
+  let result_subject: Subject(RequestResult) = process.new_subject()
+
+  // Send the request
+  send_control_request(session, request, result_subject)
+
+  // Wait for response with 5000ms timeout
+  case process.receive(result_subject, set_model_timeout_ms) {
+    Ok(RequestSuccess(_)) -> Ok(Nil)
+    Ok(RequestError(message)) -> Error(SetModelCliError(message))
+    Ok(RequestTimeout) -> Error(SetModelTimeout)
+    Ok(RequestSessionStopped) -> Error(SetModelSessionStopped)
+    Error(Nil) -> Error(SetModelTimeout)
   }
 }
 
