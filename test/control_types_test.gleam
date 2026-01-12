@@ -351,33 +351,29 @@ pub fn permission_result_edit_variant_test() {
 pub fn hook_registration_with_filter_test() {
   let reg =
     HookRegistration(hook_id: "h1", event: "pre_tool", filter: Some("Bash"))
-  reg.hook_id |> should.equal("h1")
-  reg.event |> should.equal("pre_tool")
-  reg.filter |> should.equal(Some("Bash"))
+  case reg {
+    HookRegistration(hook_id, event, filter) -> {
+      hook_id |> should.equal("h1")
+      event |> should.equal("pre_tool")
+      filter |> should.equal(Some("Bash"))
+    }
+  }
 }
 
 pub fn hook_registration_without_filter_test() {
   let reg = HookRegistration(hook_id: "h2", event: "on_message", filter: None)
-  reg.hook_id |> should.equal("h2")
-  reg.event |> should.equal("on_message")
-  reg.filter |> should.equal(None)
+  case reg {
+    HookRegistration(hook_id, event, filter) -> {
+      hook_id |> should.equal("h2")
+      event |> should.equal("on_message")
+      filter |> should.equal(None)
+    }
+  }
 }
-
 // ============================================================================
-// Decoder Placeholder Test (Intentionally Failing)
+// Decoder Placeholder (casg-de0.4)
 // ============================================================================
-
-/// Placeholder test for decode_line function.
-/// This test is intentionally failing because the decoder is not yet implemented.
-/// The decoder will be implemented in casg-de0.4.
-pub fn decode_line_returns_correct_variant_test() {
-  // This test will fail because decode_line doesn't exist yet.
-  // When casg-de0.4 is implemented, this test should:
-  // 1. Take a JSON line string
-  // 2. Call decode_line(json_string)
-  // 3. Assert it returns the correct IncomingMessage variant
-
-  // For now, we use should.fail() to indicate this is a placeholder
-  // that needs implementation.
-  should.fail()
-}
+// decode_line tests will be added when the decoder is implemented in casg-de0.4.
+// The decoder should:
+// 1. Take a JSON line string
+// 2. Return the correct IncomingMessage variant
