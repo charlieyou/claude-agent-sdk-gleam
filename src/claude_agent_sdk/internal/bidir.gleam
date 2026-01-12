@@ -1153,11 +1153,12 @@ pub fn add_pending_hook(
 ) -> #(SessionState, Option(String)) {
   case dict.size(state.pending_hooks) >= max_pending_hooks {
     True -> {
-      // Return immediate fail-open response without adding to map
+      // Return immediate fail-open response using hook.request_id for correlation
+      // Format matches control_encoder output for HookSuccess with continue:true
       let response =
-        "{\"type\":\"hook_response\",\"callback_id\":\""
-        <> callback_id
-        <> "\",\"result\":{\"continue\":true},\"error\":\"backpressure: too many pending hooks (max 32)\"}"
+        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\""
+        <> hook.request_id
+        <> "\",\"response\":{\"continue\":true}}}"
       #(state, Some(response))
     }
     False -> #(
