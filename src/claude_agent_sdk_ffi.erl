@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1, otp_version/0, check_stderr_support/0]).
+-export([open_port/3, open_port_safe/3, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1, otp_version/0, check_stderr_support/0, exact_equals/2]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -185,3 +185,9 @@ check_stderr_support() ->
             %% Cannot determine version, assume unsupported
             {<<"supported">>, false}
     end.
+
+%% Exact equality comparison for Dynamic values.
+%% Returns true if A =:= B (exact equality), false otherwise.
+%% Used for comparing port references in decoded messages.
+exact_equals(A, B) ->
+    A =:= B.
