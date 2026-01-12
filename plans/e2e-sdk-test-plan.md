@@ -619,12 +619,12 @@ None—this replaces internal test implementation, not public API.
 | Old Test | Coverage | New Test(s) |
 |----------|----------|-------------|
 | E2E-01 (preflight) | CLI discovery | SDK-01 (implicit), SDK-60 |
-| E2E-02 (version) | Version check | SDK-01 (implicit via SDK version check) |
-| E2E-03 (auth) | Authentication | SDK-61 |
-| E2E-04 (basic query) | Basic streaming | SDK-01, SDK-02 |
-| E2E-05 (options) | Options passthrough | SDK-20 through SDK-28 |
-| E2E-06 (multi-turn) | Conversation flow | SDK-03 |
-| E2E-07 (resume) | Session resume | SDK-04 |
+| E2E-02 (simple query) | Basic streaming | SDK-01, SDK-02 |
+| E2E-03 (ndjson purity) | NDJSON validation | SDK-01 (implicit) |
+| E2E-04 (session resume) | Session resume | SDK-04 |
+| E2E-05 (version edge cases) | Version edge cases | SDK-01 (implicit) |
+| E2E-06 (auth missing) | Auth error handling | SDK-61 |
+| E2E-07 (cli missing) | CLI error handling | SDK-60 |
 | E2E-08a (delayed-exit) | Delayed exit handling | SDK-62 (`sdk_62_delayed_exit_test`) |
 | E2E-08b (timeout) | Stream timeout handling | SDK-62 (`sdk_62_timeout_test`) |
 
