@@ -8,8 +8,8 @@ import gleam/erlang/process
 import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
-  type Message, type SessionLifecycle, Failed, InitSent, Pong, Running, Starting,
-  Stopped,
+  type SessionLifecycle, type SubscriberMessage, Failed, InitSent, Pong, Running,
+  Starting, Stopped,
 }
 import support/mock_bidir_runner
 
@@ -52,7 +52,7 @@ pub fn actor_responds_to_ping_test() {
   let mock = mock_bidir_runner.new()
 
   // Create subscriber for messages
-  let subscriber: process.Subject(Message) = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config = bidir.default_config(subscriber)
 
   // Start the actor
@@ -68,7 +68,7 @@ pub fn actor_returns_lifecycle_state_test() {
   let mock = mock_bidir_runner.new()
 
   // Create subscriber for messages
-  let subscriber: process.Subject(Message) = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config = bidir.default_config(subscriber)
 
   // Start the actor
@@ -88,7 +88,7 @@ pub fn session_state_can_be_constructed_test() {
   let mock = mock_bidir_runner.new()
 
   // Create subscriber for messages
-  let subscriber: process.Subject(Message) = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config = bidir.default_config(subscriber)
 
   // Verify we can start (which creates SessionState internally)
@@ -97,7 +97,7 @@ pub fn session_state_can_be_constructed_test() {
 }
 
 pub fn default_config_sets_timeout_test() {
-  let subscriber: process.Subject(Message) = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config = bidir.default_config(subscriber)
 
   // Default timeout should be 60 seconds
@@ -113,8 +113,8 @@ pub fn can_start_multiple_sessions_test() {
   let mock1 = mock_bidir_runner.new()
   let mock2 = mock_bidir_runner.new()
 
-  let subscriber1: process.Subject(Message) = process.new_subject()
-  let subscriber2: process.Subject(Message) = process.new_subject()
+  let subscriber1: process.Subject(SubscriberMessage) = process.new_subject()
+  let subscriber2: process.Subject(SubscriberMessage) = process.new_subject()
 
   let config1 = bidir.default_config(subscriber1)
   let config2 = bidir.default_config(subscriber2)
@@ -135,7 +135,7 @@ pub fn actor_can_shutdown_test() {
   let mock = mock_bidir_runner.new()
 
   // Create subscriber for messages
-  let subscriber: process.Subject(Message) = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config = bidir.default_config(subscriber)
 
   // Start the actor

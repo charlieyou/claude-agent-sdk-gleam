@@ -13,6 +13,12 @@
 /// - Dispatches hook callbacks to registered handlers
 /// - Manages pending operations and queued messages
 ///
+/// ## Current Status: Skeleton
+///
+/// This is the initial skeleton implementation with type definitions and stubs.
+/// Port message handling and selector configuration will be added in subsequent
+/// tasks (T2: Lifecycle state machine, T3: Port message routing).
+///
 /// ## Usage
 ///
 /// ```gleam
@@ -144,6 +150,21 @@ pub type CliCapabilities {
 }
 
 // =============================================================================
+// Subscriber Notifications
+// =============================================================================
+
+/// Messages sent to subscribers when CLI events occur.
+///
+/// This is the public notification type - subscribers receive these messages
+/// to observe session events. Internal port handling uses a separate type.
+pub type SubscriberMessage {
+  /// A parsed message from the CLI.
+  CliMessage(Dynamic)
+  /// Session has stopped (clean or with error).
+  SessionStopped(reason: Option(String))
+}
+
+// =============================================================================
 // Session State
 // =============================================================================
 
@@ -172,7 +193,7 @@ pub type SessionState {
     /// Counter for generating callback IDs.
     next_callback_id: Int,
     /// Subject for sending messages to subscriber.
-    subscriber: Subject(Message),
+    subscriber: Subject(SubscriberMessage),
     /// CLI capabilities (populated after init response).
     capabilities: Option(CliCapabilities),
     /// Default timeout for control requests (ms).
@@ -186,22 +207,11 @@ pub type SessionState {
 // Actor Messages
 // =============================================================================
 
-/// Messages the session actor can receive.
-///
-/// External messages (from callers) and internal messages (from port).
-pub type Message {
-  /// Shutdown the session gracefully.
-  Shutdown
-  /// A regular message from the CLI (for subscriber).
-  CliMessage(Dynamic)
-  /// Internal: port data received.
-  PortData(BitArray)
-  /// Internal: port exited.
-  PortExit(Int)
-}
-
 /// Messages sent to the actor for synchronous operations.
 /// Each variant that needs a reply includes a reply_to Subject.
+///
+/// Note: Port messages will be handled via selector in future implementation.
+/// This skeleton focuses on the call/cast interface.
 pub type ActorMessage {
   /// Get current lifecycle state.
   GetLifecycle(reply_to: Subject(SessionLifecycle))
@@ -232,8 +242,8 @@ pub type StartError {
 /// Start configuration for a session.
 pub type StartConfig {
   StartConfig(
-    /// Subject to receive messages.
-    subscriber: Subject(Message),
+    /// Subject to receive subscriber messages.
+    subscriber: Subject(SubscriberMessage),
     /// Default timeout for requests (ms).
     default_timeout_ms: Int,
     /// Hook timeouts per event.
@@ -242,7 +252,7 @@ pub type StartConfig {
 }
 
 /// Create a default start configuration.
-pub fn default_config(subscriber: Subject(Message)) -> StartConfig {
+pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
   StartConfig(
     subscriber: subscriber,
     default_timeout_ms: 60_000,
@@ -254,6 +264,13 @@ pub fn default_config(subscriber: Subject(Message)) -> StartConfig {
 ///
 /// The runner must already be started (port spawned). This function creates
 /// the actor that will manage the session lifecycle.
+///
+/// ## Port Ownership Note
+///
+/// In the current skeleton, the runner is passed in for testing purposes.
+/// The full implementation (T3) will use `new_with_initialiser` to spawn
+/// the port inside the actor's init function, ensuring proper port ownership.
+/// Mock runners work correctly because they don't use real port messages.
 pub fn start(
   runner: BidirRunner,
   config: StartConfig,
@@ -276,6 +293,7 @@ pub fn start(
     )
 
   // Use the Builder pattern for gleam_otp 1.x
+  // Note: Port selector will be added in T3 using new_with_initialiser
   let builder =
     actor.new(initial_state)
     |> actor.on_message(handle_message)
@@ -304,7 +322,9 @@ fn handle_message(
     }
     ShutdownActor -> {
       // Clean shutdown - close the runner
-      state.runner.close()
+      // BidirRunner.close is a function field: fn() -> Nil
+      let close_fn = state.runner.close
+      close_fn()
       actor.stop()
     }
   }
