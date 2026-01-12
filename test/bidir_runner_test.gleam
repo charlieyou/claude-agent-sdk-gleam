@@ -247,7 +247,7 @@ pub fn mock_write_error_test() {
   }
 }
 
-/// mock() port field is usable for pattern matching with decode_port_message.
+/// mock() port field is usable for pattern matching and distinct between instances.
 pub fn mock_port_is_usable_test() {
   let runner =
     bidir_runner.mock(on_write: fn(_) { Ok(Nil) }, on_close: fn() { Nil })
