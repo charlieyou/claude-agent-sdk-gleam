@@ -140,6 +140,12 @@ pub const with_hook_timeout = options.with_hook_timeout
 /// Set a factory function for creating BidirRunner instances (testing seam).
 pub const with_bidir_runner_factory = options.with_bidir_runner_factory
 
+/// Add an MCP server handler.
+pub const with_mcp_server = options.with_mcp_server
+
+/// Enable file checkpointing for rewind_files support.
+pub const with_file_checkpointing = options.with_file_checkpointing
+
 // =============================================================================
 // Message Types (from message.gleam)
 // =============================================================================

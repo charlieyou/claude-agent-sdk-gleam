@@ -43,6 +43,7 @@ import claude_agent_sdk/hook.{
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 import claude_agent_sdk/runner.{type Runner}
 import gleam/dict.{type Dict}
+import gleam/dynamic
 import gleam/option.{type Option, None, Some}
 
 /// Permission mode for controlling tool execution behavior.
@@ -104,6 +105,12 @@ pub type QueryOptions {
     on_subagent_stop: Option(fn(SubagentStopContext) -> HookExecutionResult),
     on_pre_compact: Option(fn(PreCompactContext) -> HookExecutionResult),
     on_can_use_tool: Option(fn(CanUseToolContext) -> PermissionCheckResult),
+    // --- MCP server configuration (for bidirectional mode) ---
+    /// List of MCP servers configured via with_mcp_server. Each entry is (name, handler).
+    mcp_servers: List(#(String, fn(dynamic.Dynamic) -> dynamic.Dynamic)),
+    // --- File checkpointing configuration ---
+    /// Whether file checkpointing is enabled for rewind_files support.
+    file_checkpointing_enabled: Bool,
     // --- Timeout configuration ---
     /// Global timeout in milliseconds for operations. Applied in GenServer.
     timeout_ms: Result(Int, Nil),
@@ -156,6 +163,8 @@ pub fn default_options() -> QueryOptions {
     on_subagent_stop: None,
     on_pre_compact: None,
     on_can_use_tool: None,
+    mcp_servers: [],
+    file_checkpointing_enabled: False,
     timeout_ms: Error(Nil),
     hook_timeouts: dict.new(),
     bidir_runner_factory: Error(Nil),
@@ -606,6 +615,59 @@ pub fn with_can_use_tool(
   callback: fn(CanUseToolContext) -> PermissionCheckResult,
 ) -> QueryOptions {
   QueryOptions(..options, on_can_use_tool: Some(callback))
+}
+
+// =============================================================================
+// MCP Server Builders
+// =============================================================================
+
+/// Add an MCP server handler.
+///
+/// Adds an MCP server to the list of SDK-hosted MCP servers. Multiple calls
+/// accumulate servers in the list. The handler receives MCP requests and
+/// returns responses.
+///
+/// ## Parameters
+///
+/// - `name`: Unique name for the MCP server
+/// - `handler`: Function receiving MCP requests (Dynamic) and returning responses (Dynamic)
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_mcp_server("my-tools", fn(request) {
+///     // Handle MCP request and return response
+///     dynamic.from(Nil)
+///   })
+///   |> with_mcp_server("data-server", my_data_handler)
+/// ```
+pub fn with_mcp_server(
+  options: QueryOptions,
+  name: String,
+  handler: fn(dynamic.Dynamic) -> dynamic.Dynamic,
+) -> QueryOptions {
+  let new_servers = [#(name, handler), ..options.mcp_servers]
+  QueryOptions(..options, mcp_servers: new_servers)
+}
+
+// =============================================================================
+// File Checkpointing Builder
+// =============================================================================
+
+/// Enable file checkpointing for rewind_files support.
+///
+/// When enabled, the CLI tracks file changes made during the session,
+/// allowing them to be reverted using `rewind_files()`.
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_file_checkpointing()
+/// ```
+pub fn with_file_checkpointing(options: QueryOptions) -> QueryOptions {
+  QueryOptions(..options, file_checkpointing_enabled: True)
 }
 
 // =============================================================================
