@@ -12,13 +12,13 @@ import claude_agent_sdk.{
 import claude_agent_sdk/error
 
 // =============================================================================
-// TDD Phase 1: Failing Test
+// API Surface Tests (Pass in Phase 1)
 // =============================================================================
 
-/// Test that start_session compiles and returns the expected error.
+/// Test that start_session compiles and returns the expected stub error.
 ///
-/// This test verifies the API surface is correct. It expects NotImplemented
-/// error since the actual implementation will be added in Epic 8.
+/// This test verifies the API surface is correct and the stub returns
+/// NotImplemented. It passes in Phase 1 (API skeleton).
 pub fn start_session_returns_not_implemented_test() {
   let options = default_options()
 
@@ -75,28 +75,26 @@ pub fn session_type_accessible_test() {
   // If this compiles, the types are correctly exported
   should.be_true(True)
 }
-/// Test that start_session returns Ok(Session) when fully implemented.
-///
-/// THIS TEST IS EXPECTED TO FAIL in TDD Phase 1.
-/// It will pass once Epic 8 implementation is complete.
-///
-/// Uncomment this test when ready to implement:
+
 // =============================================================================
-// TDD Phase 2: Success Test (Expected to Fail Until Implementation)
+// TDD Phase 1: Failing Test (Expects Ok but gets NotImplemented)
 // =============================================================================
 
-// pub fn start_session_succeeds_test() {
-//   let options = default_options()
-//
-//   case start_session("Hello, Claude!", options) {
-//     Ok(_session) -> {
-//       // Success - session was created
-//       should.be_true(True)
-//     }
-//     Error(err) -> {
-//       // Should not fail once implemented
-//       io.debug(#("Unexpected error", err))
-//       should.fail()
-//     }
-//   }
-// }
+/// Test that start_session returns Ok(Session) when fully implemented.
+///
+/// THIS TEST FAILS in TDD Phase 1 because start_session returns NotImplemented.
+/// It will pass once the actual implementation is complete (Epic 8).
+pub fn start_session_succeeds_test() {
+  let options = default_options()
+
+  case start_session("Hello, Claude!", options) {
+    Ok(_session) -> {
+      // Success - session was created
+      should.be_true(True)
+    }
+    Error(_err) -> {
+      // Should not fail once implemented
+      should.fail()
+    }
+  }
+}
