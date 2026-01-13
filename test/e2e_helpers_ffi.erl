@@ -1,5 +1,6 @@
 -module(e2e_helpers_ffi).
--export([get_env/1, set_env/2, unset_env/1, get_plain_args/0, kill_pid/1, acquire_lock/0, release_lock/0]).
+-export([get_env/1, set_env/2, unset_env/1, get_plain_args/0, kill_pid/1, acquire_lock/0, release_lock/0,
+         get_timestamp_iso8601/0, get_monotonic_ms/0, ensure_dir/1, append_line/2]).
 
 -define(LOCK_TABLE, e2e_query_lock_table).
 
@@ -70,3 +71,31 @@ release_lock() ->
     ensure_lock_table(),
     ets:delete(?LOCK_TABLE, lock),
     nil.
+
+%% Get current timestamp as ISO8601 binary string.
+get_timestamp_iso8601() ->
+    {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
+    Ms = erlang:system_time(millisecond) rem 1000,
+    list_to_binary(io_lib:format("~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
+                                  [Y, Mo, D, H, Mi, S, Ms])).
+
+%% Get monotonic time in milliseconds for elapsed calculations.
+get_monotonic_ms() ->
+    erlang:monotonic_time(millisecond).
+
+%% Ensure directory exists (recursive mkdir -p).
+ensure_dir(Path) ->
+    PathStr = binary_to_list(Path),
+    case filelib:ensure_dir(PathStr ++ "/") of
+        ok -> {ok, nil};
+        {error, Reason} -> {error, list_to_binary(atom_to_list(Reason))}
+    end.
+
+%% Append a line to a file (creates if not exists).
+append_line(Path, Line) ->
+    PathStr = binary_to_list(Path),
+    LineWithNewline = <<Line/binary, "\n">>,
+    case file:write_file(PathStr, LineWithNewline, [append]) of
+        ok -> {ok, nil};
+        {error, Reason} -> {error, list_to_binary(atom_to_list(Reason))}
+    end.

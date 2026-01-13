@@ -4,6 +4,7 @@
 /// - Test skipping based on CLI flags
 /// - Stream consumption utilities
 /// - Protocol invariant assertions
+/// - Structured logging and artifact generation
 import claude_agent_sdk
 import claude_agent_sdk/error.{EndOfStream, Message, WarningEvent}
 import claude_agent_sdk/message.{
@@ -12,8 +13,12 @@ import claude_agent_sdk/message.{
 import gleam/dynamic
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/int
+import gleam/io
+import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/string
 
 /// Convert Result to Option (helper to avoid qualified module reference).
 fn option_from_result(result: Result(a, b)) -> Option(a) {
@@ -81,6 +86,259 @@ fn acquire_query_lock() -> Nil
 /// Release global lock for serialized CLI queries.
 @external(erlang, "e2e_helpers_ffi", "release_lock")
 fn release_query_lock() -> Nil
+
+/// Get current timestamp as ISO8601 string.
+@external(erlang, "e2e_helpers_ffi", "get_timestamp_iso8601")
+fn get_timestamp_iso8601() -> String
+
+/// Get monotonic time in milliseconds.
+@external(erlang, "e2e_helpers_ffi", "get_monotonic_ms")
+fn get_monotonic_ms() -> Int
+
+/// Ensure directory exists (recursive).
+@external(erlang, "e2e_helpers_ffi", "ensure_dir")
+fn ensure_dir(path: String) -> Result(Nil, String)
+
+/// Append a line to a file.
+@external(erlang, "e2e_helpers_ffi", "append_line")
+fn append_line(path: String, line: String) -> Result(Nil, String)
+
+// ============================================================================
+// Structured E2E Logging
+// ============================================================================
+
+/// Log levels for structured logging.
+pub type LogLevel {
+  LevelInfo
+  LevelStep
+  LevelError
+  LevelDebug
+}
+
+/// Test context for logging - tracks test identity and log file.
+pub type TestContext {
+  TestContext(
+    /// Unique test identifier (e.g., "sdk_01_basic_query")
+    test_id: String,
+    /// Path to the artifact log file
+    log_path: String,
+    /// Monotonic start time for elapsed calculations
+    start_ms: Int,
+    /// Current step counter
+    step: Int,
+  )
+}
+
+/// Artifacts directory base path.
+const artifacts_base = "artifacts/e2e"
+
+/// Create a new test context and initialize the log file.
+/// Creates the artifact directory and log file for this test.
+pub fn new_test_context(test_id: String) -> TestContext {
+  let timestamp = get_timestamp_iso8601()
+  let date_prefix = string.slice(timestamp, 0, 10)
+  let time_suffix =
+    string.slice(timestamp, 11, 8)
+    |> string.replace(":", "")
+  let log_dir = artifacts_base <> "/" <> date_prefix
+  let log_path = log_dir <> "/" <> test_id <> "-" <> time_suffix <> ".log"
+
+  // Ensure directory exists
+  let _ = ensure_dir(log_dir)
+
+  let ctx =
+    TestContext(
+      test_id: test_id,
+      log_path: log_path,
+      start_ms: get_monotonic_ms(),
+      step: 0,
+    )
+
+  // Log test start
+  let _ =
+    log_structured(ctx, LevelInfo, "test_start", [
+      #("test_id", json.string(test_id)),
+      #("timestamp", json.string(timestamp)),
+    ])
+
+  ctx
+}
+
+/// Increment step counter and return updated context.
+pub fn next_step(ctx: TestContext) -> TestContext {
+  TestContext(..ctx, step: ctx.step + 1)
+}
+
+/// Log a structured message at the given level.
+/// Writes to both stdout and the per-test log file.
+fn log_structured(
+  ctx: TestContext,
+  level: LogLevel,
+  event: String,
+  payload: List(#(String, json.Json)),
+) -> Nil {
+  let timestamp = get_timestamp_iso8601()
+  let elapsed_ms = get_monotonic_ms() - ctx.start_ms
+  let level_str = case level {
+    LevelInfo -> "INFO"
+    LevelStep -> "STEP"
+    LevelError -> "ERROR"
+    LevelDebug -> "DEBUG"
+  }
+
+  let base_fields = [
+    #("ts", json.string(timestamp)),
+    #("level", json.string(level_str)),
+    #("test_id", json.string(ctx.test_id)),
+    #("step", json.int(ctx.step)),
+    #("elapsed_ms", json.int(elapsed_ms)),
+    #("event", json.string(event)),
+  ]
+
+  let all_fields = list.append(base_fields, payload)
+  let json_line = json.to_string(json.object(all_fields))
+
+  // Write to stdout (human-readable prefix)
+  io.println(
+    "["
+    <> level_str
+    <> "] "
+    <> ctx.test_id
+    <> ":"
+    <> int.to_string(ctx.step)
+    <> " "
+    <> event,
+  )
+
+  // Write to log file
+  let _ = append_line(ctx.log_path, json_line)
+  Nil
+}
+
+/// Log an informational message.
+pub fn log_info(ctx: TestContext, event: String) -> Nil {
+  log_structured(ctx, LevelInfo, event, [])
+}
+
+/// Log an informational message with payload.
+pub fn log_info_with(
+  ctx: TestContext,
+  event: String,
+  payload: List(#(String, json.Json)),
+) -> Nil {
+  log_structured(ctx, LevelInfo, event, payload)
+}
+
+/// Log a test step (auto-increments step counter).
+/// Returns the updated context with incremented step.
+pub fn test_step(ctx: TestContext, description: String) -> TestContext {
+  let ctx = next_step(ctx)
+  log_structured(ctx, LevelStep, description, [])
+  ctx
+}
+
+/// Log a test step with payload.
+/// Returns the updated context with incremented step.
+pub fn test_step_with(
+  ctx: TestContext,
+  description: String,
+  payload: List(#(String, json.Json)),
+) -> TestContext {
+  let ctx = next_step(ctx)
+  log_structured(ctx, LevelStep, description, payload)
+  ctx
+}
+
+/// Log an error.
+pub fn log_error(ctx: TestContext, event: String, error_msg: String) -> Nil {
+  log_structured(ctx, LevelError, event, [#("error", json.string(error_msg))])
+}
+
+/// Log an error with additional payload.
+pub fn log_error_with(
+  ctx: TestContext,
+  event: String,
+  error_msg: String,
+  payload: List(#(String, json.Json)),
+) -> Nil {
+  let fields = [#("error", json.string(error_msg)), ..payload]
+  log_structured(ctx, LevelError, event, fields)
+}
+
+/// Log a debug message (only written to file, not stdout).
+pub fn log_debug(
+  ctx: TestContext,
+  event: String,
+  payload: List(#(String, json.Json)),
+) -> Nil {
+  let timestamp = get_timestamp_iso8601()
+  let elapsed_ms = get_monotonic_ms() - ctx.start_ms
+
+  let base_fields = [
+    #("ts", json.string(timestamp)),
+    #("level", json.string("DEBUG")),
+    #("test_id", json.string(ctx.test_id)),
+    #("step", json.int(ctx.step)),
+    #("elapsed_ms", json.int(elapsed_ms)),
+    #("event", json.string(event)),
+  ]
+
+  let all_fields = list.append(base_fields, payload)
+  let json_line = json.to_string(json.object(all_fields))
+
+  // Only write to file for debug
+  let _ = append_line(ctx.log_path, json_line)
+  Nil
+}
+
+/// Log stream transcript (list of message types received).
+pub fn log_stream_transcript(
+  ctx: TestContext,
+  messages: List(MessageEnvelope),
+) -> Nil {
+  let transcript =
+    list.map(messages, fn(env) {
+      case env.message {
+        System(_) -> "system"
+        Assistant(_) -> "assistant"
+        User(_) -> "user"
+        Result(_) -> "result"
+      }
+    })
+
+  log_structured(ctx, LevelDebug, "stream_transcript", [
+    #("message_count", json.int(list.length(messages))),
+    #("types", json.array(transcript, json.string)),
+  ])
+}
+
+/// Log test completion (success or failure).
+pub fn log_test_complete(ctx: TestContext, success: Bool, notes: String) -> Nil {
+  let elapsed_ms = get_monotonic_ms() - ctx.start_ms
+  let status = case success {
+    True -> "pass"
+    False -> "fail"
+  }
+
+  log_structured(ctx, LevelInfo, "test_complete", [
+    #("status", json.string(status)),
+    #("total_elapsed_ms", json.int(elapsed_ms)),
+    #("total_steps", json.int(ctx.step)),
+    #("notes", json.string(notes)),
+  ])
+}
+
+/// Log error summary for failed tests (captures key error details).
+pub fn log_error_summary(
+  ctx: TestContext,
+  error_type: String,
+  details: String,
+) -> Nil {
+  log_structured(ctx, LevelError, "error_summary", [
+    #("error_type", json.string(error_type)),
+    #("details", json.string(details)),
+  ])
+}
 
 fn has_e2e_flag() -> Bool {
   case decode.run(get_plain_args(), decode.list(decode.string)) {
