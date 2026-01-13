@@ -281,9 +281,9 @@ pub fn parse_version_string_major_minor_with_trailing_dot_returns_error_test() {
   result |> should.be_error()
 }
 
-pub fn parse_version_string_leading_zeros_test() {
-  // "01.02.03" -> Ok(CliVersion(1,2,3,"1.2.3"))
-  // Leading zeros are parsed as decimal (int.parse handles them)
+pub fn parse_version_string_leading_zeros_preserved_test() {
+  // "01.02.03" -> Ok(CliVersion(1,2,3,"01.02.03"))
+  // Leading zeros are preserved in raw string but parsed as decimal integers
   let result = parse_version_string("01.02.03")
   let assert Ok(CliVersion(major, minor, patch, raw)) = result
   major |> should.equal(1)
@@ -328,8 +328,8 @@ pub fn parse_version_string_negative_prefix_finds_version_test() {
   raw |> should.equal("1.2.3")
 }
 
-pub fn parse_version_string_decimal_version_returns_error_test() {
-  // "1.2.3.4" -> Ok(CliVersion(1,2,3,"1.2.3")) - stops at third component
+pub fn parse_version_string_four_parts_parses_first_three_test() {
+  // "1.2.3.4" -> Ok(CliVersion(1,2,3,"1.2.3")) - parser stops at third component
   let result = parse_version_string("1.2.3.4")
   let assert Ok(CliVersion(major, minor, patch, raw)) = result
   major |> should.equal(1)
@@ -389,21 +389,21 @@ pub fn parse_version_string_very_large_numbers_test() {
 // ============================================================================
 
 pub fn version_meets_minimum_unknown_version_returns_false_test() {
-  // UnknownVersion cannot be compared - should return False
+  // Safety policy: UnknownVersion as version returns False (fail-safe behavior)
   let version = UnknownVersion("garbage output")
   let minimum = CliVersion(1, 0, 0, "1.0.0")
   version_meets_minimum(version, minimum) |> should.be_false()
 }
 
 pub fn version_meets_minimum_unknown_minimum_returns_false_test() {
-  // UnknownVersion as minimum - should return False
+  // Safety policy: UnknownVersion as minimum returns False (fail-safe behavior)
   let version = CliVersion(1, 0, 0, "1.0.0")
   let minimum = UnknownVersion("garbage")
   version_meets_minimum(version, minimum) |> should.be_false()
 }
 
 pub fn version_meets_minimum_both_unknown_returns_false_test() {
-  // Both UnknownVersion - should return False
+  // Safety policy: both UnknownVersion returns False (fail-safe behavior)
   let version = UnknownVersion("output1")
   let minimum = UnknownVersion("output2")
   version_meets_minimum(version, minimum) |> should.be_false()
