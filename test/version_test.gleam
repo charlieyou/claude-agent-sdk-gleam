@@ -218,3 +218,249 @@ pub fn detect_cli_version_nonexistent_path_returns_spawn_failed_test() {
     }
   }
 }
+
+// ============================================================================
+// Additional parse_version_string edge-case tests
+// ============================================================================
+
+pub fn parse_version_string_prerelease_alpha_test() {
+  // "1.0.0-alpha" -> Ok(CliVersion(1,0,0,"1.0.0"))
+  let result = parse_version_string("1.0.0-alpha")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(0)
+  patch |> should.equal(0)
+  raw |> should.equal("1.0.0")
+}
+
+pub fn parse_version_string_prerelease_rc_test() {
+  // "v2.1.0-rc.1" -> Ok(CliVersion(2,1,0,"2.1.0"))
+  let result = parse_version_string("v2.1.0-rc.1")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(2)
+  minor |> should.equal(1)
+  patch |> should.equal(0)
+  raw |> should.equal("2.1.0")
+}
+
+pub fn parse_version_string_build_metadata_test() {
+  // "1.2.3+build.456" -> Ok(CliVersion(1,2,3,"1.2.3"))
+  let result = parse_version_string("1.2.3+build.456")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("1.2.3")
+}
+
+pub fn parse_version_string_prerelease_and_build_metadata_test() {
+  // "3.0.0-beta.2+build.789" -> Ok(CliVersion(3,0,0,"3.0.0"))
+  let result = parse_version_string("3.0.0-beta.2+build.789")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(3)
+  minor |> should.equal(0)
+  patch |> should.equal(0)
+  raw |> should.equal("3.0.0")
+}
+
+pub fn parse_version_string_missing_minor_and_patch_returns_error_test() {
+  // "1" -> Error (only major)
+  let result = parse_version_string("1")
+  result |> should.be_error()
+}
+
+pub fn parse_version_string_major_with_trailing_dot_returns_error_test() {
+  // "1." -> Error
+  let result = parse_version_string("1.")
+  result |> should.be_error()
+}
+
+pub fn parse_version_string_major_minor_with_trailing_dot_returns_error_test() {
+  // "1.2." -> Error (missing patch after dot)
+  let result = parse_version_string("1.2.")
+  result |> should.be_error()
+}
+
+pub fn parse_version_string_leading_zeros_test() {
+  // "01.02.03" -> Ok(CliVersion(1,2,3,"1.2.3"))
+  // Leading zeros are parsed as decimal (int.parse handles them)
+  let result = parse_version_string("01.02.03")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("01.02.03")
+}
+
+pub fn parse_version_string_tab_whitespace_test() {
+  // "\t1.2.3\t" -> Ok (tab whitespace trimmed)
+  let result = parse_version_string("\t1.2.3\t")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("1.2.3")
+}
+
+pub fn parse_version_string_mixed_whitespace_test() {
+  // " \n\t 1.2.3 \r\n " -> Ok (mixed whitespace trimmed)
+  let result = parse_version_string(" \n\t 1.2.3 \r\n ")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("1.2.3")
+}
+
+pub fn parse_version_string_internal_whitespace_returns_error_test() {
+  // "1. 2.3" -> Error (whitespace between version parts)
+  let result = parse_version_string("1. 2.3")
+  result |> should.be_error()
+}
+
+pub fn parse_version_string_negative_prefix_finds_version_test() {
+  // "-1.2.3" -> Ok (parser scans past non-digit prefix and finds version)
+  let result = parse_version_string("-1.2.3")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("1.2.3")
+}
+
+pub fn parse_version_string_decimal_version_returns_error_test() {
+  // "1.2.3.4" -> Ok(CliVersion(1,2,3,"1.2.3")) - stops at third component
+  let result = parse_version_string("1.2.3.4")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("1.2.3")
+}
+
+pub fn parse_version_string_special_chars_returns_error_test() {
+  // "!@#$%^&*()" -> Error
+  let result = parse_version_string("!@#$%^&*()")
+  result |> should.be_error()
+}
+
+pub fn parse_version_string_version_in_path_test() {
+  // "/usr/local/bin/claude-1.2.3" -> Ok (finds version in path)
+  let result = parse_version_string("/usr/local/bin/claude-1.2.3")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(2)
+  patch |> should.equal(3)
+  raw |> should.equal("1.2.3")
+}
+
+pub fn parse_version_string_multiple_versions_takes_first_test() {
+  // "v1.0.0 -> v2.0.0" -> Ok(CliVersion(1,0,0,"1.0.0")) - takes first
+  let result = parse_version_string("v1.0.0 -> v2.0.0")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(1)
+  minor |> should.equal(0)
+  patch |> should.equal(0)
+  raw |> should.equal("1.0.0")
+}
+
+pub fn parse_version_string_zero_versions_test() {
+  // "0.0.0" -> Ok(CliVersion(0,0,0,"0.0.0"))
+  let result = parse_version_string("0.0.0")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(0)
+  minor |> should.equal(0)
+  patch |> should.equal(0)
+  raw |> should.equal("0.0.0")
+}
+
+pub fn parse_version_string_very_large_numbers_test() {
+  // "999.999.999" -> Ok (stress test with large version numbers)
+  let result = parse_version_string("999.999.999")
+  let assert Ok(CliVersion(major, minor, patch, raw)) = result
+  major |> should.equal(999)
+  minor |> should.equal(999)
+  patch |> should.equal(999)
+  raw |> should.equal("999.999.999")
+}
+
+// ============================================================================
+// Additional version_meets_minimum edge-case tests
+// ============================================================================
+
+pub fn version_meets_minimum_unknown_version_returns_false_test() {
+  // UnknownVersion cannot be compared - should return False
+  let version = UnknownVersion("garbage output")
+  let minimum = CliVersion(1, 0, 0, "1.0.0")
+  version_meets_minimum(version, minimum) |> should.be_false()
+}
+
+pub fn version_meets_minimum_unknown_minimum_returns_false_test() {
+  // UnknownVersion as minimum - should return False
+  let version = CliVersion(1, 0, 0, "1.0.0")
+  let minimum = UnknownVersion("garbage")
+  version_meets_minimum(version, minimum) |> should.be_false()
+}
+
+pub fn version_meets_minimum_both_unknown_returns_false_test() {
+  // Both UnknownVersion - should return False
+  let version = UnknownVersion("output1")
+  let minimum = UnknownVersion("output2")
+  version_meets_minimum(version, minimum) |> should.be_false()
+}
+
+pub fn version_meets_minimum_zero_version_test() {
+  // v0.0.0 >= v0.0.0 -> True (edge case with all zeros)
+  let version = CliVersion(0, 0, 0, "0.0.0")
+  let minimum = CliVersion(0, 0, 0, "0.0.0")
+  version_meets_minimum(version, minimum) |> should.be_true()
+}
+
+pub fn version_meets_minimum_zero_below_any_test() {
+  // v0.0.0 >= v0.0.1 -> False
+  let version = CliVersion(0, 0, 0, "0.0.0")
+  let minimum = CliVersion(0, 0, 1, "0.0.1")
+  version_meets_minimum(version, minimum) |> should.be_false()
+}
+
+pub fn version_meets_minimum_large_numbers_test() {
+  // v100.200.300 >= v100.200.299 -> True
+  let version = CliVersion(100, 200, 300, "100.200.300")
+  let minimum = CliVersion(100, 200, 299, "100.200.299")
+  version_meets_minimum(version, minimum) |> should.be_true()
+}
+
+pub fn version_meets_minimum_minor_trumps_patch_test() {
+  // v1.2.0 >= v1.1.99 -> True (minor wins over patch)
+  let version = CliVersion(1, 2, 0, "1.2.0")
+  let minimum = CliVersion(1, 1, 99, "1.1.99")
+  version_meets_minimum(version, minimum) |> should.be_true()
+}
+
+pub fn version_meets_minimum_major_trumps_minor_test() {
+  // v2.0.0 >= v1.99.99 -> True (major wins over minor/patch)
+  let version = CliVersion(2, 0, 0, "2.0.0")
+  let minimum = CliVersion(1, 99, 99, "1.99.99")
+  version_meets_minimum(version, minimum) |> should.be_true()
+}
+
+// ============================================================================
+// format_version_error edge-case tests
+// ============================================================================
+
+pub fn format_version_error_unknown_detected_test() {
+  // UnknownVersion as detected
+  let detected = UnknownVersion("weird output")
+  let required = CliVersion(1, 0, 0, "1.0.0")
+  let msg = format_version_error(detected, required)
+  // Should include the raw output from UnknownVersion
+  msg |> should.not_equal("")
+}
+
+pub fn format_version_error_unknown_required_test() {
+  // UnknownVersion as required (unusual but supported)
+  let detected = CliVersion(0, 9, 0, "0.9.0")
+  let required = UnknownVersion("unknown minimum")
+  let msg = format_version_error(detected, required)
+  msg |> should.not_equal("")
+}
