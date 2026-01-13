@@ -344,3 +344,58 @@ pub fn stream_error_to_string(error: StreamError) -> String {
       "Unexpected message type in: " <> raw_json
   }
 }
+
+// ============================================================================
+// ControlError Type (Control Operation Errors)
+// ============================================================================
+
+/// Errors that can occur during control operations.
+///
+/// ControlError is returned by control operations like `interrupt()`,
+/// `set_permission_mode()`, `set_model()`, and `rewind_files()`.
+pub type ControlError {
+  /// Operation timed out waiting for CLI acknowledgment.
+  ControlTimeout
+  /// Session is closed and cannot accept control operations.
+  ControlSessionClosed
+  /// Placeholder for TDD: control operation is not yet implemented.
+  /// This variant will be removed once the actual implementation is complete.
+  ControlNotImplemented
+}
+
+/// Convert a ControlError to a human-readable string.
+///
+/// Useful for logging or displaying errors to users.
+pub fn control_error_to_string(error: ControlError) -> String {
+  case error {
+    ControlTimeout -> "Control operation timed out"
+    ControlSessionClosed -> "Session is closed"
+    ControlNotImplemented -> "Control operation is not yet implemented"
+  }
+}
+
+// ============================================================================
+// StopError Type (Stop Operation Errors)
+// ============================================================================
+
+/// Errors that can occur when stopping a session.
+///
+/// StopError is returned by `stop()` when the SDK cannot initiate
+/// a graceful session shutdown.
+pub type StopError {
+  /// Session is already closed.
+  StopSessionClosed
+  /// Placeholder for TDD: stop is not yet implemented.
+  /// This variant will be removed once the actual implementation is complete.
+  StopNotImplemented
+}
+
+/// Convert a StopError to a human-readable string.
+///
+/// Useful for logging or displaying errors to users.
+pub fn stop_error_to_string(error: StopError) -> String {
+  case error {
+    StopSessionClosed -> "Session is already closed"
+    StopNotImplemented -> "stop is not yet implemented"
+  }
+}

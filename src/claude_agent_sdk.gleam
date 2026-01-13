@@ -231,11 +231,23 @@ pub type WarningCode =
 pub type StartError =
   error.StartError
 
+pub type ControlError =
+  error.ControlError
+
+pub type StopError =
+  error.StopError
+
 /// Check if a StreamError is terminal (stream closed, no more items)
 pub const is_terminal = error.is_terminal
 
 /// Convert a StartError to a human-readable string
 pub const start_error_to_string = error.start_error_to_string
+
+/// Convert a ControlError to a human-readable string
+pub const control_error_to_string = error.control_error_to_string
+
+/// Convert a StopError to a human-readable string
+pub const stop_error_to_string = error.stop_error_to_string
 
 // =============================================================================
 // Stream Helpers (from claude_agent_sdk/stream.gleam)
@@ -559,4 +571,132 @@ pub fn start_session(
   _options: QueryOptions,
 ) -> Result(Session, StartError) {
   Error(error.NotImplemented)
+}
+
+// =============================================================================
+// Control Operations (Bidirectional Mode)
+// =============================================================================
+
+/// Send interrupt signal to stop current operation.
+///
+/// Blocks up to 5s waiting for CLI acknowledgment.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
+/// The actual implementation will be added in Epic 8.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+///
+/// ## Returns
+///
+/// - `Ok(Nil)`: Interrupt was acknowledged
+/// - `Error(ControlTimeout)`: CLI did not acknowledge within 5s
+/// - `Error(ControlSessionClosed)`: Session is closed
+/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
+pub fn interrupt(_session: Session) -> Result(Nil, ControlError) {
+  Error(error.ControlNotImplemented)
+}
+
+/// Change permission mode during session.
+///
+/// Blocks up to 5s waiting for CLI acknowledgment.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
+/// The actual implementation will be added in Epic 8.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+/// - `mode`: The new permission mode to set
+///
+/// ## Returns
+///
+/// - `Ok(Nil)`: Permission mode was changed
+/// - `Error(ControlTimeout)`: CLI did not acknowledge within 5s
+/// - `Error(ControlSessionClosed)`: Session is closed
+/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
+pub fn set_permission_mode(
+  _session: Session,
+  _mode: PermissionMode,
+) -> Result(Nil, ControlError) {
+  Error(error.ControlNotImplemented)
+}
+
+/// Change model during session.
+///
+/// Blocks up to 5s waiting for CLI acknowledgment.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
+/// The actual implementation will be added in Epic 8.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+/// - `model`: The model identifier to switch to
+///
+/// ## Returns
+///
+/// - `Ok(Nil)`: Model was changed
+/// - `Error(ControlTimeout)`: CLI did not acknowledge within 5s
+/// - `Error(ControlSessionClosed)`: Session is closed
+/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
+pub fn set_model(_session: Session, _model: String) -> Result(Nil, ControlError) {
+  Error(error.ControlNotImplemented)
+}
+
+/// Rewind files to checkpoint at specified message.
+///
+/// Requires `enable_file_checkpointing` option to be set when starting the session.
+/// Blocks up to 30s waiting for CLI acknowledgment.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
+/// The actual implementation will be added in Epic 8.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+/// - `user_message_id`: The ID of the user message to rewind to
+///
+/// ## Returns
+///
+/// - `Ok(Nil)`: Files were rewound to checkpoint
+/// - `Error(ControlTimeout)`: CLI did not acknowledge within 30s
+/// - `Error(ControlSessionClosed)`: Session is closed
+/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
+pub fn rewind_files(
+  _session: Session,
+  _user_message_id: String,
+) -> Result(Nil, ControlError) {
+  Error(error.ControlNotImplemented)
+}
+
+/// Gracefully stop the session.
+///
+/// Non-blocking; initiates shutdown and returns immediately.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(StopNotImplemented)` as a placeholder.
+/// The actual implementation will be added in Epic 8.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+///
+/// ## Returns
+///
+/// - `Ok(Nil)`: Shutdown initiated
+/// - `Error(StopSessionClosed)`: Session is already closed
+/// - `Error(StopNotImplemented)`: Not yet implemented (current)
+pub fn stop(_session: Session) -> Result(Nil, StopError) {
+  Error(error.StopNotImplemented)
 }
