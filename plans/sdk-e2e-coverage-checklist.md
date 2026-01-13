@@ -6,7 +6,7 @@ Issue: casg-3wy.9
 ## Summary
 
 All SDK-01 through SDK-64 scenarios from `plans/e2e-sdk-test-plan.md` are implemented.
-Tests are gated behind `--e2e` flag to prevent accidental API costs.
+Tests are gated behind `E2E_SDK_TEST=1` environment variable to prevent accidental API costs.
 
 ## Coverage Matrix
 
@@ -109,8 +109,8 @@ The following tests in `test/e2e/bidir_e2e_test.gleam` provide additional real C
 
 | Variable | Purpose | Default |
 |----------|---------|---------|
-| `--e2e` | Enable E2E tests (passed as CLI arg) | Not set (tests skip) |
-| `ANTHROPIC_API_KEY` | API authentication | Required when `--e2e` |
+| `E2E_SDK_TEST` | Enable E2E tests | `0` (tests skip) |
+| `ANTHROPIC_API_KEY` | API authentication | Required when `E2E_SDK_TEST=1` |
 
 ## Protocol Invariant Assertions
 
