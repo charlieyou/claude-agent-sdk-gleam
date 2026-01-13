@@ -42,8 +42,8 @@ import claude_agent_sdk/internal/port_ffi.{type WriteError}
 pub type MockState {
   /// Waiting for initialize request.
   AwaitingInit
-  /// Session is running (init completed).
-  MockRunning
+  /// Init ack was injected (does not verify session actually transitioned).
+  InitAckInjected
   /// Session was closed.
   Closed
 }
@@ -255,14 +255,14 @@ pub fn stop(_adapter: RunnerAdapter) -> Nil {
 ///
 /// Call this after receiving the init request on captured_writes.
 /// If auto_init_ack is enabled, this sends a success response.
-/// Returns the updated adapter with MockRunning state.
+/// Returns the updated adapter with InitAckInjected state.
 pub fn process_init(adapter: RunnerAdapter) -> RunnerAdapter {
   case adapter.config.auto_init_ack, adapter.session_subject {
     True, Some(session) -> {
       let success_json =
         "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
       bidir.inject_message(session, success_json)
-      RunnerAdapter(..adapter, state: MockRunning)
+      RunnerAdapter(..adapter, state: InitAckInjected)
     }
     _, _ -> adapter
   }

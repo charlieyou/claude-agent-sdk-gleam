@@ -357,10 +357,10 @@ pub fn session_state_tracking_test() {
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
-  // Mock should be in running state
+  // Mock should be in init-ack-injected state
   should.equal(
     full_mock_runner.get_mock_state(adapter),
-    full_mock_runner.MockRunning,
+    full_mock_runner.InitAckInjected,
   )
 
   bidir.shutdown(session)
