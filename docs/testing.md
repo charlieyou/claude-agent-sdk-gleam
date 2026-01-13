@@ -53,9 +53,11 @@ Full scripted workflows with real Claude CLI:
 
 For **eligible modules** (pure logic, no OS boundary code):
 - Line coverage: ≥95%
-- Branch coverage: ≥90% (where measurable)
 
 Run `./scripts/coverage.sh --threshold 95.0` to enforce.
+
+Note: Erlang's `cover` module measures line coverage. Branch coverage is not
+currently measured or enforced.
 
 ## Module Exclusions
 
@@ -65,20 +67,15 @@ contain OS/process boundary code that cannot be unit tested without mocks:
 | Module | Reason |
 |--------|--------|
 | `claude_agent_sdk/internal/port_ffi` | Erlang port operations (spawn, read, close) |
+| `claude_agent_sdk/internal/cli` | CLI version detection uses port_ffi |
 | `claude_agent_sdk_ffi` | Erlang FFI layer |
 | `bidir_ffi` | Bidirectional protocol FFI |
 
-### Function-Level Exclusions
+The `cli` module is excluded because `detect_cli_version/2` spawns a real CLI
+process via port_ffi. Other functions in the module are pure but the module
+is excluded as a whole for simplicity.
 
-Within otherwise-eligible modules, these functions involve OS calls:
-
-| Module | Function | Reason |
-|--------|----------|--------|
-| `cli` | `detect_cli_version/2` | Spawns CLI process |
-| `cli` | `find_cli_path/0` | PATH environment lookup |
-| `cli` | `check_cli_availability/0` | OS process execution |
-
-These functions are covered by integration tests (`CLAUDE_INTEGRATION_TEST=1`),
+These modules are covered by integration tests (`CLAUDE_INTEGRATION_TEST=1`),
 not unit coverage thresholds.
 
 ## No-Mock Policy

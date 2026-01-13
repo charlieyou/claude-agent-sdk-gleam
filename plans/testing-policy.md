@@ -57,7 +57,7 @@ Allowed:
   - Error path(s) and edge cases
 - Coverage threshold targets (per-module unless excluded):
   - Line coverage: >= 95%
-  - Branch coverage: >= 90%
+  - Note: Branch coverage is not currently measured (Erlang cover limitation)
 - Explicitly excluded from unit coverage (must be covered by phase0/integration/E2E):
   - Any function that spawns processes or uses port_ffi
   - CLI version detection that calls the OS
@@ -73,18 +73,9 @@ because they contain OS/process boundary code.
 | Module | Reason |
 |--------|--------|
 | `claude_agent_sdk/internal/port_ffi` | Erlang port operations (spawn, read, close) |
+| `claude_agent_sdk/internal/cli` | CLI version detection uses port_ffi |
 | `claude_agent_sdk_ffi` | Erlang FFI layer |
 | `bidir_ffi` | Bidirectional protocol FFI |
-
-### Function-Level Exclusions
-
-These functions within otherwise-eligible modules involve OS calls:
-
-| Module | Function | Reason |
-|--------|----------|--------|
-| `cli` | `detect_cli_version/2` | Spawns CLI process via port_ffi |
-| `cli` | `find_cli_path/0` | PATH environment lookup |
-| `cli` | `check_cli_availability/0` | OS process execution |
 
 ### Justification
 
@@ -92,9 +83,9 @@ These functions within otherwise-eligible modules involve OS calls:
   them requires spawning real OS processes. They are covered by phase0 runtime tests
   using deterministic commands like `/bin/echo`.
 
-- **CLI detection functions**: These call the actual Claude CLI binary. Testing them
-  requires either a real CLI installation or mocking, which violates our no-mock policy.
-  They are covered by integration tests gated on `CLAUDE_INTEGRATION_TEST=1`.
+- **CLI module**: Contains `detect_cli_version/2` which spawns a real CLI process.
+  While other functions in the module are pure, the module is excluded as a whole
+  for simplicity. Covered by integration tests gated on `CLAUDE_INTEGRATION_TEST=1`.
 
 ### Enforcement
 

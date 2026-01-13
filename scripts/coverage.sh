@@ -12,6 +12,10 @@
 #   0 - Success
 #   1 - Coverage below threshold
 #   2 - Build/runtime error
+#
+# Note: This script instruments modules with cover BEFORE running tests,
+# ensuring accurate coverage measurement. Tests are executed via the
+# Erlang runtime with cover active, not via `gleam test`.
 
 set -euo pipefail
 
@@ -46,7 +50,7 @@ while [[ $# -gt 0 ]]; do
             echo "Options:"
             echo "  --json          Output JSON instead of text"
             echo "  --threshold N   Exit 1 if coverage < N% (implies --eligible-only)"
-            echo "  --eligible-only Only report on pure modules (excludes port_ffi, cli OS calls)"
+            echo "  --eligible-only Only report on pure modules (excludes FFI/port modules)"
             exit 0
             ;;
         *)
@@ -57,16 +61,13 @@ while [[ $# -gt 0 ]]; do
 done
 
 # Modules excluded from coverage thresholds (port/CLI boundary code)
-# These are covered by integration/E2E tests, not unit tests
+# These contain OS-boundary code covered by integration/E2E tests
 EXCLUDED_MODULES=(
     "claude_agent_sdk@internal@port_ffi"     # Port FFI - OS boundary
     "claude_agent_sdk_ffi"                    # Erlang FFI
     "bidir_ffi"                               # Bidirectional FFI
+    "claude_agent_sdk@internal@cli"          # CLI detection uses port_ffi
 )
-
-# Functions with OS dependencies (documented but not filtered at module level)
-# - cli.detect_cli_version - spawns CLI process
-# - cli.find_cli_path - PATH lookup
 
 is_excluded_module() {
     local module="$1"
@@ -83,74 +84,112 @@ is_test_or_support() {
     local module="$1"
     # Skip test modules and support code
     [[ "$module" == *"_test" ]] || \
+    [[ "$module" == *"_test_ffi" ]] || \
     [[ "$module" == "support@"* ]] || \
     [[ "$module" == "phase1_"* ]] || \
     [[ "$module" == *"@@main" ]]
 }
 
-# Ensure build is up to date
-if [[ ! -d "$EBIN_DIR" ]]; then
-    echo "Building project..." >&2
-    gleam build --target=erlang >/dev/null 2>&1 || {
-        echo "Build failed" >&2
-        exit 2
-    }
-fi
-
-# Run tests first with gleam test
-echo "Running tests..." >&2
-gleam test >/dev/null 2>&1 || {
-    echo "Tests failed" >&2
+# Build the project first
+echo "Building project..." >&2
+gleam build --target=erlang >/dev/null 2>&1 || {
+    echo "Build failed" >&2
     exit 2
 }
 
-# Create temporary Erlang script for coverage analysis
-TMPDIR=$(mktemp -d)
-trap 'rm -rf "$TMPDIR"' EXIT
+if [[ ! -d "$EBIN_DIR" ]]; then
+    echo "Build directory not found: $EBIN_DIR" >&2
+    exit 2
+fi
 
-cat > "$TMPDIR/coverage.erl" << 'ERLEOF'
--module(coverage).
--export([main/1]).
+# Get all dep paths for code loading
+DEP_PATHS=""
+for dep in gleeunit gleam_stdlib gleam_erlang gleam_json gleam_otp simplifile gleam_yielder filepath; do
+    DEP_PATHS="$DEP_PATHS -pa build/dev/erlang/$dep/ebin"
+done
 
-main([EbinDir]) ->
+# Run coverage analysis with tests executed under cover instrumentation
+# This is the correct approach: instrument first, then run tests
+echo "Running tests under coverage..." >&2
+coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
+    %% Ensure all dependency modules are loaded first
+    %% This is required because cover:compile_beam can interfere with module loading
+    DepDirs = ["gleeunit", "gleam_stdlib", "gleam_erlang", "gleam_json",
+               "gleam_otp", "simplifile", "gleam_yielder", "filepath"],
+    lists:foreach(fun(Dep) ->
+        Dir = "build/dev/erlang/" ++ Dep ++ "/ebin",
+        DepBeams = filelib:wildcard(Dir ++ "/*.beam"),
+        lists:foreach(fun(B) ->
+            Mod = list_to_atom(filename:basename(B, ".beam")),
+            code:ensure_loaded(Mod)
+        end, DepBeams)
+    end, DepDirs),
+
+    %% Start cover AFTER loading dependencies
     cover:start(),
 
-    % Get all beam files
+    %% Get all beam files from project
+    EbinDir = "'"$EBIN_DIR"'",
     Beams = filelib:wildcard(EbinDir ++ "/*.beam"),
 
-    % Compile each for coverage
+    %% Compile all project modules for coverage instrumentation
+    %% This must happen BEFORE tests run so execution is tracked
     lists:foreach(fun(Beam) ->
         cover:compile_beam(Beam)
     end, Beams),
 
-    % Get code paths for deps
-    Deps = ["gleeunit", "gleam_stdlib", "gleam_erlang", "gleam_json",
-            "gleam_otp", "simplifile", "gleam_yielder", "filepath"],
-    DepPaths = [filename:join(["build", "dev", "erlang", Dep, "ebin"])
-                || Dep <- Deps],
-    lists:foreach(fun(P) -> code:add_path(P) end, DepPaths),
-
-    % Discover test modules
+    %% Discover test modules (those ending in _test)
     TestMods = [list_to_atom(filename:basename(F, ".beam"))
                 || F <- Beams,
                    string:find(filename:basename(F), "_test.beam") =/= nomatch],
 
-    % Run test functions
-    lists:foreach(fun(Mod) ->
+    %% Helper to check if a function name is a test function
+    %% Matches both "test_foo" prefix and "foo_test" suffix patterns
+    IsTestFun = fun(Name) ->
+        lists:prefix("test_", Name) orelse lists:suffix("_test", Name)
+    end,
+
+    %% Run all test functions under cover instrumentation
+    %% gleeunit exports test functions as test_Name/0 OR Name_test/0 with arity 0
+    TestResults = lists:map(fun(Mod) ->
         try
             Exports = Mod:module_info(exports),
             TestFuns = [Fun || {Fun, 0} <- Exports,
-                              is_test_fun(atom_to_list(Fun))],
-            lists:foreach(fun(Fun) ->
-                try Mod:Fun()
-                catch _:_ -> ok
+                              IsTestFun(atom_to_list(Fun))],
+            Results = lists:map(fun(Fun) ->
+                try
+                    Mod:Fun(),
+                    {Fun, pass}
+                catch
+                    throw:skip -> {Fun, skip};
+                    Class:Reason ->
+                        io:format(standard_error, "FAIL ~p:~p - ~p:~p~n",
+                                  [Mod, Fun, Class, Reason]),
+                        {Fun, fail}
                 end
-            end, TestFuns)
-        catch _:_ -> ok
+            end, TestFuns),
+            {Mod, Results}
+        catch _:_ ->
+            {Mod, []}
         end
     end, TestMods),
 
-    % Collect coverage
+    %% Count results
+    AllResults = lists:flatten([Rs || {_, Rs} <- TestResults]),
+    Passed = length([X || X = {_, pass} <- AllResults]),
+    Failed = length([X || X = {_, fail} <- AllResults]),
+    Skipped = length([X || X = {_, skip} <- AllResults]),
+
+    case Failed of
+        0 -> ok;
+        _ ->
+            io:format(standard_error, "~n~p passed, ~p failed, ~p skipped~n",
+                      [Passed, Failed, Skipped]),
+            cover:stop(),
+            halt(2)
+    end,
+
+    %% Collect coverage from all instrumented modules
     Mods = cover:modules(),
     Results = lists:filtermap(fun(Mod) ->
         case cover:analyse(Mod, coverage, module) of
@@ -165,35 +204,28 @@ main([EbinDir]) ->
         end
     end, Mods),
 
-    % Output
+    %% Output pipe-separated for bash parsing
     lists:foreach(fun({Name, Cov, Total, Pct}) ->
         io:format("~s|~p|~p|~.1f~n", [Name, Cov, Total, Pct])
     end, Results),
 
+    io:format(standard_error, "~p passed, ~p skipped~n", [Passed, Skipped]),
     cover:stop(),
     halt(0).
-
-is_test_fun(Name) ->
-    case lists:suffix("_test", Name) of
-        true -> true;
-        false -> false
-    end.
-ERLEOF
-
-# Compile and run coverage module
-erlc -o "$TMPDIR" "$TMPDIR/coverage.erl"
-
-# Get all dep paths
-DEP_PATHS=""
-for dep in gleeunit gleam_stdlib gleam_erlang gleam_json gleam_otp simplifile gleam_yielder filepath; do
-    DEP_PATHS="$DEP_PATHS -pa build/dev/erlang/$dep/ebin"
-done
-
-coverage_data=$(erl -noshell -pa "$TMPDIR" -pa "$EBIN_DIR" $DEP_PATHS \
-    -run coverage main "$EBIN_DIR" 2>/dev/null) || {
+' 2>&1) || {
     echo "Coverage analysis failed" >&2
     exit 2
 }
+
+# Separate stderr (test status) from stdout (coverage data)
+# The coverage data lines contain | separators
+coverage_lines=$(echo "$coverage_data" | grep '|' || true)
+test_status=$(echo "$coverage_data" | grep -v '|' || true)
+
+# Show test status
+if [[ -n "$test_status" ]]; then
+    echo "$test_status" >&2
+fi
 
 # Parse and format results
 declare -a modules
@@ -214,7 +246,7 @@ while IFS='|' read -r module cov tot pct; do
         continue
     fi
 
-    # Only include claude_agent_sdk modules
+    # Only include claude_agent_sdk modules and bidir_ffi
     if [[ "$module" != "claude_agent_sdk"* ]] && [[ "$module" != "bidir_ffi" ]]; then
         continue
     fi
@@ -232,7 +264,7 @@ while IFS='|' read -r module cov tot pct; do
         eligible_covered=$((eligible_covered + cov))
         eligible_lines=$((eligible_lines + tot))
     fi
-done <<< "$coverage_data"
+done <<< "$coverage_lines"
 
 # Calculate totals
 if [[ $total_lines -gt 0 ]]; then
@@ -294,7 +326,7 @@ if [[ "$JSON_OUTPUT" == "true" ]]; then
 else
     # Text output
     printf "%-50s %10s %15s\n" "MODULE" "COVERAGE" "LINES"
-    printf "%s\n" "$(printf '=%.0s' {1..75})"
+    printf '%s\n' "$(printf '=%.0s' {1..75})"
 
     for i in "${!modules[@]}"; do
         mod="${modules[$i]}"
