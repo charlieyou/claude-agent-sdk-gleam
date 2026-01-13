@@ -78,6 +78,7 @@ pub fn crashing_callback_returns_continue_true_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 5000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -150,6 +151,7 @@ pub fn session_continues_after_crash_fail_open_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 5000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -229,6 +231,7 @@ pub fn timeout_returns_continue_true_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

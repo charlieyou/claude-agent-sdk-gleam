@@ -93,6 +93,7 @@ pub fn response_before_timeout_cancels_timer_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)

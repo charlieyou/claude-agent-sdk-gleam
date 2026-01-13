@@ -587,6 +587,8 @@ pub type StartConfig {
     default_hook_timeout_ms: Int,
     /// Enable file checkpointing for rewind_files support. Default: False.
     enable_file_checkpointing: Bool,
+    /// MCP server handlers (name -> handler function). Default: empty.
+    mcp_servers: List(#(String, fn(Dynamic) -> Dynamic)),
   )
 }
 
@@ -599,6 +601,7 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
     init_timeout_ms: 10_000,
     default_hook_timeout_ms: 30_000,
     enable_file_checkpointing: False,
+    mcp_servers: [],
   )
 }
 
@@ -674,7 +677,7 @@ fn start_internal(
           pending_hooks: dict.new(),
           queued_ops: [],
           hooks: hooks,
-          mcp_handlers: dict.new(),
+          mcp_handlers: dict.from_list(config.mcp_servers),
           next_request_id: 1,
           // Start at 1 since req_0 is used for init
           next_callback_id: 0,
@@ -815,12 +818,14 @@ fn perform_init_handshake(state: SessionState) -> SessionState {
 
   // Build the initialize request
   let assert Some(request_id) = state.init_request_id
+  // Extract MCP server names from handlers dict
+  let mcp_server_names = dict.keys(state.mcp_handlers)
   let init_request =
     control.Initialize(
       request_id: request_id,
       hooks: [],
       // Hooks will be populated from config in future
-      mcp_servers: [],
+      mcp_servers: mcp_server_names,
       enable_file_checkpointing: state.file_checkpointing_enabled,
     )
 

@@ -37,6 +37,7 @@ pub fn rewind_files_sends_correct_wire_format_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
@@ -142,6 +143,7 @@ pub fn rewind_files_receives_success_response_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
@@ -198,6 +200,7 @@ pub fn rewind_files_receives_error_response_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)

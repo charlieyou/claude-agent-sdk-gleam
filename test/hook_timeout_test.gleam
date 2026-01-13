@@ -49,6 +49,7 @@ pub fn fast_callback_completes_before_timeout_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -116,6 +117,7 @@ pub fn slow_callback_times_out_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -187,6 +189,7 @@ pub fn late_hook_done_ignored_after_timeout_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 50,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

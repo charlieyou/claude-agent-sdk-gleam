@@ -61,6 +61,7 @@ pub fn normal_completion_cleanup_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 1000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -138,6 +139,7 @@ pub fn timeout_cleanup_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 50,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -219,6 +221,7 @@ pub fn crash_cleanup_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 1000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -295,6 +298,7 @@ pub fn session_termination_cleanup_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 60_000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -372,6 +376,7 @@ pub fn double_cleanup_is_safe_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

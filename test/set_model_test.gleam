@@ -216,6 +216,7 @@ pub fn set_model_timeout_test() {
       init_timeout_ms: 10_000,
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
+      mcp_servers: [],
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
