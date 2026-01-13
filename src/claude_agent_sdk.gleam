@@ -131,6 +131,15 @@ pub const with_skip_version_check = options.with_skip_version_check
 /// Allow unknown CLI versions with a warning.
 pub const with_permissive_version_check = options.with_permissive_version_check
 
+/// Set the global timeout in milliseconds.
+pub const with_timeout = options.with_timeout
+
+/// Set a per-hook timeout override.
+pub const with_hook_timeout = options.with_hook_timeout
+
+/// Set a factory function for creating BidirRunner instances (testing seam).
+pub const with_bidir_runner_factory = options.with_bidir_runner_factory
+
 // =============================================================================
 // Message Types (from message.gleam)
 // =============================================================================

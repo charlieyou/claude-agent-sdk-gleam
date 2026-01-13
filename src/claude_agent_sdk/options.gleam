@@ -34,7 +34,15 @@
 ///
 /// All `Option` fields default to `None`, all `Bool` fields default to `False`.
 /// The CLI uses its own defaults when options are unset.
+import claude_agent_sdk/hook.{
+  type CanUseToolContext, type HookEvent, type HookExecutionResult,
+  type PermissionCheckResult, type PostToolUseContext, type PreCompactContext,
+  type PreToolUseContext, type StopContext, type SubagentStopContext,
+  type UserPromptSubmitContext,
+}
+import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 import claude_agent_sdk/runner.{type Runner}
+import gleam/dict.{type Dict}
 import gleam/option.{type Option, None, Some}
 
 /// Permission mode for controlling tool execution behavior.
@@ -86,6 +94,24 @@ pub type QueryOptions {
     test_runner: Option(Runner),
     skip_version_check: Bool,
     permissive_version_check: Bool,
+    // --- Hook callbacks (for bidirectional mode) ---
+    on_pre_tool_use: Option(fn(PreToolUseContext) -> HookExecutionResult),
+    on_post_tool_use: Option(fn(PostToolUseContext) -> HookExecutionResult),
+    on_user_prompt_submit: Option(
+      fn(UserPromptSubmitContext) -> HookExecutionResult,
+    ),
+    on_stop: Option(fn(StopContext) -> HookExecutionResult),
+    on_subagent_stop: Option(fn(SubagentStopContext) -> HookExecutionResult),
+    on_pre_compact: Option(fn(PreCompactContext) -> HookExecutionResult),
+    on_can_use_tool: Option(fn(CanUseToolContext) -> PermissionCheckResult),
+    // --- Timeout configuration ---
+    /// Global timeout in milliseconds for operations. Applied in GenServer.
+    timeout_ms: Result(Int, Nil),
+    /// Per-hook timeout overrides. Keys are HookEvent, values are timeout in ms.
+    hook_timeouts: Dict(HookEvent, Int),
+    // --- Testing seam for bidirectional mode ---
+    /// Factory function for creating BidirRunner. Used by start_session() tests.
+    bidir_runner_factory: Result(fn() -> BidirRunner, Nil),
   )
 }
 
@@ -123,6 +149,16 @@ pub fn default_options() -> QueryOptions {
     test_runner: None,
     skip_version_check: False,
     permissive_version_check: False,
+    on_pre_tool_use: None,
+    on_post_tool_use: None,
+    on_user_prompt_submit: None,
+    on_stop: None,
+    on_subagent_stop: None,
+    on_pre_compact: None,
+    on_can_use_tool: None,
+    timeout_ms: Error(Nil),
+    hook_timeouts: dict.new(),
+    bidir_runner_factory: Error(Nil),
   )
 }
 
@@ -382,4 +418,275 @@ pub fn with_skip_version_check(options: QueryOptions) -> QueryOptions {
 /// See also: `with_skip_version_check()` to skip version checks entirely
 pub fn with_permissive_version_check(options: QueryOptions) -> QueryOptions {
   QueryOptions(..options, permissive_version_check: True)
+}
+
+// =============================================================================
+// Hook Callback Builders
+// =============================================================================
+
+/// Set a pre-tool-use hook callback.
+///
+/// Called before each tool is executed. Return `Continue` to proceed,
+/// `Block(reason)` to prevent execution, or `ModifyInput(new_input)`
+/// to modify the tool input before execution.
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `PreToolUseContext` and returning `HookExecutionResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_pre_tool_use(fn(ctx) {
+///     case ctx.tool_name {
+///       "Bash" -> hook.Block("Bash disabled")
+///       _ -> hook.Continue
+///     }
+///   })
+/// ```
+pub fn with_pre_tool_use(
+  options: QueryOptions,
+  callback: fn(PreToolUseContext) -> HookExecutionResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_pre_tool_use: Some(callback))
+}
+
+/// Set a post-tool-use hook callback.
+///
+/// Called after each tool completes execution. Return `Continue` to proceed,
+/// `Block(reason)` to halt, or `ModifyInput(new_output)` to modify the output.
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `PostToolUseContext` and returning `HookExecutionResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_post_tool_use(fn(ctx) {
+///     // Log all tool executions
+///     io.println("Tool " <> ctx.tool_name <> " completed")
+///     hook.Continue
+///   })
+/// ```
+pub fn with_post_tool_use(
+  options: QueryOptions,
+  callback: fn(PostToolUseContext) -> HookExecutionResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_post_tool_use: Some(callback))
+}
+
+/// Set a user-prompt-submit hook callback.
+///
+/// Called when user submits a prompt. Return `Continue` to proceed,
+/// `Block(reason)` to reject the prompt, or `ModifyInput(new_prompt)`
+/// to modify the prompt before processing.
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `UserPromptSubmitContext` and returning `HookExecutionResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_user_prompt_submit(fn(ctx) {
+///     case string.contains(ctx.prompt, "secret") {
+///       True -> hook.Block("Prompt contains sensitive content")
+///       False -> hook.Continue
+///     }
+///   })
+/// ```
+pub fn with_user_prompt_submit(
+  options: QueryOptions,
+  callback: fn(UserPromptSubmitContext) -> HookExecutionResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_user_prompt_submit: Some(callback))
+}
+
+/// Set a stop hook callback.
+///
+/// Called when the session stops. Return `Continue` to allow stop,
+/// or `Block(reason)` to log the stop reason (stop still proceeds).
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `StopContext` and returning `HookExecutionResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_stop(fn(ctx) {
+///     io.println("Session stopped: " <> ctx.reason)
+///     hook.Continue
+///   })
+/// ```
+pub fn with_stop(
+  options: QueryOptions,
+  callback: fn(StopContext) -> HookExecutionResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_stop: Some(callback))
+}
+
+/// Set a subagent-stop hook callback.
+///
+/// Called when a subagent stops. Return `Continue` to proceed,
+/// or `Block(reason)` to log the stop event.
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `SubagentStopContext` and returning `HookExecutionResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_subagent_stop(fn(ctx) {
+///     io.println("Subagent " <> ctx.subagent_id <> " stopped")
+///     hook.Continue
+///   })
+/// ```
+pub fn with_subagent_stop(
+  options: QueryOptions,
+  callback: fn(SubagentStopContext) -> HookExecutionResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_subagent_stop: Some(callback))
+}
+
+/// Set a pre-compact hook callback.
+///
+/// Called before context compaction occurs. Return `Continue` to proceed,
+/// or `Block(reason)` to prevent compaction.
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `PreCompactContext` and returning `HookExecutionResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_pre_compact(fn(ctx) {
+///     io.println("Compacting session: " <> ctx.session_id)
+///     hook.Continue
+///   })
+/// ```
+pub fn with_pre_compact(
+  options: QueryOptions,
+  callback: fn(PreCompactContext) -> HookExecutionResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_pre_compact: Some(callback))
+}
+
+/// Set a can-use-tool permission check callback.
+///
+/// Called to check if a tool can be used. Return `Allow` to permit,
+/// or `Deny(reason)` to block tool usage.
+///
+/// ## Parameters
+///
+/// - `callback`: Function receiving `CanUseToolContext` and returning `PermissionCheckResult`
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_can_use_tool(fn(ctx) {
+///     case ctx.tool_name {
+///       "Write" -> hook.Deny("Write access disabled")
+///       _ -> hook.Allow
+///     }
+///   })
+/// ```
+pub fn with_can_use_tool(
+  options: QueryOptions,
+  callback: fn(CanUseToolContext) -> PermissionCheckResult,
+) -> QueryOptions {
+  QueryOptions(..options, on_can_use_tool: Some(callback))
+}
+
+// =============================================================================
+// Timeout Configuration Builders
+// =============================================================================
+
+/// Set the global timeout in milliseconds.
+///
+/// This timeout is applied to all operations unless overridden by
+/// a per-hook timeout via `with_hook_timeout`.
+///
+/// ## Parameters
+///
+/// - `timeout_ms`: Timeout in milliseconds (positive integer)
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_timeout(60_000)  // 60 seconds
+/// ```
+pub fn with_timeout(options: QueryOptions, timeout_ms: Int) -> QueryOptions {
+  QueryOptions(..options, timeout_ms: Ok(timeout_ms))
+}
+
+/// Set a per-hook timeout override.
+///
+/// Overrides the global timeout for a specific hook event type.
+/// Multiple calls with different events accumulate; same event overwrites.
+///
+/// ## Parameters
+///
+/// - `event`: The hook event type to configure
+/// - `timeout_ms`: Timeout in milliseconds for this hook type
+///
+/// ## Example
+///
+/// ```gleam
+/// let opts = default_options()
+///   |> with_timeout(60_000)  // 60 second global default
+///   |> with_hook_timeout(hook.PreToolUse, 5000)  // 5 second override for PreToolUse
+/// ```
+pub fn with_hook_timeout(
+  options: QueryOptions,
+  event: HookEvent,
+  timeout_ms: Int,
+) -> QueryOptions {
+  let new_timeouts = dict.insert(options.hook_timeouts, event, timeout_ms)
+  QueryOptions(..options, hook_timeouts: new_timeouts)
+}
+
+/// Set a factory function for creating BidirRunner instances.
+///
+/// This is a testing seam for `start_session()`. When set, `start_session()`
+/// uses this factory to create the BidirRunner instead of spawning a real
+/// CLI process. This allows unit testing bidirectional sessions.
+///
+/// **Note**: Only used by `start_session()`. Ignored by `query()`.
+///
+/// ## Parameters
+///
+/// - `factory`: Function that returns a new BidirRunner instance
+///
+/// ## Example
+///
+/// ```gleam
+/// import claude_agent_sdk/internal/bidir_runner
+///
+/// let mock_factory = fn() {
+///   bidir_runner.mock(
+///     on_write: fn(_) { Ok(Nil) },
+///     on_close: fn() { Nil },
+///   )
+/// }
+///
+/// let opts = default_options()
+///   |> with_bidir_runner_factory(mock_factory)
+/// ```
+pub fn with_bidir_runner_factory(
+  options: QueryOptions,
+  factory: fn() -> BidirRunner,
+) -> QueryOptions {
+  QueryOptions(..options, bidir_runner_factory: Ok(factory))
 }
