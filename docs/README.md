@@ -59,11 +59,17 @@ fn loop(stream: claude_agent_sdk.QueryStream) -> Nil {
       }
       loop(stream)
     }
-    Ok(error.EndOfStream) -> claude_agent_sdk.close(stream)
+    Ok(error.EndOfStream) -> {
+      let _ = claude_agent_sdk.close(stream)
+      Nil
+    }
     Ok(error.WarningEvent(_)) -> loop(stream)
     Error(err) ->
       case error.is_terminal(err) {
-        True -> claude_agent_sdk.close(stream)
+        True -> {
+          let _ = claude_agent_sdk.close(stream)
+          Nil
+        }
         False -> loop(stream)
       }
   }
