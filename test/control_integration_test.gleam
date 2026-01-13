@@ -26,7 +26,7 @@ import claude_agent_sdk/control.{
 }
 import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage, CheckpointingNotEnabled,
-  RequestError, RequestSuccess, Running,
+  RequestError, RequestSuccess, RewindFilesSessionStopped, Running,
 }
 import support/full_mock_runner
 
@@ -315,9 +315,10 @@ pub fn test_rewind_files_without_checkpointing_fails_test() {
   // Act: call rewind_files (should fail immediately)
   let result = bidir.rewind_files(session, "msg_123", 5000)
 
-  // Assert: returns CheckpointingNotEnabled (or SessionStopped under scheduler pressure)
+  // Assert: returns CheckpointingNotEnabled (or RewindFilesSessionStopped under scheduler pressure)
   case result {
     Error(CheckpointingNotEnabled) -> Nil
+    Error(RewindFilesSessionStopped) -> Nil
     _ -> should.fail()
   }
 
