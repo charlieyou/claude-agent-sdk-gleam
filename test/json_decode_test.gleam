@@ -336,3 +336,79 @@ pub fn decode_nested_content_blocks_test() {
       panic as "Expected successful decode for nested_content_blocks.json"
   }
 }
+
+// =============================================================================
+// Error Path Tests for Standalone Decoders
+// =============================================================================
+
+pub fn decode_tool_result_block_missing_field_test() {
+  // Missing tool_use_id should error
+  let json = "{\"content\": \"ok\", \"type\": \"tool_result\"}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_tool_result_block(dynamic) {
+    Error(decoder.JsonDecodeError(msg)) -> {
+      let has_expected =
+        string.contains(msg, "tool_use_id") || string.contains(msg, "String")
+      case has_expected {
+        True -> Nil
+        False ->
+          panic as { "Expected error mentioning missing field, got: " <> msg }
+      }
+    }
+    Ok(_) -> panic as "Expected error for tool_result missing tool_use_id"
+    Error(_) -> panic as "Expected JsonDecodeError for missing field"
+  }
+}
+
+pub fn decode_mcp_server_status_missing_field_test() {
+  // Missing name should error
+  let json = "{\"status\": \"connected\"}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_mcp_server_status(dynamic) {
+    Error(decoder.JsonDecodeError(msg)) -> {
+      let has_name =
+        string.contains(msg, "name") || string.contains(msg, "String")
+      case has_name {
+        True -> Nil
+        False ->
+          panic as { "Expected error mentioning missing name, got: " <> msg }
+      }
+    }
+    Ok(_) -> panic as "Expected error for mcp_server_status missing name"
+    Error(_) -> panic as "Expected JsonDecodeError for missing field"
+  }
+}
+
+pub fn decode_permission_denial_missing_field_test() {
+  // Missing tool_name should error
+  let json = "{\"tool_use_id\": \"xyz\", \"tool_input\": {}}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_permission_denial(dynamic) {
+    Error(decoder.JsonDecodeError(msg)) -> {
+      let has_tool_name =
+        string.contains(msg, "tool_name") || string.contains(msg, "String")
+      case has_tool_name {
+        True -> Nil
+        False ->
+          panic as {
+            "Expected error mentioning missing tool_name, got: " <> msg
+          }
+      }
+    }
+    Ok(_) -> panic as "Expected error for permission_denial missing tool_name"
+    Error(_) -> panic as "Expected JsonDecodeError for missing field"
+  }
+}
+
+pub fn decode_usage_all_optional_succeeds_test() {
+  // Usage should decode even with empty object (all fields optional)
+  let json = "{}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_usage(dynamic) {
+    Ok(usage) -> {
+      should.equal(usage.input_tokens, None)
+      should.equal(usage.output_tokens, None)
+    }
+    Error(_) -> panic as "Expected empty usage object to decode successfully"
+  }
+}
