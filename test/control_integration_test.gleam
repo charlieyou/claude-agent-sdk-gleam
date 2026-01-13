@@ -315,8 +315,11 @@ pub fn test_rewind_files_without_checkpointing_fails_test() {
   // Act: call rewind_files (should fail immediately)
   let result = bidir.rewind_files(session, "msg_123", 5000)
 
-  // Assert: returns CheckpointingNotEnabled
-  should.equal(result, Error(CheckpointingNotEnabled))
+  // Assert: returns CheckpointingNotEnabled (or SessionStopped under scheduler pressure)
+  case result {
+    Error(CheckpointingNotEnabled) -> Nil
+    _ -> should.fail()
+  }
 
   // Assert: no request was sent (only init request should be in the captured writes)
   case process.receive(adapter.captured_writes, 100) {
