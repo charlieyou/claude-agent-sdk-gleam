@@ -18,7 +18,6 @@ import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
-import gleam/string
 
 /// Convert Result to Option (helper to avoid qualified module reference).
 fn option_from_result(result: Result(a, b)) -> Option(a) {
@@ -134,17 +133,22 @@ const artifacts_base = "artifacts/e2e"
 
 /// Create a new test context and initialize the log file.
 /// Creates the artifact directory and log file for this test.
+/// Artifact path is deterministic: artifacts/e2e/<test-id>.log
 pub fn new_test_context(test_id: String) -> TestContext {
   let timestamp = get_timestamp_iso8601()
-  let date_prefix = string.slice(timestamp, 0, 10)
-  let time_suffix =
-    string.slice(timestamp, 11, 8)
-    |> string.replace(":", "")
-  let log_dir = artifacts_base <> "/" <> date_prefix
-  let log_path = log_dir <> "/" <> test_id <> "-" <> time_suffix <> ".log"
+  let log_path = artifacts_base <> "/" <> test_id <> ".log"
 
-  // Ensure directory exists
-  let _ = ensure_dir(log_dir)
+  // Ensure directory exists and fail loudly if it cannot be created
+  case ensure_dir(artifacts_base) {
+    Ok(Nil) -> Nil
+    Error(reason) ->
+      io.println(
+        "[ERROR] Failed to create artifact directory "
+        <> artifacts_base
+        <> ": "
+        <> reason,
+      )
+  }
 
   let ctx =
     TestContext(
@@ -210,9 +214,14 @@ fn log_structured(
     <> event,
   )
 
-  // Write to log file
-  let _ = append_line(ctx.log_path, json_line)
-  Nil
+  // Write to log file (log error but don't fail test)
+  case append_line(ctx.log_path, json_line) {
+    Ok(Nil) -> Nil
+    Error(reason) ->
+      io.println(
+        "[ERROR] Failed to write to log file " <> ctx.log_path <> ": " <> reason,
+      )
+  }
 }
 
 /// Log an informational message.
@@ -286,9 +295,14 @@ pub fn log_debug(
   let all_fields = list.append(base_fields, payload)
   let json_line = json.to_string(json.object(all_fields))
 
-  // Only write to file for debug
-  let _ = append_line(ctx.log_path, json_line)
-  Nil
+  // Only write to file for debug (log error but don't fail test)
+  case append_line(ctx.log_path, json_line) {
+    Ok(Nil) -> Nil
+    Error(reason) ->
+      io.println(
+        "[ERROR] Failed to write to log file " <> ctx.log_path <> ": " <> reason,
+      )
+  }
 }
 
 /// Log stream transcript (list of message types received).
