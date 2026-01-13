@@ -65,10 +65,10 @@ jobs:
         run: gleam deps download
       - name: Run E2E tests
         if: steps.prereq.outputs.skip != 'true'
-        run: |
-          gleam test -- --e2e
+        run: gleam test
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          E2E_SDK_TEST: "1"
       - name: Upload E2E artifacts
         if: always() && steps.prereq.outputs.skip != 'true'
         uses: actions/upload-artifact@v4

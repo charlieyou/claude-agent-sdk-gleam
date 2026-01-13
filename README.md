@@ -193,14 +193,7 @@ gleam test  # Run the tests
 gleam test
 
 # E2E tests (requires Claude CLI + auth)
-gleam test -- --e2e
-
-# E2E tests: list scenarios or run a specific one
-gleam test -- --e2e --list
-gleam test -- --e2e --scenario E2E-02
-
-# E2E tests: custom output directory
-gleam test -- --e2e --output-dir artifacts/e2e/manual
+E2E_SDK_TEST=1 gleam test
 ```
 
 ### Environment Variables
@@ -230,13 +223,7 @@ npm install -g @anthropic-ai/claude-code
 export ANTHROPIC_API_KEY=your-key
 
 # Run E2E via gleam test (runs unit + E2E)
-gleam test -- --e2e
-
-# List scenarios
-gleam test -- --e2e --list
-
-# Run a specific scenario
-gleam test -- --e2e --scenario E2E-02
+E2E_SDK_TEST=1 gleam test
 ```
 
 #### Running in CI

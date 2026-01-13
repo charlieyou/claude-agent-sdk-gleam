@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, get_plain_arguments/0, unique_integer/0, system_info/0, os_cmd/1, otp_version/0, check_stderr_support/0, exact_equals/2]).
+-export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, otp_version/0, check_stderr_support/0, exact_equals/2]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -174,25 +174,9 @@ rescue(Thunk) ->
 monotonic_time_ms() ->
     erlang:monotonic_time(millisecond).
 
-%% Returns command-line arguments passed to the runtime as binaries.
-get_plain_arguments() ->
-    [list_to_binary(Arg) || Arg <- init:get_plain_arguments()].
-
 %% Returns a unique positive integer for run IDs.
 unique_integer() ->
     erlang:unique_integer([positive]).
-
-%% Returns basic system info as {Os, Arch} binaries.
-system_info() ->
-    {_OsFamily, OsName} = os:type(),
-    Arch = erlang:system_info(system_architecture),
-    Os = list_to_binary(atom_to_list(OsName)),
-    {Os, list_to_binary(Arch)}.
-
-%% Run a shell command and return stdout as a binary.
-os_cmd(Command) ->
-    CommandStr = binary_to_list(Command),
-    list_to_binary(os:cmd(CommandStr)).
 
 %% Returns OTP major version as {<<"ok">>, Version} or {<<"error">>, Reason}.
 %% Uses erlang:system_info(otp_release) which returns a string like "27".
