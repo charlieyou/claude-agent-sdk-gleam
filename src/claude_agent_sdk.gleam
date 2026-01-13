@@ -140,6 +140,9 @@ pub const with_hook_timeout = options.with_hook_timeout
 /// Set a factory function for creating BidirRunner instances (testing seam).
 pub const with_bidir_runner_factory = options.with_bidir_runner_factory
 
+/// Set the permission callback for tool execution control.
+pub const with_can_use_tool = options.with_can_use_tool
+
 /// Add an MCP server handler.
 pub const with_mcp_server = options.with_mcp_server
 
@@ -380,7 +383,7 @@ pub fn query(
   case cli.has_bidir_features(options) {
     True ->
       io.println_error(
-        "Warning: query() ignores hooks/can_use_tool/mcp_config/timeout_ms. Use start_session() for bidirectional features.",
+        "Warning: query() ignores hooks/can_use_tool/timeout_ms. Use start_session() for bidirectional features.",
       )
     False -> Nil
   }
