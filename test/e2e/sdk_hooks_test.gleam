@@ -581,13 +581,13 @@ pub fn sdk_34_can_use_tool_test() {
                   }
                 }
                 Error(Nil) -> {
-                  // Permission handler not invoked - may be because unknown tool
-                  // gets auto-denied by dispatch_permission_callback
+                  // Permission handler was not invoked - this means the test
+                  // cannot validate permission handling behavior
                   io.println(
-                    "[INFO] Permission handler not invoked (unknown tool auto-denied)",
+                    "[FAIL] Permission handler not invoked within timeout",
                   )
-                  // This is acceptable - the bidir module denies unknown tools
                   bidir.shutdown(session)
+                  should.fail()
                   Nil
                 }
               }
@@ -746,7 +746,7 @@ pub fn sdk_36_multiple_hooks_test() {
                     }
                     False -> {
                       io.println(
-                        "[WARN] Not all hooks fired (pre: "
+                        "[FAIL] Not all hooks fired (pre: "
                         <> bool_to_string(has_pre)
                         <> ", post: "
                         <> bool_to_string(has_post)
@@ -755,8 +755,8 @@ pub fn sdk_36_multiple_hooks_test() {
                     }
                   }
 
-                  // At least require one hook to pass
-                  { has_pre || has_post }
+                  // Require BOTH hooks to fire - this validates multiple hook types
+                  { has_pre && has_post }
                   |> should.be_true
 
                   let _ = collect_messages(subscriber, 5000, [])
