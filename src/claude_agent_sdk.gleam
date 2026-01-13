@@ -140,6 +140,24 @@ pub const with_hook_timeout = options.with_hook_timeout
 /// Set a factory function for creating BidirRunner instances (testing seam).
 pub const with_bidir_runner_factory = options.with_bidir_runner_factory
 
+/// Set a pre-tool-use hook callback.
+pub const with_pre_tool_use = options.with_pre_tool_use
+
+/// Set a post-tool-use hook callback.
+pub const with_post_tool_use = options.with_post_tool_use
+
+/// Set a user-prompt-submit hook callback.
+pub const with_user_prompt_submit = options.with_user_prompt_submit
+
+/// Set a stop hook callback.
+pub const with_stop = options.with_stop
+
+/// Set a subagent-stop hook callback.
+pub const with_subagent_stop = options.with_subagent_stop
+
+/// Set a pre-compact hook callback.
+pub const with_pre_compact = options.with_pre_compact
+
 /// Set the permission callback for tool execution control.
 pub const with_can_use_tool = options.with_can_use_tool
 
