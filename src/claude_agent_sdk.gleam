@@ -28,7 +28,7 @@
 //// StreamError, and other variant types.
 
 import gleam/dynamic
-import gleam/io
+import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 
@@ -397,15 +397,6 @@ pub fn query(
   prompt: String,
   options: QueryOptions,
 ) -> Result(QueryStream, QueryError) {
-  // Warn if bidir features are set but using legacy query()
-  case cli.has_bidir_features(options) {
-    True ->
-      io.println_error(
-        "Warning: query() ignores hooks/can_use_tool/timeout_ms. Use start_session() for bidirectional features.",
-      )
-    False -> Nil
-  }
-
   case options.test_mode {
     True -> {
       // Test mode: validate test_runner is provided, then spawn without CLI discovery
@@ -538,6 +529,20 @@ fn spawn_query_with_warnings(
   cli_path: String,
   warnings: List(error.Warning),
 ) -> Result(QueryStream, QueryError) {
+  // Add bidir warning if bidir features are set but using query()
+  let all_warnings = case cli.has_bidir_features(options) {
+    True -> {
+      let bidir_warning =
+        error.Warning(
+          code: error.BidirOptionIgnored,
+          message: "query() ignores hooks/can_use_tool/timeout_ms. Use start_session() for bidirectional features.",
+          context: None,
+        )
+      list.append(warnings, [bidir_warning])
+    }
+    False -> warnings
+  }
+
   // Build CLI arguments
   let args = cli.build_cli_args(options, prompt)
 
@@ -561,7 +566,7 @@ fn spawn_query_with_warnings(
               Ok(internal_stream.new_from_runner_with_warnings(
                 test_runner,
                 handle,
-                warnings,
+                all_warnings,
               ))
           }
         }
@@ -574,7 +579,7 @@ fn spawn_query_with_warnings(
     False ->
       case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
         Error(reason) -> Error(error.SpawnError(reason))
-        Ok(port) -> Ok(internal_stream.new_with_warnings(port, warnings))
+        Ok(port) -> Ok(internal_stream.new_with_warnings(port, all_warnings))
       }
   }
 }

@@ -5,6 +5,7 @@
 /// for existing users.
 import claude_agent_sdk
 import claude_agent_sdk/content.{TextBlock, ToolUseBlock, UnknownBlock}
+import claude_agent_sdk/error
 import claude_agent_sdk/hook
 import claude_agent_sdk/message
 import claude_agent_sdk/options
@@ -172,6 +173,16 @@ pub fn query_ignores_bidir_options_with_warning_test() {
 
       // No terminal error
       should.equal(result.terminal_error, None)
+
+      // Should have at least one BidirOptionIgnored warning
+      let bidir_warnings =
+        list.filter(result.warnings, fn(w) {
+          case w.code {
+            error.BidirOptionIgnored -> True
+            _ -> False
+          }
+        })
+      should.be_true(list.length(bidir_warnings) >= 1)
     }
   }
 }
@@ -616,6 +627,16 @@ pub fn query_ignores_all_bidir_options_test() {
     Ok(stream) -> {
       let result = claude_agent_sdk.collect_messages(stream)
       should.equal(list.length(result.items), 2)
+
+      // Should have exactly one BidirOptionIgnored warning (not one per option)
+      let bidir_warnings =
+        list.filter(result.warnings, fn(w) {
+          case w.code {
+            error.BidirOptionIgnored -> True
+            _ -> False
+          }
+        })
+      should.equal(list.length(bidir_warnings), 1)
     }
   }
 }

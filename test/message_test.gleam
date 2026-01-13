@@ -13,8 +13,8 @@ import claude_agent_sdk/content.{
 }
 import claude_agent_sdk/error.{
   type StreamError, type StreamItem, type Warning, type WarningCode,
-  BufferOverflow, CleanExitNoResult, DeprecatedOption, EndOfStream,
-  ErrorDiagnostic, JsonDecodeError, Message as StreamMessage,
+  BidirOptionIgnored, BufferOverflow, CleanExitNoResult, DeprecatedOption,
+  EndOfStream, ErrorDiagnostic, JsonDecodeError, Message as StreamMessage,
   NonZeroExitAfterResult, ProcessError, TooManyDecodeErrors,
   UnexpectedMessageAfterResult, UnexpectedMessageError, UnparseableCliVersion,
   Warning, WarningEvent, is_terminal,
@@ -242,6 +242,19 @@ pub fn warning_deprecated_option_test() {
   }
 }
 
+pub fn warning_bidir_option_ignored_test() {
+  let warning =
+    Warning(
+      code: BidirOptionIgnored,
+      message: "query() ignores hooks/can_use_tool/timeout_ms",
+      context: None,
+    )
+  case warning.code {
+    BidirOptionIgnored -> should.be_true(True)
+    _ -> should.fail()
+  }
+}
+
 pub fn warning_all_codes_matchable_test() {
   // Verify exhaustive pattern matching on WarningCode
   let codes: List(WarningCode) = [
@@ -250,10 +263,11 @@ pub fn warning_all_codes_matchable_test() {
     NonZeroExitAfterResult(0),
     UnexpectedMessageAfterResult,
     DeprecatedOption,
+    BidirOptionIgnored,
   ]
   codes
   |> list.length
-  |> should.equal(5)
+  |> should.equal(6)
 }
 
 // ============================================================================

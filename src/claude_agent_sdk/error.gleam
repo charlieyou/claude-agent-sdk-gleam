@@ -247,6 +247,9 @@ pub type WarningCode {
   IncompleteLastLine(String)
   /// Reserved for future deprecation warnings.
   DeprecatedOption
+  /// Bidirectional option was ignored by query().
+  /// Hooks and can_use_tool require start_session() for bidirectional mode.
+  BidirOptionIgnored
 }
 
 // ============================================================================
