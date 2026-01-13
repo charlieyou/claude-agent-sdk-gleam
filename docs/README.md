@@ -7,7 +7,7 @@ and errors in a structured way.
 ## Requirements
 
 - Claude Code CLI installed and available on PATH
-- Authentication via `claude login` or `ANTHROPIC_API_KEY`
+- Authentication via `claude auth login`
 
 Install the CLI:
 

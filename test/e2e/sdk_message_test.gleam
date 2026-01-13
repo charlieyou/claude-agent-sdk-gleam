@@ -5,9 +5,8 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// export E2E_SDK_TEST=1
-/// export ANTHROPIC_API_KEY="..."
-/// gleam test
+/// gleam test -- --e2e
+/// # Ensure the Claude CLI is authenticated (e.g., `claude auth login`)
 /// ```
 import claude_agent_sdk
 import claude_agent_sdk/content.{TextBlock, ToolResultBlock, ToolUseBlock}
@@ -17,7 +16,7 @@ import claude_agent_sdk/message.{
   System, User,
 }
 import claude_agent_sdk/options.{BypassPermissions}
-import e2e/helpers.{consume_stream, skip_if_no_e2e}
+import e2e/helpers
 import gleam/int
 import gleam/io
 import gleam/list
@@ -32,7 +31,7 @@ import gleeunit/should
 /// SDK-10: Verify SystemMessage fields decode correctly.
 /// Tests session_id, tools, and mcp_servers fields.
 pub fn sdk_10_system_message_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -42,13 +41,16 @@ pub fn sdk_10_system_message_test() {
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Hello", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           io.println("[FAIL] query() failed: " <> error_to_string(err))
           should.fail()
         }
-        Ok(stream) -> {
-          let result = consume_stream(stream)
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
 
           // Find SystemMessage
           let system_msg =
@@ -118,7 +120,7 @@ pub fn sdk_10_system_message_test() {
 /// SDK-11: Verify AssistantMessage content blocks decode correctly.
 /// Tests that TextBlock content is accessible via pattern match.
 pub fn sdk_11_content_blocks_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -128,13 +130,16 @@ pub fn sdk_11_content_blocks_test() {
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Say hello briefly", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Say hello briefly", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           io.println("[FAIL] query() failed: " <> error_to_string(err))
           should.fail()
         }
-        Ok(stream) -> {
-          let result = consume_stream(stream)
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
 
           // Find AssistantMessage with TextBlock
           let has_text_block =
@@ -178,7 +183,7 @@ pub fn sdk_11_content_blocks_test() {
 /// SDK-12: Verify tool flow (ToolUseBlock -> ToolResultBlock).
 /// Tests that tool use and result can be parsed without crashes.
 pub fn sdk_12_tool_result_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -189,13 +194,20 @@ pub fn sdk_12_tool_result_test() {
         |> claude_agent_sdk.with_max_turns(2)
         |> claude_agent_sdk.with_permission_mode(BypassPermissions)
 
-      case claude_agent_sdk.query("Read the file gleam.toml", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout(
+        "Read the file gleam.toml",
+        opts,
+        30_000,
+      ) {
+        helpers.QueryFailure(err) -> {
           io.println("[FAIL] query() failed: " <> error_to_string(err))
           should.fail()
         }
-        Ok(stream) -> {
-          let result = consume_stream(stream)
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
 
           // Look for ToolUseBlock in any AssistantMessage
           let has_tool_use =
@@ -287,7 +299,7 @@ pub fn sdk_12_tool_result_test() {
 /// SDK-13: Verify usage statistics parse correctly.
 /// Tests that token counts are valid integers >= 0.
 pub fn sdk_13_usage_data_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -297,13 +309,16 @@ pub fn sdk_13_usage_data_test() {
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Say hello", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           io.println("[FAIL] query() failed: " <> error_to_string(err))
           should.fail()
         }
-        Ok(stream) -> {
-          let result = consume_stream(stream)
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
 
           // Find ResultMessage with usage
           let result_usage = find_result_usage(result.messages)
@@ -385,7 +400,7 @@ fn find_result_usage(messages: List(MessageEnvelope)) -> option.Option(Usage) {
 /// SDK-14: Verify error messages surface cleanly without panic.
 /// Tests error handling for invalid/error responses.
 pub fn sdk_14_error_message_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -400,8 +415,8 @@ pub fn sdk_14_error_message_test() {
         |> claude_agent_sdk.with_max_turns(1)
 
       // Query with invalid model should trigger an error
-      case claude_agent_sdk.query("Say hi", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Say hi", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           // Query-level errors are expected with invalid model
           // Key assertion: error is surfaced properly, no panic
           io.println("[INFO] Query error (expected): " <> error_to_string(err))
@@ -411,9 +426,12 @@ pub fn sdk_14_error_message_test() {
           |> should.be_true
           io.println("[PASS] Error surfaced cleanly without panic")
         }
-        Ok(stream) -> {
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
           // If query somehow succeeds, the model should still report an error
-          let result = consume_stream(stream)
 
           // Find ResultMessage and check is_error field
           let result_msg = find_result_message(result.messages)

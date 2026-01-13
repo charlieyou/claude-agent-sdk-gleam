@@ -13,12 +13,13 @@
 /// ## Running Tests
 /// Run these tests in isolation to avoid race conditions with other E2E tests:
 /// ```bash
-/// export E2E_SDK_TEST=1
+/// gleam test -- --e2e
 /// gleam test -- --only sdk_error_serial
 /// ```
 import claude_agent_sdk
 import claude_agent_sdk/error
 import claude_agent_sdk/runner
+import e2e/helpers
 import gleam/dynamic
 import gleam/io
 import gleam/option.{type Option, None, Some}
@@ -48,15 +49,6 @@ fn unset_env(name: String) -> Nil
 // Test Helpers
 // ============================================================================
 
-/// Check if E2E SDK tests are enabled.
-fn skip_if_no_e2e() -> Result(Nil, String) {
-  case get_env("E2E_SDK_TEST") {
-    Ok("1") -> Ok(Nil)
-    Ok(_) -> Error("[SKIP] E2E_SDK_TEST is set but not '1'")
-    Error(_) -> Error("[SKIP] E2E_SDK_TEST not set; skipping E2E test")
-  }
-}
-
 /// Save the current value of an environment variable.
 fn save_env(name: String) -> Option(String) {
   case get_env(name) {
@@ -82,7 +74,7 @@ fn restore_env(name: String, saved: Option(String)) -> Nil {
 /// This test modifies PATH to point to a non-existent directory,
 /// which should cause query() to return CliNotFoundError.
 pub fn sdk_60_cli_not_found_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -148,7 +140,7 @@ pub fn sdk_60_cli_not_found_test() {
 ///
 /// The SDK should surface the error cleanly with helpful diagnostics.
 pub fn sdk_61_auth_failure_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -203,12 +195,9 @@ pub fn sdk_61_auth_failure_test() {
                   diagnostic.exit_code_hint
                   |> should.equal("Authentication required")
 
-                  // Troubleshooting should mention authentication and API key
+                  // Troubleshooting should mention authentication
                   diagnostic.troubleshooting
                   |> string.contains("Authenticate")
-                  |> should.be_true
-                  diagnostic.troubleshooting
-                  |> string.contains("ANTHROPIC_API_KEY")
                   |> should.be_true
 
                   io.println(

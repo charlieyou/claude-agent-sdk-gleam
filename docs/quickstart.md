@@ -11,10 +11,8 @@ npm install -g @anthropic-ai/claude-code
 Authenticate:
 
 ```sh
-claude login
+claude auth login
 ```
-
-Or set `ANTHROPIC_API_KEY` in your environment.
 
 ## 2) Add the SDK dependency
 

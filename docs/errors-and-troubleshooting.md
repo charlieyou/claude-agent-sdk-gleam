@@ -71,8 +71,7 @@ Warnings do not stop the stream.
 The CLI may write errors to stderr only. If stdout is empty and the process
 exits with code 1, check authentication:
 
-- Run `claude login`
-- Or set `ANTHROPIC_API_KEY` in the environment
+- Run `claude auth login`
 
 ### Version errors
 

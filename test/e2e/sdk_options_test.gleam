@@ -1,7 +1,7 @@
 /// E2E Tests for Query Options (SDK-20 to SDK-28).
 ///
 /// These tests verify that QueryOptions builder functions correctly
-/// configure CLI behavior. They are skipped when E2E_SDK_TEST != 1.
+/// configure CLI behavior. They are skipped unless --e2e is provided.
 ///
 /// ## What We Can and Can't Test
 /// **Can verify**:
@@ -16,15 +16,15 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// export E2E_SDK_TEST=1
-/// export ANTHROPIC_API_KEY="..."
+/// gleam test -- --e2e
+/// # Ensure the Claude CLI is authenticated (e.g., `claude auth login`)
 /// gleam test
 /// ```
 import claude_agent_sdk
 import claude_agent_sdk/error.{error_to_string}
 import claude_agent_sdk/message.{System}
 import claude_agent_sdk/options.{AcceptEdits, BypassPermissions, Default}
-import e2e/helpers.{consume_stream, skip_if_no_e2e}
+import e2e/helpers
 import gleam/io
 import gleam/list
 import gleam/option.{None, Some}
@@ -38,7 +38,7 @@ import gleeunit/should
 /// SDK-20: Verify with_model() selects model correctly.
 /// If model is invalid, query may fail; if valid, should succeed.
 pub fn sdk_20_model_selection_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -49,16 +49,19 @@ pub fn sdk_20_model_selection_test() {
         |> claude_agent_sdk.with_model("claude-sonnet-4-20250514")
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Say hello", opts) {
-        Ok(stream) -> {
-          let _ = consume_stream(stream)
+      case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
+        helpers.QuerySuccess(_result) -> {
           // Model accepted - test passes
           should.be_true(True)
         }
-        Error(err) -> {
+        helpers.QueryFailure(err) -> {
           // Model error is valid behavior (may not exist in all environments)
           io.println("Model error: " <> string.inspect(err))
           should.be_true(True)
+        }
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
         }
       }
     }
@@ -72,7 +75,7 @@ pub fn sdk_20_model_selection_test() {
 /// SDK-21: Verify with_max_turns() limits turns.
 /// Should terminate without hanging.
 pub fn sdk_21_max_turns_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -82,16 +85,18 @@ pub fn sdk_21_max_turns_test() {
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Say hello", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           // Infra/config error (CLI not found, auth, etc.) - skip test
           io.println(
             "[SKIP] query() failed (infra/config): " <> error_to_string(err),
           )
         }
-        Ok(stream) -> {
-          let result = consume_stream(stream)
-
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
           // Should terminate (not hang forever)
           list.length(result.messages)
           |> should.not_equal(0)
@@ -108,7 +113,7 @@ pub fn sdk_21_max_turns_test() {
 /// SDK-22: Verify with_max_budget() is accepted.
 /// Very low budget may trigger budget stop; we just verify no crash.
 pub fn sdk_22_max_budget_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -120,16 +125,18 @@ pub fn sdk_22_max_budget_test() {
         |> claude_agent_sdk.with_max_budget(0.001)
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Hello", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           // Infra/config error (CLI not found, auth, etc.) - skip test
           io.println(
             "[SKIP] query() failed (infra/config): " <> error_to_string(err),
           )
         }
-        Ok(stream) -> {
-          let result = consume_stream(stream)
-
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
           // May or may not exceed budget - just verify no crash and stream terminates
           io.println(
             "Max budget test: "
@@ -150,7 +157,7 @@ pub fn sdk_22_max_budget_test() {
 /// SDK-23: Verify with_system_prompt() is accepted.
 /// We can't verify semantic effect, just that query completes.
 pub fn sdk_23_system_prompt_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -163,12 +170,21 @@ pub fn sdk_23_system_prompt_test() {
         )
         |> claude_agent_sdk.with_max_turns(1)
 
-      let assert Ok(stream) = claude_agent_sdk.query("Say hello", opts)
-      let result = consume_stream(stream)
-
-      // Query completed - system prompt was accepted
-      list.length(result.messages)
-      |> should.not_equal(0)
+      case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
+        }
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
+          // Query completed - system prompt was accepted
+          list.length(result.messages)
+          |> should.not_equal(0)
+        }
+      }
     }
   }
 }
@@ -180,7 +196,7 @@ pub fn sdk_23_system_prompt_test() {
 /// SDK-24: Verify with_allowed_tools() filters tools.
 /// Check SystemMessage.tools reflects the filter.
 pub fn sdk_24_allowed_tools_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -192,16 +208,19 @@ pub fn sdk_24_allowed_tools_test() {
         |> claude_agent_sdk.with_allowed_tools(allowed_tools)
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Hello", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           // Infra/config error (CLI not found, auth, etc.) - skip test
           io.println(
             "[SKIP] query() failed (infra/config): " <> error_to_string(err),
           )
         }
-        Ok(stream) -> {
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
           // Consume stream and find SystemMessage (handles WarningEvent first)
-          let result = consume_stream(stream)
           let system_msg =
             list.find(result.messages, fn(envelope) {
               case envelope.message {
@@ -248,7 +267,7 @@ pub fn sdk_24_allowed_tools_test() {
 /// SDK-25: Verify with_disallowed_tools() excludes tools.
 /// Check SystemMessage.tools doesn't include disallowed tool.
 pub fn sdk_25_disallowed_tools_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -260,16 +279,19 @@ pub fn sdk_25_disallowed_tools_test() {
         |> claude_agent_sdk.with_disallowed_tools(disallowed_tools)
         |> claude_agent_sdk.with_max_turns(1)
 
-      case claude_agent_sdk.query("Hello", opts) {
-        Error(err) -> {
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
           // Infra/config error (CLI not found, auth, etc.) - skip test
           io.println(
             "[SKIP] query() failed (infra/config): " <> error_to_string(err),
           )
         }
-        Ok(stream) -> {
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(result) -> {
           // Consume stream and find SystemMessage (handles WarningEvent first)
-          let result = consume_stream(stream)
           let system_msg =
             list.find(result.messages, fn(envelope) {
               case envelope.message {
@@ -316,7 +338,7 @@ pub fn sdk_25_disallowed_tools_test() {
 /// SDK-26: Verify with_permission_mode(Default) is accepted.
 /// Default mode prompts for permission interactively.
 pub fn sdk_26_permission_default_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -327,11 +349,20 @@ pub fn sdk_26_permission_default_test() {
         |> claude_agent_sdk.with_permission_mode(Default)
         |> claude_agent_sdk.with_max_turns(1)
 
-      let assert Ok(stream) = claude_agent_sdk.query("Hello", opts)
-      let _ = consume_stream(stream)
-
-      // Just verify it doesn't crash
-      should.be_true(True)
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
+        }
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(_result) -> {
+          // Just verify it doesn't crash
+          should.be_true(True)
+        }
+      }
     }
   }
 }
@@ -343,7 +374,7 @@ pub fn sdk_26_permission_default_test() {
 /// SDK-27: Verify with_permission_mode(AcceptEdits) is accepted.
 /// AcceptEdits mode auto-accepts file edits.
 pub fn sdk_27_permission_accept_edits_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -354,11 +385,20 @@ pub fn sdk_27_permission_accept_edits_test() {
         |> claude_agent_sdk.with_permission_mode(AcceptEdits)
         |> claude_agent_sdk.with_max_turns(1)
 
-      let assert Ok(stream) = claude_agent_sdk.query("Hello", opts)
-      let _ = consume_stream(stream)
-
-      // Just verify it doesn't crash
-      should.be_true(True)
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
+        }
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(_result) -> {
+          // Just verify it doesn't crash
+          should.be_true(True)
+        }
+      }
     }
   }
 }
@@ -370,7 +410,7 @@ pub fn sdk_27_permission_accept_edits_test() {
 /// SDK-28: Verify with_permission_mode(BypassPermissions) is accepted.
 /// BypassPermissions skips all permission prompts.
 pub fn sdk_28_permission_bypass_test() {
-  case skip_if_no_e2e() {
+  case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
       Nil
@@ -381,11 +421,20 @@ pub fn sdk_28_permission_bypass_test() {
         |> claude_agent_sdk.with_permission_mode(BypassPermissions)
         |> claude_agent_sdk.with_max_turns(1)
 
-      let assert Ok(stream) = claude_agent_sdk.query("Hello", opts)
-      let _ = consume_stream(stream)
-
-      // Just verify it doesn't crash
-      should.be_true(True)
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
+          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          should.fail()
+        }
+        helpers.QueryTimedOut -> {
+          io.println("[FAIL] query() timed out")
+          should.fail()
+        }
+        helpers.QuerySuccess(_result) -> {
+          // Just verify it doesn't crash
+          should.be_true(True)
+        }
+      }
     }
   }
 }

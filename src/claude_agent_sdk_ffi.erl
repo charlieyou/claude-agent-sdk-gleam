@@ -5,8 +5,11 @@
 %% Returns the port reference.
 %% Gleam passes binaries; open_port expects charlists for executable/args/cd.
 open_port(Executable, Args, WorkingDir) ->
-    ExecStr = binary_to_list(Executable),
-    ArgsStr = [binary_to_list(A) || A <- Args],
+    ExecStr0 = binary_to_list(Executable),
+    ArgsStr0 = [binary_to_list(A) || A <- Args],
+    ensure_executable_exists(ExecStr0),
+    {ExecStr1, ArgsStr1} = wrap_with_stdbuf(ExecStr0, ArgsStr0),
+    {ExecStr, ArgsStr} = wrap_with_stdin_closed(ExecStr1, ArgsStr1),
     Opts = case WorkingDir of
         <<>> -> [];
         _ -> [{cd, binary_to_list(WorkingDir)}]
@@ -22,23 +25,29 @@ open_port(Executable, Args, WorkingDir) ->
 %% Safe version of open_port that catches exceptions and returns {ok, Port} | {error, Reason}.
 %% Use this for version detection where spawn failure should be a Result, not a crash.
 open_port_safe(Executable, Args, WorkingDir) ->
-    ExecStr = binary_to_list(Executable),
-    ArgsStr = [binary_to_list(A) || A <- Args],
-    Opts = case WorkingDir of
-        <<>> -> [];
-        _ -> [{cd, binary_to_list(WorkingDir)}]
-    end,
-    try
-        Port = erlang:open_port({spawn_executable, ExecStr}, [
-            {args, ArgsStr},
-            stream,
-            binary,
-            exit_status,
-            use_stdio
-        ] ++ Opts),
-        {<<"ok">>, Port}
-    catch
-        error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}
+    ExecStr0 = binary_to_list(Executable),
+    ArgsStr0 = [binary_to_list(A) || A <- Args],
+    case executable_exists(ExecStr0) of
+        false -> {<<"error">>, <<"not_found">>};
+        true ->
+            {ExecStr1, ArgsStr1} = wrap_with_stdbuf(ExecStr0, ArgsStr0),
+            {ExecStr, ArgsStr} = wrap_with_stdin_closed(ExecStr1, ArgsStr1),
+            Opts = case WorkingDir of
+                <<>> -> [];
+                _ -> [{cd, binary_to_list(WorkingDir)}]
+            end,
+            try
+                Port = erlang:open_port({spawn_executable, ExecStr}, [
+                    {args, ArgsStr},
+                    stream,
+                    binary,
+                    exit_status,
+                    use_stdio
+                ] ++ Opts),
+                {<<"ok">>, Port}
+            catch
+                error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}
+            end
     end.
 
 %% Opens a port for bidirectional protocol communication.
@@ -52,30 +61,35 @@ open_port_safe(Executable, Args, WorkingDir) ->
 %% Uses try-with-fallback for stderr_to_stdout detection to handle
 %% non-standard OTP release strings that fail version parsing.
 open_port_bidir(Executable, Args) ->
-    ExecStr = binary_to_list(Executable),
-    ArgsStr = [binary_to_list(A) || A <- Args],
-    %% Build base options
-    BaseOpts = [
-        {args, ArgsStr},
-        binary,
-        exit_status,
-        use_stdio
-    ],
-    %% Try with stderr_to_stdout first (OTP >= 25), fall back without it
-    OptsWithStderr = BaseOpts ++ [stderr_to_stdout],
-    try
-        Port = erlang:open_port({spawn_executable, ExecStr}, OptsWithStderr),
-        {<<"ok">>, Port}
-    catch
-        error:badarg ->
-            %% stderr_to_stdout not supported, retry without it
+    ExecStr0 = binary_to_list(Executable),
+    ArgsStr0 = [binary_to_list(A) || A <- Args],
+    case executable_exists(ExecStr0) of
+        false -> {<<"error">>, <<"not_found">>};
+        true ->
+            {ExecStr, ArgsStr} = wrap_with_stdbuf(ExecStr0, ArgsStr0),
+            %% Build base options
+            BaseOpts = [
+                {args, ArgsStr},
+                binary,
+                exit_status,
+                use_stdio
+            ],
+            %% Try with stderr_to_stdout first (OTP >= 25), fall back without it
+            OptsWithStderr = BaseOpts ++ [stderr_to_stdout],
             try
-                Port2 = erlang:open_port({spawn_executable, ExecStr}, BaseOpts),
-                {<<"ok">>, Port2}
+                Port = erlang:open_port({spawn_executable, ExecStr}, OptsWithStderr),
+                {<<"ok">>, Port}
             catch
-                error:Reason2 -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason2]))}
-            end;
-        error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}
+                error:badarg ->
+                    %% stderr_to_stdout not supported, retry without it
+                    try
+                        Port2 = erlang:open_port({spawn_executable, ExecStr}, BaseOpts),
+                        {<<"ok">>, Port2}
+                    catch
+                        error:Reason2 -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason2]))}
+                    end;
+                error:Reason -> {<<"error">>, list_to_binary(io_lib:format("~p", [Reason]))}
+            end
     end.
 
 %% Blocking receive for port messages.
@@ -147,6 +161,37 @@ find_cli_path(Name) ->
     case os:find_executable(NameStr) of
         false -> {<<"error">>, <<"not_found">>};
         Path -> {<<"ok">>, list_to_binary(Path)}
+    end.
+
+%% Wrap executable with stdbuf -oL -eL if available to avoid output buffering.
+wrap_with_stdbuf(ExecStr, ArgsStr) ->
+    case os:find_executable("stdbuf") of
+        false -> {ExecStr, ArgsStr};
+        StdBuf ->
+            {
+                StdBuf,
+                ["-oL", "-eL", ExecStr | ArgsStr]
+            }
+    end.
+
+%% Wrap executable in a shell that closes stdin to avoid blocking on piped stdin.
+wrap_with_stdin_closed(ExecStr, ArgsStr) ->
+    %% Use: sh -c 'exec "$@" < /dev/null' sh <exec> <args...>
+    case {filename:basename(ExecStr), os:find_executable("sh")} of
+        {"claude", Sh} when Sh =/= false ->
+            {Sh, ["-c", "exec \"$@\" < /dev/null", "sh", ExecStr | ArgsStr]};
+        _ -> {ExecStr, ArgsStr}
+    end.
+
+%% Return true if the executable path exists.
+executable_exists(ExecStr) ->
+    filelib:is_regular(ExecStr).
+
+%% Raise if executable does not exist.
+ensure_executable_exists(ExecStr) ->
+    case executable_exists(ExecStr) of
+        true -> ok;
+        false -> erlang:error(enoent)
     end.
 
 %% Rescue function to catch panics for testing.

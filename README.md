@@ -11,9 +11,7 @@ Gleam module namespace: `claude_agent_sdk`
 ## Prerequisites
 
 - **Claude Code** installed and accessible in PATH (`claude --version` works)
-- **Authentication** via one of:
-  - `claude login` (interactive)
-  - `ANTHROPIC_API_KEY` environment variable
+- **Authentication** via `claude auth login`
 - **Gleam** 1.0 or later
 
 ## Installation
@@ -193,25 +191,17 @@ gleam test  # Run the tests
 gleam test
 
 # E2E tests (requires Claude CLI + auth)
-E2E_SDK_TEST=1 gleam test
+gleam test -- --e2e
 ```
-
-### Environment Variables
-
-| Variable | Purpose |
-|----------|---------|
-| `ANTHROPIC_API_KEY` | API key for CLI authentication |
 
 ### Prerequisites for E2E Tests
 
 1. Claude CLI installed (`claude --version` works)
-2. Authentication via one of:
-   - `claude login` (interactive)
-   - `ANTHROPIC_API_KEY` environment variable
+2. Authentication via `claude auth login` (interactive)
 
 ### E2E Tests
 
-End-to-end tests validate the full SDK against a real Claude CLI. See [`docs/e2e.md`](docs/e2e.md) for detailed documentation.
+End-to-end tests validate the full SDK against a real Claude CLI. See [`docs/E2E_TESTING.md`](docs/E2E_TESTING.md) for detailed documentation.
 
 #### Running Locally
 
@@ -220,10 +210,10 @@ End-to-end tests validate the full SDK against a real Claude CLI. See [`docs/e2e
 npm install -g @anthropic-ai/claude-code
 
 # Authenticate
-export ANTHROPIC_API_KEY=your-key
+claude auth login
 
 # Run E2E via gleam test (runs unit + E2E)
-E2E_SDK_TEST=1 gleam test
+gleam test -- --e2e
 ```
 
 #### Running in CI
@@ -237,8 +227,8 @@ E2E tests are **opt-in** in CI to avoid running on every PR. They run when:
 | **Schedule** | Automatic weekly run (Sundays 02:00 UTC) |
 
 **CI requirements:**
-- `ANTHROPIC_API_KEY` secret must be configured in repository settings
-- If the secret is missing, E2E tests skip with a warning
+- Claude CLI must be installed and authenticated in the runner
+- Run tests with `gleam test -- --e2e`
 
 #### E2E Artifacts
 
@@ -587,7 +577,7 @@ your_gleam_app 2>/tmp/claude_stderr.log
 ```
 
 Common causes of empty stdout with non-zero exit:
-- **Not authenticated**: Authenticate the CLI or set `ANTHROPIC_API_KEY`
+- **Not authenticated**: Authenticate the CLI (e.g., `claude auth login`)
 - **Network issues**: Check connectivity to Anthropic API
 - **Config errors**: Check `~/.claude/` configuration
 

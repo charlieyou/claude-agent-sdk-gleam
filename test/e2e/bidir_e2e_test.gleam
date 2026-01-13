@@ -1,17 +1,17 @@
 /// End-to-End Tests for Bidirectional Protocol with Real Claude CLI.
 ///
-/// These tests are opt-in: they only run when CLAUDE_E2E_TESTS=1 is set.
+/// These tests are opt-in: they only run when --e2e is set.
 /// They validate the full bidirectional protocol against the real CLI.
 ///
 /// ## Prerequisites
 /// - Claude CLI installed and in PATH
-/// - Valid ANTHROPIC_API_KEY configured
-/// - Environment: CLAUDE_E2E_TESTS=1
+/// - Claude CLI authenticated (e.g., `claude auth login`)
+/// - Environment: --e2e
 ///
 /// ## Running Tests
 /// ```bash
-/// export CLAUDE_E2E_TESTS=1
-/// export ANTHROPIC_API_KEY="..."
+/// gleam test -- --e2e
+/// # Ensure the Claude CLI is authenticated (e.g., `claude auth login`)
 /// gleam test -- --only bidir_e2e
 /// ```
 ///
@@ -31,6 +31,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/io
+import gleam/string
 import gleeunit/should
 
 import e2e/helpers.{is_cli_available, skip_if_no_cli_e2e}
@@ -120,23 +121,44 @@ fn start_error_to_string(err: bidir.StartError) -> String {
 }
 
 /// Wait for session to reach Running state (with timeout).
+/// Returns Ok if Running, Error with the last observed lifecycle state otherwise.
 fn wait_for_running(
   session: process.Subject(bidir.ActorMessage),
   max_attempts: Int,
-) -> Bool {
+) -> Result(Nil, bidir.SessionLifecycle) {
+  wait_for_running_loop(session, max_attempts, bidir.Starting)
+}
+
+fn wait_for_running_loop(
+  session: process.Subject(bidir.ActorMessage),
+  max_attempts: Int,
+  last_state: bidir.SessionLifecycle,
+) -> Result(Nil, bidir.SessionLifecycle) {
   case max_attempts <= 0 {
-    True -> False
+    True -> Error(last_state)
     False -> {
-      case bidir.get_lifecycle(session, 1000) {
-        Running -> True
-        bidir.Failed(_) -> False
+      let state = bidir.get_lifecycle(session, 1000)
+      case state {
+        Running -> Ok(Nil)
+        bidir.Failed(_) -> Error(state)
+        bidir.Stopped -> Error(state)
         _ -> {
           process.sleep(100)
-          wait_for_running(session, max_attempts - 1)
+          wait_for_running_loop(session, max_attempts - 1, state)
         }
       }
     }
   }
+}
+
+fn handle_wait_failure(
+  session: process.Subject(bidir.ActorMessage),
+  state: bidir.SessionLifecycle,
+) -> Nil {
+  io.println("[INFO] Lifecycle state: " <> string.inspect(state))
+  io.println("[FAIL] Session failed to reach Running state")
+  bidir.shutdown(session)
+  should.fail()
 }
 
 /// Collect subscriber messages until session ends or timeout.
@@ -196,12 +218,8 @@ pub fn real_session_with_hook_test() {
             }
             Ok(#(session, subscriber)) -> {
               case wait_for_running(session, 50) {
-                False -> {
-                  io.println("[FAIL] Session failed to reach Running state")
-                  bidir.shutdown(session)
-                  should.fail()
-                }
-                True -> {
+                Error(state) -> handle_wait_failure(session, state)
+                Ok(Nil) -> {
                   case process.receive(hook_subject, 30_000) {
                     Ok(hook_input) -> {
                       // Verify hook received tool context
@@ -266,12 +284,8 @@ pub fn real_control_operations_test() {
             }
             Ok(#(session, subscriber)) -> {
               case wait_for_running(session, 50) {
-                False -> {
-                  io.println("[FAIL] Session failed to reach Running state")
-                  bidir.shutdown(session)
-                  should.fail()
-                }
-                True -> {
+                Error(state) -> handle_wait_failure(session, state)
+                Ok(Nil) -> {
                   // Send set_model request
                   let result_subject: process.Subject(RequestResult) =
                     process.new_subject()
@@ -376,12 +390,8 @@ pub fn real_permission_callback_test() {
             }
             Ok(#(session, subscriber)) -> {
               case wait_for_running(session, 50) {
-                False -> {
-                  io.println("[FAIL] Session failed to reach Running state")
-                  bidir.shutdown(session)
-                  should.fail()
-                }
-                True -> {
+                Error(state) -> handle_wait_failure(session, state)
+                Ok(Nil) -> {
                   // Wait for permission handler invocation
                   case process.receive(permission_subject, 30_000) {
                     Ok(msg) -> {
@@ -460,12 +470,8 @@ pub fn real_interrupt_test() {
             }
             Ok(#(session, subscriber)) -> {
               case wait_for_running(session, 50) {
-                False -> {
-                  io.println("[FAIL] Session failed to reach Running state")
-                  bidir.shutdown(session)
-                  should.fail()
-                }
-                True -> {
+                Error(state) -> handle_wait_failure(session, state)
+                Ok(Nil) -> {
                   // Give CLI a moment to start processing
                   process.sleep(500)
 
@@ -531,22 +537,22 @@ pub fn real_interrupt_test() {
 
 /// Validate is_cli_available() helper returns correct value.
 ///
-/// When CLAUDE_E2E_TESTS=1, should return True if claude is in PATH.
-/// When CLAUDE_E2E_TESTS is not set, should return False.
+/// When --e2e, should return True if claude is in PATH.
+/// When --e2e is not set, should return False.
 pub fn is_cli_available_helper_test() {
   // This test runs unconditionally to validate the helper
   let result = is_cli_available()
 
   case skip_if_no_cli_e2e() {
     Error(_) -> {
-      // CLAUDE_E2E_TESTS not set - helper should return False
+      // --e2e not set - helper should return False
       should.equal(result, False)
       io.println(
-        "[PASS] is_cli_available() returns False when CLAUDE_E2E_TESTS not set",
+        "[PASS] is_cli_available() returns False when --e2e is not set",
       )
     }
     Ok(Nil) -> {
-      // CLAUDE_E2E_TESTS=1 - result depends on whether CLI is in PATH
+      // --e2e - result depends on whether CLI is in PATH
       io.println(
         "[INFO] is_cli_available() returned: " <> bool_to_string(result),
       )

@@ -8,7 +8,7 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// export E2E_SDK_TEST=1
+/// gleam test -- --e2e
 /// gleam test -- --only sdk_bidir
 /// ```
 import gleam/dict

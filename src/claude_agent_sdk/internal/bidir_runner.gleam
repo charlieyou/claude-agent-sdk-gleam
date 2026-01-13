@@ -76,20 +76,25 @@ pub fn start(args: List(String)) -> Result(BidirRunner, StartError) {
 }
 
 /// Start a BidirRunner with an explicit executable path.
-/// Prepends --output-format stream-json --input-format stream-json to args.
+/// Prepends --print --verbose --output-format stream-json --input-format stream-json to args.
 pub fn start_with_path(
   executable_path: String,
   args: List(String),
 ) -> Result(BidirRunner, StartError) {
-  // Build full args: --output-format stream-json --input-format stream-json + user args
+  // Build full args: --print --verbose --output-format stream-json --input-format stream-json + user args
   let full_args = [
+    "--print",
+    "--verbose",
     "--output-format",
     "stream-json",
     "--input-format",
     "stream-json",
     ..args
   ]
-  start_raw(executable_path, full_args)
+  case find_cli_path(executable_path) {
+    Error(reason) -> Error(SpawnFailed("executable not found: " <> reason))
+    Ok(_) -> start_raw(executable_path, full_args)
+  }
 }
 
 /// Start a BidirRunner with raw arguments (no stream-json args prepended).

@@ -33,7 +33,7 @@ const skip_msg_version_prefix = "[SKIP:ENV] CLI version "
 
 const skip_msg_version_suffix = " < 1.0.0 - upgrade required"
 
-const skip_msg_auth_unavailable = "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or authenticate the CLI"
+const skip_msg_auth_unavailable = "[SKIP:AUTH] Auth not available - authenticate the CLI"
 
 const skip_msg_ndjson = "[SKIP:NDJSON] CLI not producing pure NDJSON"
 
@@ -185,7 +185,7 @@ pub fn integration__skip_message_auth_unavailable_test() {
   // Validates that the constant has the expected format
   should.equal(
     skip_msg_auth_unavailable,
-    "[SKIP:AUTH] Auth not available - set ANTHROPIC_API_KEY or authenticate the CLI",
+    "[SKIP:AUTH] Auth not available - authenticate the CLI",
   )
 }
 

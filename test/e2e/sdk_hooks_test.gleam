@@ -1,7 +1,7 @@
 /// E2E Tests for Hooks via Bidirectional Protocol (SDK-30 to SDK-36).
 ///
 /// These tests verify hook registration and dispatch via bidir.start_with_hooks() API.
-/// They are skipped when E2E_SDK_TEST != 1.
+/// They are skipped unless --e2e is provided.
 ///
 /// ## What's Being Tested
 /// - SDK-30: PreToolUse hook fires with tool_name and tool_input
@@ -14,8 +14,8 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// export E2E_SDK_TEST=1
-/// export ANTHROPIC_API_KEY="..."
+/// gleam test -- --e2e
+/// # Ensure the Claude CLI is authenticated (e.g., `claude auth login`)
 /// gleam test -- --only sdk_hooks
 /// ```
 import claude_agent_sdk/internal/bidir.{
@@ -29,6 +29,7 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/io
 import gleam/list
+import gleam/string
 import gleeunit/should
 
 import e2e/helpers.{skip_if_no_e2e}
@@ -123,23 +124,44 @@ fn bidir_start_error_to_string(err: bidir.StartError) -> String {
 }
 
 /// Wait for session to reach Running state (with timeout).
+/// Returns Ok if Running, Error with the last observed lifecycle state otherwise.
 fn wait_for_running(
   session: process.Subject(bidir.ActorMessage),
   max_attempts: Int,
-) -> Bool {
+) -> Result(Nil, bidir.SessionLifecycle) {
+  wait_for_running_loop(session, max_attempts, bidir.Starting)
+}
+
+fn wait_for_running_loop(
+  session: process.Subject(bidir.ActorMessage),
+  max_attempts: Int,
+  last_state: bidir.SessionLifecycle,
+) -> Result(Nil, bidir.SessionLifecycle) {
   case max_attempts <= 0 {
-    True -> False
+    True -> Error(last_state)
     False -> {
-      case bidir.get_lifecycle(session, 1000) {
-        Running -> True
-        bidir.Failed(_) -> False
+      let state = bidir.get_lifecycle(session, 1000)
+      case state {
+        Running -> Ok(Nil)
+        bidir.Failed(_) -> Error(state)
+        bidir.Stopped -> Error(state)
         _ -> {
           process.sleep(100)
-          wait_for_running(session, max_attempts - 1)
+          wait_for_running_loop(session, max_attempts - 1, state)
         }
       }
     }
   }
+}
+
+fn handle_wait_failure(
+  session: process.Subject(bidir.ActorMessage),
+  state: bidir.SessionLifecycle,
+) -> Nil {
+  io.println("[INFO] Lifecycle state: " <> string.inspect(state))
+  io.println("[FAIL] Session failed to reach Running state")
+  bidir.shutdown(session)
+  should.fail()
 }
 
 /// Wait for and collect subscriber messages until session ends or timeout.
@@ -232,12 +254,8 @@ pub fn sdk_30_pre_tool_use_hook_test() {
         Ok(#(session, subscriber)) -> {
           // Wait for session to be running
           case wait_for_running(session, 50) {
-            False -> {
-              io.println("[FAIL] Session failed to reach Running state")
-              bidir.shutdown(session)
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               // Wait for hook invocation or timeout
               case process.receive(hook_subject, 30_000) {
                 Ok(hook_input) -> {
@@ -315,12 +333,8 @@ pub fn sdk_31_pre_tool_use_block_test() {
         }
         Ok(#(session, subscriber)) -> {
           case wait_for_running(session, 50) {
-            False -> {
-              io.println("[FAIL] Session failed to reach Running state")
-              bidir.shutdown(session)
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               // Wait for PreToolUse hook to be invoked
               case process.receive(pre_hook_subject, 30_000) {
                 Ok(tool_name) -> {
@@ -405,12 +419,8 @@ pub fn sdk_32_pre_tool_use_modify_input_test() {
         }
         Ok(#(session, subscriber)) -> {
           case wait_for_running(session, 50) {
-            False -> {
-              bidir.shutdown(session)
-              io.println("[FAIL] Session failed to reach Running state")
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               case process.receive(hook_subject, 30_000) {
                 Ok(msg) -> {
                   io.println("[PASS] Hook invoked: " <> msg)
@@ -469,12 +479,8 @@ pub fn sdk_33_post_tool_use_hook_test() {
         }
         Ok(#(session, subscriber)) -> {
           case wait_for_running(session, 50) {
-            False -> {
-              bidir.shutdown(session)
-              io.println("[FAIL] Session failed to reach Running state")
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               // Wait for PostToolUse hook
               case process.receive(hook_subject, 30_000) {
                 Ok(hook_input) -> {
@@ -551,12 +557,8 @@ pub fn sdk_34_can_use_tool_test() {
         }
         Ok(#(session, subscriber)) -> {
           case wait_for_running(session, 50) {
-            False -> {
-              bidir.shutdown(session)
-              io.println("[FAIL] Session failed to reach Running state")
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               // Wait for permission check
               case process.receive(hook_subject, 30_000) {
                 Ok(msg) -> {
@@ -638,12 +640,8 @@ pub fn sdk_35_stop_hook_test() {
         }
         Ok(#(session, subscriber)) -> {
           case wait_for_running(session, 50) {
-            False -> {
-              bidir.shutdown(session)
-              io.println("[FAIL] Session failed to reach Running state")
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               // Wait for session to complete naturally
               let _ = collect_messages(subscriber, 30_000, [])
 
@@ -712,12 +710,8 @@ pub fn sdk_36_multiple_hooks_test() {
         }
         Ok(#(session, subscriber)) -> {
           case wait_for_running(session, 50) {
-            False -> {
-              bidir.shutdown(session)
-              io.println("[FAIL] Session failed to reach Running state")
-              should.fail()
-            }
-            True -> {
+            Error(state) -> handle_wait_failure(session, state)
+            Ok(Nil) -> {
               // Collect hook invocations (give time for both hooks to fire)
               let hooks_fired =
                 collect_hook_invocations(hook_subject, [], 30_000)
