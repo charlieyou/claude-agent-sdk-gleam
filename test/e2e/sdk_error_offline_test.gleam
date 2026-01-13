@@ -19,8 +19,10 @@ import claude_agent_sdk/error.{
   WarningEvent,
 }
 import claude_agent_sdk/runner
+import e2e/helpers
 import gleam/dynamic
 import gleam/erlang/process
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleeunit/should
@@ -50,6 +52,9 @@ fn from_dynamic(d: dynamic.Dynamic) -> a
 /// True timeout testing would require a mock that hangs indefinitely
 /// and SDK-level timeout configuration.
 pub fn sdk_62_delayed_exit_test() {
+  let ctx = helpers.new_test_context("sdk_62_delayed_exit")
+  let ctx = helpers.test_step(ctx, "setup_mock_runner")
+
   // Create mock runner that delays before returning exit status
   let mock_runner =
     runner.test_runner(
@@ -69,13 +74,16 @@ pub fn sdk_62_delayed_exit_test() {
     |> claude_agent_sdk.with_max_turns(1)
     |> claude_agent_sdk.with_skip_version_check
 
+  let ctx = helpers.test_step(ctx, "execute_query")
   case claude_agent_sdk.query("test prompt", opts) {
     Error(_err) -> {
       // Query itself failed - acceptable for delayed exit scenario
-      Nil
+      helpers.log_info(ctx, "query_failed_acceptable")
+      helpers.log_test_complete(ctx, True, "Query failed as acceptable outcome")
     }
     Ok(stream) -> {
       // Query succeeded, read from stream
+      let ctx = helpers.test_step(ctx, "read_stream")
       let #(result, updated_stream) = claude_agent_sdk.next(stream)
 
       // Should get an error (ProcessError for non-zero exit)
@@ -83,17 +91,30 @@ pub fn sdk_62_delayed_exit_test() {
         Error(ProcessError(exit_code, _diagnostic)) -> {
           // Non-zero exit after delay is expected
           exit_code |> should.equal(1)
+          helpers.log_info_with(ctx, "process_error_received", [
+            #("exit_code", json.int(exit_code)),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Delayed exit handled with ProcessError",
+          )
         }
         Error(other_error) -> {
           // Any terminal error is acceptable
           claude_agent_sdk.is_terminal(other_error) |> should.be_true
+          helpers.log_info(ctx, "terminal_error_received")
+          helpers.log_test_complete(ctx, True, "Terminal error handled")
         }
         Ok(EndOfStream) -> {
           // EndOfStream is acceptable if runner returned exit
-          Nil
+          helpers.log_info(ctx, "end_of_stream_received")
+          helpers.log_test_complete(ctx, True, "EndOfStream handled")
         }
         Ok(_) -> {
           // Unexpected success - should not happen with failing runner
+          helpers.log_error(ctx, "unexpected_success", "Should not succeed")
+          helpers.log_test_complete(ctx, False, "Unexpected success")
           should.fail()
         }
       }
@@ -114,6 +135,9 @@ pub fn sdk_62_delayed_exit_test() {
 /// This complements sdk_62_delayed_exit_test which tests delayed exit handling.
 /// This test exercises the Timeout variant added to runner.ReadResult.
 pub fn sdk_62_timeout_test() {
+  let ctx = helpers.new_test_context("sdk_62_timeout")
+  let ctx = helpers.test_step(ctx, "setup_mock_runner")
+
   // Create mock runner that returns Timeout immediately (simulating hung CLI)
   let mock_runner =
     runner.test_runner(
@@ -131,27 +155,38 @@ pub fn sdk_62_timeout_test() {
     |> claude_agent_sdk.with_max_turns(1)
     |> claude_agent_sdk.with_skip_version_check
 
+  let ctx = helpers.test_step(ctx, "execute_query")
   case claude_agent_sdk.query("test prompt", opts) {
     Error(_err) -> {
       // Query itself failed - acceptable for timeout scenario
-      Nil
+      helpers.log_info(ctx, "query_failed_acceptable")
+      helpers.log_test_complete(ctx, True, "Query failed as acceptable outcome")
     }
     Ok(stream) -> {
       // Query succeeded, read from stream - should see timeout handling
+      let ctx = helpers.test_step(ctx, "read_stream")
       let #(result, updated_stream) = claude_agent_sdk.next(stream)
 
       // Timeout should result in EndOfStream or an error, not hang
       case result {
         Ok(EndOfStream) -> {
           // Timeout treated as end of stream - valid behavior
-          Nil
+          helpers.log_info(ctx, "timeout_as_end_of_stream")
+          helpers.log_test_complete(ctx, True, "Timeout handled as EndOfStream")
         }
         Error(_) -> {
           // Any error is acceptable for timeout scenario
-          Nil
+          helpers.log_info(ctx, "timeout_as_error")
+          helpers.log_test_complete(ctx, True, "Timeout handled as error")
         }
         Ok(_) -> {
           // Unexpected data after timeout - fail the test
+          helpers.log_error(
+            ctx,
+            "unexpected_data",
+            "Received data after timeout",
+          )
+          helpers.log_test_complete(ctx, False, "Unexpected data after timeout")
           should.fail()
         }
       }
@@ -175,6 +210,9 @@ const call_count_key = "call_count"
 /// The mock runner emits one valid message then abruptly closes with
 /// a non-zero exit status, simulating a network interruption.
 pub fn sdk_63_stream_interruption_test() {
+  let ctx = helpers.new_test_context("sdk_63_stream_interruption")
+  let ctx = helpers.test_step(ctx, "setup_mock_runner")
+
   let table = ets_helpers.new("sdk_63_test_state")
 
   // Initialize call counter
@@ -224,32 +262,51 @@ pub fn sdk_63_stream_interruption_test() {
     |> claude_agent_sdk.with_max_turns(1)
     |> claude_agent_sdk.with_skip_version_check
 
+  let ctx = helpers.test_step(ctx, "execute_query")
   case claude_agent_sdk.query("test prompt", opts) {
     Error(_err) -> {
+      helpers.log_error(ctx, "query_failed", "Query should not fail")
+      helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
       should.fail()
     }
     Ok(stream) -> {
       // First read should yield the system message
+      let ctx = helpers.test_step(ctx, "read_first_message")
       let #(result1, stream1) = claude_agent_sdk.next(stream)
 
       case result1 {
         Ok(Message(_envelope)) -> {
           // Good - got the message before interruption
-          Nil
+          helpers.log_info(ctx, "first_message_received")
         }
         _ -> {
+          helpers.log_error(
+            ctx,
+            "missing_message",
+            "Expected system message first",
+          )
+          helpers.log_test_complete(ctx, False, "Missing first message")
           let _ = claude_agent_sdk.close(stream1)
           should.fail()
         }
       }
 
       // Second read should get the interruption error
+      let ctx = helpers.test_step(ctx, "verify_interruption_error")
       let #(result2, stream2) = claude_agent_sdk.next(stream1)
 
       case result2 {
         Error(ProcessError(exit_code, _diagnostic)) -> {
           // Stream interrupted - exit code should be 1
           exit_code |> should.equal(1)
+          helpers.log_info_with(ctx, "interruption_error_received", [
+            #("exit_code", json.int(exit_code)),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Stream interruption handled gracefully",
+          )
           let _ = claude_agent_sdk.close(stream2)
           Nil
         }
@@ -257,14 +314,38 @@ pub fn sdk_63_stream_interruption_test() {
           // Warning about no result is also acceptable before interruption error
           let #(result3, stream3) = claude_agent_sdk.next(stream2)
           case result3 {
-            Error(ProcessError(_, _)) -> Nil
-            Ok(EndOfStream) -> Nil
-            _ -> should.fail()
+            Error(ProcessError(_, _)) -> {
+              helpers.log_info(ctx, "interruption_after_warning")
+              helpers.log_test_complete(
+                ctx,
+                True,
+                "Interruption after warning handled",
+              )
+            }
+            Ok(EndOfStream) -> {
+              helpers.log_info(ctx, "end_of_stream_after_warning")
+              helpers.log_test_complete(
+                ctx,
+                True,
+                "EndOfStream after warning handled",
+              )
+            }
+            _ -> {
+              helpers.log_error(
+                ctx,
+                "unexpected_result",
+                "Unexpected result after warning",
+              )
+              helpers.log_test_complete(ctx, False, "Unexpected result")
+              should.fail()
+            }
           }
           let _ = claude_agent_sdk.close(stream3)
           Nil
         }
         _ -> {
+          helpers.log_error(ctx, "unexpected_result", "Expected interruption")
+          helpers.log_test_complete(ctx, False, "Unexpected result")
           let _ = claude_agent_sdk.close(stream2)
           should.fail()
         }
@@ -285,6 +366,9 @@ pub fn sdk_63_stream_interruption_test() {
 /// - Log/skip malformed lines (non-terminal error)
 /// - Continue processing subsequent valid lines (graceful degradation)
 pub fn sdk_64_invalid_json_handling_test() {
+  let ctx = helpers.new_test_context("sdk_64_invalid_json")
+  let ctx = helpers.test_step(ctx, "setup_mock_runner")
+
   let table = ets_helpers.new("sdk_64_test_state")
 
   // Initialize line index
@@ -328,12 +412,16 @@ pub fn sdk_64_invalid_json_handling_test() {
     |> claude_agent_sdk.with_max_turns(1)
     |> claude_agent_sdk.with_skip_version_check
 
+  let ctx = helpers.test_step(ctx, "execute_query")
   case claude_agent_sdk.query("test prompt", opts) {
     Error(_err) -> {
+      helpers.log_error(ctx, "query_failed", "Query should not fail")
+      helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
       should.fail()
     }
     Ok(stream) -> {
       // Collect all results to verify graceful degradation
+      let ctx = helpers.test_step(ctx, "collect_stream_results")
       let #(messages, errors, stream_final) = collect_stream_results(stream)
 
       // Should have processed valid messages (system, assistant, result = 3)
@@ -354,6 +442,16 @@ pub fn sdk_64_invalid_json_handling_test() {
             }
         }
       })
+
+      helpers.log_info_with(ctx, "graceful_degradation_verified", [
+        #("messages_received", json.int(list.length(messages))),
+        #("errors_received", json.int(list.length(errors))),
+      ])
+      helpers.log_test_complete(
+        ctx,
+        True,
+        "Malformed JSON handled with graceful degradation",
+      )
 
       // Cleanup
       let _ = claude_agent_sdk.close(stream_final)
@@ -421,6 +519,9 @@ fn collect_stream_loop(
 /// SDK-64b: Explicitly verify that valid messages are processed even
 /// when surrounded by malformed JSON.
 pub fn sdk_64b_valid_messages_preserved_test() {
+  let ctx = helpers.new_test_context("sdk_64b_valid_preserved")
+  let ctx = helpers.test_step(ctx, "setup_mock_runner")
+
   let table = ets_helpers.new("sdk_64b_test_state")
 
   // Initialize line index
@@ -464,11 +565,15 @@ pub fn sdk_64b_valid_messages_preserved_test() {
     |> claude_agent_sdk.with_max_turns(1)
     |> claude_agent_sdk.with_skip_version_check
 
+  let ctx = helpers.test_step(ctx, "execute_query")
   case claude_agent_sdk.query("test prompt", opts) {
     Error(_err) -> {
+      helpers.log_error(ctx, "query_failed", "Query should not fail")
+      helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
       should.fail()
     }
     Ok(stream) -> {
+      let ctx = helpers.test_step(ctx, "collect_stream_results")
       let #(messages, errors, stream_final) = collect_stream_results(stream)
 
       // Should have exactly 3 valid messages (system, assistant, result)
@@ -482,8 +587,26 @@ pub fn sdk_64b_valid_messages_preserved_test() {
         Ok(JsonDecodeError(line, _)) -> {
           // The malformed line should be preserved in the error
           line |> should.equal("not json at all")
+          helpers.log_info_with(ctx, "valid_messages_preserved", [
+            #("messages_count", json.int(list.length(messages))),
+            #("errors_count", json.int(list.length(errors))),
+            #("malformed_line", json.string(line)),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Valid messages preserved around malformed JSON",
+          )
         }
-        _ -> should.fail()
+        _ -> {
+          helpers.log_error(
+            ctx,
+            "unexpected_error_type",
+            "Expected JsonDecodeError",
+          )
+          helpers.log_test_complete(ctx, False, "Wrong error type")
+          should.fail()
+        }
       }
 
       // Cleanup
