@@ -540,11 +540,15 @@ pub fn test_ac10_hook_errors_fail_open_test() {
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
 
-  let assert Ok(_) = process.receive(mock.writes, 500)
+  // Capture init request and extract request_id for response correlation
+  let assert Ok(init_msg) = process.receive(mock.writes, 500)
+  let assert Ok(req_id) = extract_request_id(init_msg)
 
-  // Transition to Running
+  // Transition to Running with matching request_id
   let init_json =
-    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
+    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\""
+    <> req_id
+    <> "\",\"response\":{\"capabilities\":{}}}}"
   bidir.inject_message(session, init_json)
   process.sleep(50)
   should.equal(bidir.get_lifecycle(session, 1000), Running)
@@ -610,11 +614,15 @@ pub fn test_ac11_permission_errors_fail_deny_test() {
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
 
-  let assert Ok(_) = process.receive(mock.writes, 500)
+  // Capture init request and extract request_id for response correlation
+  let assert Ok(init_msg) = process.receive(mock.writes, 500)
+  let assert Ok(req_id) = extract_request_id(init_msg)
 
-  // Transition to Running
+  // Transition to Running with matching request_id
   let init_json =
-    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
+    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\""
+    <> req_id
+    <> "\",\"response\":{\"capabilities\":{}}}}"
   bidir.inject_message(session, init_json)
   process.sleep(50)
   should.equal(bidir.get_lifecycle(session, 1000), Running)
