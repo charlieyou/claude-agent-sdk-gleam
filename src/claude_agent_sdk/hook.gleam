@@ -31,7 +31,7 @@
 /// ```
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
-import gleam/option.{type Option}
+import gleam/option.{type Option, None}
 
 // =============================================================================
 // Hook Events
@@ -354,12 +354,16 @@ fn decode_subagent_stop(input: Dynamic) -> Result(HookInput, HookDecodeError) {
 }
 
 /// Decode PreCompact input to PreCompactContext.
+/// Uses optional_field for trigger and custom_instructions for backward compatibility
+/// with older payloads that may not include these fields.
 fn decode_pre_compact(input: Dynamic) -> Result(HookInput, HookDecodeError) {
   let decoder = {
     use session_id <- decode.field("session_id", decode.string)
-    use trigger <- decode.field("trigger", decode.string)
-    use custom_instructions <- decode.field(
+    // Default to "auto" when trigger field is missing for backward compatibility
+    use trigger <- decode.optional_field("trigger", "auto", decode.string)
+    use custom_instructions <- decode.optional_field(
       "custom_instructions",
+      None,
       decode.optional(decode.string),
     )
     decode.success(PreCompactContext(

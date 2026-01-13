@@ -251,7 +251,8 @@ pub fn decode_pre_compact_missing_session_id_test() {
   }
 }
 
-pub fn decode_pre_compact_missing_trigger_test() {
+pub fn decode_pre_compact_missing_trigger_defaults_to_auto_test() {
+  // Trigger field is optional with default "auto" for backward compatibility
   let json_str =
     "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"abc123\",\"custom_instructions\":null}"
   let input = parse_json(json_str)
@@ -259,7 +260,29 @@ pub fn decode_pre_compact_missing_trigger_test() {
   let result = decode_hook_input(PreCompact, input)
 
   case result {
-    Error(MissingField(field)) -> should.equal(field, "trigger")
+    Ok(PreCompactInput(ctx)) -> {
+      should.equal(ctx.session_id, "abc123")
+      should.equal(ctx.trigger, "auto")
+      should.equal(ctx.custom_instructions, None)
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn decode_pre_compact_minimal_payload_test() {
+  // Backward compatibility: minimal payload with only session_id
+  let json_str =
+    "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"abc123\"}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreCompact, input)
+
+  case result {
+    Ok(PreCompactInput(ctx)) -> {
+      should.equal(ctx.session_id, "abc123")
+      should.equal(ctx.trigger, "auto")
+      should.equal(ctx.custom_instructions, None)
+    }
     _ -> should.fail()
   }
 }
