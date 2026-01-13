@@ -63,6 +63,49 @@ Allowed:
   - CLI version detection that calls the OS
   - PATH lookup or auth checks
 
+## Coverage Exclusion List
+
+The following modules and functions are excluded from unit coverage thresholds
+because they contain OS/process boundary code.
+
+### Module-Level Exclusions
+
+| Module | Reason |
+|--------|--------|
+| `claude_agent_sdk/internal/port_ffi` | Erlang port operations (spawn, read, close) |
+| `claude_agent_sdk_ffi` | Erlang FFI layer |
+| `bidir_ffi` | Bidirectional protocol FFI |
+
+### Function-Level Exclusions
+
+These functions within otherwise-eligible modules involve OS calls:
+
+| Module | Function | Reason |
+|--------|----------|--------|
+| `cli` | `detect_cli_version/2` | Spawns CLI process via port_ffi |
+| `cli` | `find_cli_path/0` | PATH environment lookup |
+| `cli` | `check_cli_availability/0` | OS process execution |
+
+### Justification
+
+- **Port FFI modules**: These are thin wrappers around Erlang's port system. Testing
+  them requires spawning real OS processes. They are covered by phase0 runtime tests
+  using deterministic commands like `/bin/echo`.
+
+- **CLI detection functions**: These call the actual Claude CLI binary. Testing them
+  requires either a real CLI installation or mocking, which violates our no-mock policy.
+  They are covered by integration tests gated on `CLAUDE_INTEGRATION_TEST=1`.
+
+### Enforcement
+
+Run the coverage script with threshold enforcement:
+
+```bash
+./scripts/coverage.sh --threshold 95.0
+```
+
+This automatically excludes the listed modules and reports only on eligible code.
+
 ## Gating and Environment Variables
 - Unit tests: default `gleam test`
 - Phase 0 runtime tests: run with `gleam test`

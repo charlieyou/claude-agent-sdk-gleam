@@ -1,64 +1,115 @@
 # Testing
 
-The SDK can run without a real CLI process by enabling test mode. This lets you
-unit-test your stream handling logic deterministically.
+This document covers the SDK's testing strategy, including coverage thresholds
+and module exclusions.
 
-## Test mode basics
+## Test Categories
 
-- Create a `Runner` with `runner.test_runner(...)`
-- Enable it with `with_test_mode(runner)`
-- `query()` will use your runner instead of spawning the CLI
+### Unit Tests (Pure Logic)
 
-```gleam
-import claude_agent_sdk
-import claude_agent_sdk/runner
-import gleam/dynamic
+Run with `gleam test`:
+- Pure parsing and validation logic
+- Option builders and precedence
+- Type-level construction/matching
+- Error formatting/diagnostics
+- Decoder functions with fixtures
 
-let test_runner = runner.test_runner(
-  on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.from("handle")) },
-  on_read: fn(_handle) { runner.Eof },
-  on_close: fn(_handle) { Nil },
-)
+### Phase 0 Runtime Tests
 
-let opts = claude_agent_sdk.default_options()
-  |> claude_agent_sdk.with_test_mode(test_runner)
+Tests that use real port_ffi against deterministic OS commands:
+- Spawn/read/exit/close behavior using `/bin/echo` or similar
+- Validates FFI wiring and runtime primitives
+
+### Integration Tests
+
+Require `CLAUDE_INTEGRATION_TEST=1`:
+- PATH lookup and CLI discovery
+- CLI version detection
+- Auth availability checks
+- Real query and stream behavior
+
+### E2E Tests
+
+Full scripted workflows with real Claude CLI:
+- Multi-step scenarios with detailed logging
+- Artifact capture for debugging
+
+## Coverage Reporting
+
+### Quick Start
+
+```bash
+# Run coverage report
+./scripts/coverage.sh
+
+# JSON output for CI
+./scripts/coverage.sh --json
+
+# Enforce threshold (95% line coverage)
+./scripts/coverage.sh --threshold 95.0
 ```
 
-`ReadResult` options:
+### Coverage Thresholds
 
-- `Data(BitArray)`
-- `ExitStatus(Int)`
-- `ReadError(String)`
-- `Eof`
+For **eligible modules** (pure logic, no OS boundary code):
+- Line coverage: ≥95%
+- Branch coverage: ≥90% (where measurable)
 
-## Simulating a full response
+Run `./scripts/coverage.sh --threshold 95.0` to enforce.
 
-A realistic test runner emits JSON lines followed by `ExitStatus(0)`.
-The SDK expects each JSON object to be terminated by a newline.
+## Module Exclusions
 
-Example sketch:
+The following modules are **excluded from coverage thresholds** because they
+contain OS/process boundary code that cannot be unit tested without mocks:
 
-```gleam
-import claude_agent_sdk/runner
-import gleam/bit_array
-import gleam/dynamic
+| Module | Reason |
+|--------|--------|
+| `claude_agent_sdk/internal/port_ffi` | Erlang port operations (spawn, read, close) |
+| `claude_agent_sdk_ffi` | Erlang FFI layer |
+| `bidir_ffi` | Bidirectional protocol FFI |
 
-// Pseudocode structure: store remaining chunks per handle
-let test_runner = runner.test_runner(
-  on_spawn: fn(_, _, _) {
-    // return a handle key and store state in ETS or another store
-    Ok(dynamic.from("handle"))
-  },
-  on_read: fn(handle) {
-    // fetch next chunk from your store
-    runner.Data(bit_array.from_string("{\"type\":\"result\"}\n"))
-  },
-  on_close: fn(_handle) { Nil },
-)
+### Function-Level Exclusions
+
+Within otherwise-eligible modules, these functions involve OS calls:
+
+| Module | Function | Reason |
+|--------|----------|--------|
+| `cli` | `detect_cli_version/2` | Spawns CLI process |
+| `cli` | `find_cli_path/0` | PATH environment lookup |
+| `cli` | `check_cli_availability/0` | OS process execution |
+
+These functions are covered by integration tests (`CLAUDE_INTEGRATION_TEST=1`),
+not unit coverage thresholds.
+
+## No-Mock Policy
+
+This SDK uses a **strict no-mock policy**:
+
+**Disallowed:**
+- Test runners that simulate CLI output
+- ETS-backed fake stream state
+- Stubbed port read/close operations
+
+**Allowed:**
+- Pure-function unit tests
+- Real port_ffi against deterministic helpers (`/bin/echo`)
+- Real CLI integration tests (env-gated)
+- Fixtures representing real JSON payloads
+
+See [plans/testing-policy.md](../plans/testing-policy.md) for full policy details.
+
+## Running Tests
+
+```bash
+# Unit tests only (default)
+gleam test
+
+# Include integration tests
+CLAUDE_INTEGRATION_TEST=1 gleam test
+
+# Coverage with threshold enforcement
+./scripts/coverage.sh --threshold 95.0
+
+# CI-friendly JSON output
+./scripts/coverage.sh --json --threshold 95.0
 ```
-
-## When to use test mode
-
-- You want to test message parsing and stream handling
-- You want deterministic test data without CLI/network dependencies
-- You want to simulate error conditions (exit code, malformed JSON, etc.)
