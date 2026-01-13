@@ -32,6 +32,9 @@ pub type CliVersion {
 /// Minimum CLI version required by SDK (1.0.0)
 pub const minimum_cli_version = CliVersion(1, 0, 0, "1.0.0")
 
+/// Minimum CLI version required for bidirectional protocol support (1.1.0)
+pub const minimum_bidir_cli_version = CliVersion(1, 1, 0, "1.1.0")
+
 /// Errors from version detection
 pub type VersionCheckError {
   /// Timeout waiting for CLI response
@@ -330,4 +333,123 @@ fn add_permission_mode(args: List(String), mode: PermissionMode) -> List(String)
     // Default permission mode - don't add any flag
     options.Default -> args
   }
+}
+
+// ============================================================================
+// Bidirectional Mode Support
+// ============================================================================
+
+/// Check if options contain any bidirectional features.
+/// Returns True if any hooks or can_use_tool handler are set.
+pub fn has_bidir_features(options: QueryOptions) -> Bool {
+  case options.on_pre_tool_use {
+    Some(_) -> True
+    None ->
+      case options.on_post_tool_use {
+        Some(_) -> True
+        None ->
+          case options.on_user_prompt_submit {
+            Some(_) -> True
+            None ->
+              case options.on_stop {
+                Some(_) -> True
+                None ->
+                  case options.on_subagent_stop {
+                    Some(_) -> True
+                    None ->
+                      case options.on_pre_compact {
+                        Some(_) -> True
+                        None ->
+                          case options.on_can_use_tool {
+                            Some(_) -> True
+                            None -> False
+                          }
+                      }
+                  }
+              }
+          }
+      }
+  }
+}
+
+/// Build CLI arguments for bidirectional mode.
+/// Includes --input-format stream-json in addition to all standard args.
+pub fn build_bidir_cli_args(
+  options: QueryOptions,
+  prompt: String,
+) -> List(String) {
+  // Start with fixed arguments for bidir mode (includes --input-format)
+  let args = [
+    "--print",
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
+    "--verbose",
+  ]
+
+  // Add optional model
+  let args = case options.model {
+    Some(m) -> list.append(args, ["--model", m])
+    None -> args
+  }
+
+  // Add optional max_turns
+  let args = case options.max_turns {
+    Some(n) -> list.append(args, ["--max-turns", int.to_string(n)])
+    None -> args
+  }
+
+  // Add optional max_budget_usd
+  let args = case options.max_budget_usd {
+    Some(usd) -> list.append(args, ["--max-budget-usd", float.to_string(usd)])
+    None -> args
+  }
+
+  // Precedence: system_prompt > append_system_prompt
+  let args = case options.system_prompt {
+    Some(p) -> list.append(args, ["--system-prompt", p])
+    None ->
+      case options.append_system_prompt {
+        Some(p) -> list.append(args, ["--append-system-prompt", p])
+        None -> args
+      }
+  }
+
+  // Precedence: allowed_tools > disallowed_tools
+  let args = case options.allowed_tools {
+    Some(tools) ->
+      list.append(args, ["--allowed-tools", string.join(tools, ",")])
+    None ->
+      case options.disallowed_tools {
+        Some(tools) ->
+          list.append(args, ["--disallowed-tools", string.join(tools, ",")])
+        None -> args
+      }
+  }
+
+  // Add optional mcp_config_path
+  let args = case options.mcp_config_path {
+    Some(path) -> list.append(args, ["--mcp-config", path])
+    None -> args
+  }
+
+  // Add optional permission_mode
+  let args = case options.permission_mode {
+    Some(mode) -> add_permission_mode(args, mode)
+    None -> args
+  }
+
+  // Precedence: resume_session_id > continue_session
+  let args = case options.resume_session_id {
+    Some(id) -> list.append(args, ["--resume", id])
+    None ->
+      case options.continue_session {
+        True -> list.append(args, ["--continue"])
+        False -> args
+      }
+  }
+
+  // Add prompt separator and prompt at the end
+  list.append(args, ["--", prompt])
 }

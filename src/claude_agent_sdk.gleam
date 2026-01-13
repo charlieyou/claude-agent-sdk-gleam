@@ -28,6 +28,7 @@
 //// StreamError, and other variant types.
 
 import gleam/dynamic
+import gleam/io
 import gleam/option.{None, Some}
 import gleam/string
 
@@ -352,6 +353,15 @@ pub fn query(
   prompt: String,
   options: QueryOptions,
 ) -> Result(QueryStream, QueryError) {
+  // Warn if bidir features are set but using legacy query()
+  case cli.has_bidir_features(options) {
+    True ->
+      io.println_error(
+        "Warning: query() ignores hooks/can_use_tool. Use start_session() for bidirectional features.",
+      )
+    False -> Nil
+  }
+
   case options.test_mode {
     True -> {
       // Test mode: validate test_runner is provided, then spawn without CLI discovery
