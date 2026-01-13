@@ -59,7 +59,7 @@ import gleam/option.{type Option, None, Some}
 pub type PermissionMode {
   /// Default behavior - prompts for permission interactively
   Default
-  /// Automatically accept file edits (maps to `--dangerously-skip-permissions`)
+  /// Automatically accept file edits (maps to `--permission-mode acceptEdits`)
   AcceptEdits
   /// Skip all permission prompts (maps to `--dangerously-skip-permissions`)
   BypassPermissions
