@@ -4,15 +4,19 @@
 /// set_model, rewind_files, stop) and related error types.
 /// Tests are designed to fail until the actual implementation is complete
 /// (TDD Phase 1).
+import gleam/erlang/process
 import gleeunit/should
 
 import claude_agent_sdk.{
-  type ControlError, type Session, type StartError, type StopError,
-  control_error_to_string, default_options, interrupt, rewind_files, set_model,
-  set_permission_mode, start_session, stop, stop_error_to_string,
+  type ControlError, type Session, type StopError, control_error_to_string,
+  interrupt, rewind_files, set_model, set_permission_mode, stop,
+  stop_error_to_string,
 }
 import claude_agent_sdk/error
+import claude_agent_sdk/event.{type SessionEvent}
+import claude_agent_sdk/message.{type Message}
 import claude_agent_sdk/options
+import claude_agent_sdk/session.{type SessionMessage}
 
 // =============================================================================
 // Error Type Tests (Pass in Phase 1)
@@ -67,101 +71,62 @@ pub fn stop_error_to_string_test() {
 // API Surface Tests - Stub Returns NotImplemented (Pass in Phase 1)
 // =============================================================================
 
-/// Helper to get a Session for testing (uses start_session stub).
-/// Since start_session returns NotImplemented, we use this to verify
-/// the function signatures compile correctly.
-fn get_test_session() -> Result(Session, StartError) {
-  start_session("test", default_options())
+/// Helper to create a dummy Session for testing.
+/// Uses session.new directly to bypass start_session which returns NotImplemented.
+fn get_test_session() -> Session {
+  let actor: process.Subject(SessionMessage) = process.new_subject()
+  let messages: process.Subject(Message) = process.new_subject()
+  let events: process.Subject(SessionEvent) = process.new_subject()
+  session.new(actor, messages, events)
 }
 
 /// Test that interrupt compiles and returns ControlNotImplemented.
 pub fn interrupt_returns_not_implemented_test() {
-  case get_test_session() {
-    Ok(session) -> {
-      case interrupt(session) {
-        Error(error.ControlNotImplemented) -> should.be_true(True)
-        Error(_other) -> should.fail()
-        Ok(_) -> should.fail()
-      }
-    }
-    Error(error.NotImplemented) -> {
-      // Expected - start_session stub returns NotImplemented
-      // Test passes because function signatures compile
-      should.be_true(True)
-    }
-    Error(_) -> should.fail()
+  let session = get_test_session()
+  case interrupt(session) {
+    Error(error.ControlNotImplemented) -> should.be_true(True)
+    Error(_other) -> should.fail()
+    Ok(_) -> should.fail()
   }
 }
 
 /// Test that set_permission_mode compiles and returns ControlNotImplemented.
 pub fn set_permission_mode_returns_not_implemented_test() {
-  case get_test_session() {
-    Ok(session) -> {
-      case set_permission_mode(session, options.Default) {
-        Error(error.ControlNotImplemented) -> should.be_true(True)
-        Error(_other) -> should.fail()
-        Ok(_) -> should.fail()
-      }
-    }
-    Error(error.NotImplemented) -> {
-      // Expected - start_session stub returns NotImplemented
-      should.be_true(True)
-    }
-    Error(_) -> should.fail()
+  let session = get_test_session()
+  case set_permission_mode(session, options.Default) {
+    Error(error.ControlNotImplemented) -> should.be_true(True)
+    Error(_other) -> should.fail()
+    Ok(_) -> should.fail()
   }
 }
 
 /// Test that set_model compiles and returns ControlNotImplemented.
 pub fn set_model_returns_not_implemented_test() {
-  case get_test_session() {
-    Ok(session) -> {
-      case set_model(session, "claude-sonnet-4-20250514") {
-        Error(error.ControlNotImplemented) -> should.be_true(True)
-        Error(_other) -> should.fail()
-        Ok(_) -> should.fail()
-      }
-    }
-    Error(error.NotImplemented) -> {
-      // Expected - start_session stub returns NotImplemented
-      should.be_true(True)
-    }
-    Error(_) -> should.fail()
+  let session = get_test_session()
+  case set_model(session, "claude-sonnet-4-20250514") {
+    Error(error.ControlNotImplemented) -> should.be_true(True)
+    Error(_other) -> should.fail()
+    Ok(_) -> should.fail()
   }
 }
 
 /// Test that rewind_files compiles and returns ControlNotImplemented.
 pub fn rewind_files_returns_not_implemented_test() {
-  case get_test_session() {
-    Ok(session) -> {
-      case rewind_files(session, "user-msg-123") {
-        Error(error.ControlNotImplemented) -> should.be_true(True)
-        Error(_other) -> should.fail()
-        Ok(_) -> should.fail()
-      }
-    }
-    Error(error.NotImplemented) -> {
-      // Expected - start_session stub returns NotImplemented
-      should.be_true(True)
-    }
-    Error(_) -> should.fail()
+  let session = get_test_session()
+  case rewind_files(session, "user-msg-123") {
+    Error(error.ControlNotImplemented) -> should.be_true(True)
+    Error(_other) -> should.fail()
+    Ok(_) -> should.fail()
   }
 }
 
 /// Test that stop compiles and returns StopNotImplemented.
 pub fn stop_returns_not_implemented_test() {
-  case get_test_session() {
-    Ok(session) -> {
-      case stop(session) {
-        Error(error.StopNotImplemented) -> should.be_true(True)
-        Error(_other) -> should.fail()
-        Ok(_) -> should.fail()
-      }
-    }
-    Error(error.NotImplemented) -> {
-      // Expected - start_session stub returns NotImplemented
-      should.be_true(True)
-    }
-    Error(_) -> should.fail()
+  let session = get_test_session()
+  case stop(session) {
+    Error(error.StopNotImplemented) -> should.be_true(True)
+    Error(_other) -> should.fail()
+    Ok(_) -> should.fail()
   }
 }
 
