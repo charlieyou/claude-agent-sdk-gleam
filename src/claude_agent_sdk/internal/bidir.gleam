@@ -46,16 +46,18 @@ import gleam/string
 import claude_agent_sdk/control.{
   type IncomingControlRequest, type IncomingControlResponse,
   type IncomingMessage, type OutgoingControlRequest,
-  type OutgoingControlResponse, type PermissionMode, CanUseTool, ControlRequest,
-  ControlResponse, Deny, Error as ControlError, HookCallback, HookResponse,
+  type OutgoingControlResponse, type PermissionMode, type HookRegistration,
+  type PermissionResult, Allow, AllowAll, AllowOnce, CanUseTool, ControlRequest,
+  ControlResponse, Deny, Edit, Error as ControlError, HookCallback, HookResponse,
   HookSuccess, Interrupt, McpMessage, PermissionResponse, RegularMessage,
   SetModel, SetPermissionMode, Success,
 }
 import claude_agent_sdk/hook.{type HookEvent}
-import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
+import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/control_decoder
 import claude_agent_sdk/internal/control_encoder
 import claude_agent_sdk/internal/port_ffi
+import claude_agent_sdk/internal/stream
 import claude_agent_sdk/message
 
 // FFI: Convert any value to Dynamic (identity function at runtime)
@@ -336,6 +338,11 @@ pub type QueuedOperation {
     payload: String,
     reply_to: Subject(RequestResult),
   )
+  /// A user message to send once Running.
+  ///
+  /// The payload is a pre-encoded JSON string (without trailing newline),
+  /// created via encode_user_message.
+  QueuedUserMessage(payload: String)
 }
 
 // =============================================================================
@@ -352,6 +359,8 @@ pub type HookConfig {
     permission_handlers: Dict(String, fn(Dynamic) -> Dynamic),
   )
 }
+
+const permission_hook_callback_id: String = "__sdk_permission_hook__"
 
 /// Create an empty hook configuration.
 pub fn empty_hook_config() -> HookConfig {
@@ -470,7 +479,7 @@ pub fn resolve_pending(
 pub type SessionState {
   SessionState(
     /// The runner managing the CLI port.
-    runner: BidirRunner,
+    runner: bidir_runner.BidirRunner,
     /// Current lifecycle state.
     lifecycle: SessionLifecycle,
     /// Pending SDK-initiated requests awaiting CLI responses.
@@ -489,6 +498,8 @@ pub type SessionState {
     next_callback_id: Int,
     /// Subject for sending messages to subscriber.
     subscriber: Subject(SubscriberMessage),
+    /// Actor subject for internal self-messages.
+    self_subject: Subject(ActorMessage),
     /// CLI capabilities (populated after init response).
     capabilities: Option(CliCapabilities),
     /// Default timeout for control requests (ms).
@@ -507,6 +518,8 @@ pub type SessionState {
     init_timer_ref: Option(Dynamic),
     /// Whether file checkpointing is enabled (for rewind_files support).
     file_checkpointing_enabled: Bool,
+    /// Line buffer for incoming port data.
+    line_buffer: stream.LineBuffer,
   )
 }
 
@@ -534,13 +547,19 @@ pub type ActorMessage {
   InjectedMessage(json: String)
   /// Injected port closed event from mock runner (for testing).
   InjectedPortClosed
+  /// Begin initialization handshake after port connection.
+  StartInitHandshake
   /// Init timeout fired.
   InitTimeoutFired
+  /// Raw port message from the CLI.
+  PortMessageRaw(msg: Dynamic)
   /// Send a control request to CLI.
   SendControlRequest(
     request: OutgoingControlRequest,
     reply_to: Subject(RequestResult),
   )
+  /// Send a user message to CLI.
+  SendUserMessage(prompt: String)
   /// Request timeout fired.
   RequestTimeoutFired(request_id: String)
   /// Hook task completed with result.
@@ -617,7 +636,7 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
 /// the port inside the actor's init function, ensuring proper port ownership.
 /// Mock runners work correctly because they don't use real port messages.
 pub fn start(
-  runner: BidirRunner,
+  runner: bidir_runner.BidirRunner,
   config: StartConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
   start_internal(runner, config, None, empty_hook_config())
@@ -629,7 +648,7 @@ pub fn start(
 /// injecting messages during tests. Use `inject_message` and
 /// `inject_port_closed` to simulate CLI responses.
 pub fn start_for_testing(
-  runner: BidirRunner,
+  runner: bidir_runner.BidirRunner,
   config: StartConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
   start_internal(runner, config, None, empty_hook_config())
@@ -640,7 +659,7 @@ pub fn start_for_testing(
 /// This allows tests to register hook handlers that will be invoked
 /// when the CLI sends hook_callback control requests.
 pub fn start_with_hooks(
-  runner: BidirRunner,
+  runner: bidir_runner.BidirRunner,
   config: StartConfig,
   hooks: HookConfig,
 ) -> Result(Subject(ActorMessage), StartError) {
@@ -655,9 +674,66 @@ pub fn inject_message(session: Subject(ActorMessage), json: String) -> Nil {
   actor.send(session, InjectedMessage(json))
 }
 
+/// Build hook registrations from handlers keyed by hook event names.
+/// Returns (registrations, updated HookConfig with callback_id keys, next_id).
+fn build_hook_registrations(
+  hooks: HookConfig,
+  next_callback_id: Int,
+) -> #(List(HookRegistration), HookConfig, Int) {
+  let HookConfig(handlers: handlers, permission_handlers: permissions) = hooks
+
+  let #(registrations_rev, new_handlers, next_id) =
+    dict.fold(
+      handlers,
+      #([], dict.new(), next_callback_id),
+      fn(acc, key, handler) {
+        let #(regs, updated, next_id) = acc
+        case is_hook_event_name(key) {
+          True -> {
+            let callback_id = "hook_" <> int.to_string(next_id)
+            let registration = control.HookRegistration(callback_id, key, None)
+            let updated_handlers = dict.insert(updated, callback_id, handler)
+            #([registration, ..regs], updated_handlers, next_id + 1)
+          }
+          False -> {
+            let updated_handlers = dict.insert(updated, key, handler)
+            #(regs, updated_handlers, next_id)
+          }
+        }
+      },
+    )
+
+  let registrations = list.reverse(registrations_rev)
+  let registrations =
+    case dict.size(permissions) > 0 {
+      True ->
+        [
+          control.HookRegistration(
+            permission_hook_callback_id,
+            "PreToolUse",
+            None,
+          ),
+          ..registrations
+        ]
+      False -> registrations
+    }
+  let updated_hooks =
+    HookConfig(handlers: new_handlers, permission_handlers: permissions)
+  #(registrations, updated_hooks, next_id)
+}
+
+fn is_hook_event_name(name: String) -> Bool {
+  name == "PreToolUse"
+  || name == "PostToolUse"
+  || name == "UserPromptSubmit"
+  || name == "Stop"
+  || name == "SubagentStop"
+  || name == "PreCompact"
+}
+
 /// Internal start function.
 fn start_internal(
-  runner: BidirRunner,
+  runner: bidir_runner.BidirRunner,
   config: StartConfig,
   _inject_subject: Option(Subject(String)),
   hooks: HookConfig,
@@ -682,6 +758,7 @@ fn start_internal(
           // Start at 1 since req_0 is used for init
           next_callback_id: 0,
           subscriber: config.subscriber,
+          self_subject: self_subject,
           capabilities: None,
           default_timeout_ms: config.default_timeout_ms,
           hook_timeouts: config.hook_timeouts,
@@ -691,10 +768,8 @@ fn start_internal(
           init_timeout_ms: config.init_timeout_ms,
           init_timer_ref: None,
           file_checkpointing_enabled: config.enable_file_checkpointing,
+          line_buffer: stream.LineBuffer(<<>>),
         )
-
-      // Perform the initialization handshake
-      let state_after_init = perform_init_handshake(initial_state)
 
       // Build a selector that handles:
       // 1. Messages on the actor's subject (via process.selecting)
@@ -790,10 +865,13 @@ fn start_internal(
             HookTimeout(request_id, verify_ref)
           },
         )
+        |> process.select_other(fn(msg_dyn: Dynamic) -> ActorMessage {
+          PortMessageRaw(msg_dyn)
+        })
 
       // Return the actor's subject to the caller with custom selector
       Ok(
-        actor.initialised(state_after_init)
+        actor.initialised(initial_state)
         |> actor.selecting(selector)
         |> actor.returning(self_subject),
       )
@@ -801,7 +879,14 @@ fn start_internal(
     |> actor.on_message(handle_message)
 
   case actor.start(builder) {
-    Ok(started) -> Ok(started.data)
+    Ok(started) -> {
+      let session = started.data
+      let assert Ok(pid) = process.subject_owner(session)
+      port_ffi.connect_port(runner.port, pid)
+      actor.send(session, StartInitHandshake)
+      let _ = actor.call(session, 1000, GetLifecycle)
+      Ok(session)
+    }
     Error(err) -> Error(ActorStartFailed(err))
   }
 }
@@ -818,13 +903,14 @@ fn perform_init_handshake(state: SessionState) -> SessionState {
 
   // Build the initialize request
   let assert Some(request_id) = state.init_request_id
+  let #(hook_registrations, updated_hooks, next_callback_id) =
+    build_hook_registrations(state.hooks, state.next_callback_id)
   // Extract MCP server names from handlers dict
   let mcp_server_names = dict.keys(state.mcp_handlers)
   let init_request =
     control.Initialize(
       request_id: request_id,
-      hooks: [],
-      // Hooks will be populated from config in future
+      hooks: hook_registrations,
       mcp_servers: mcp_server_names,
       enable_file_checkpointing: state.file_checkpointing_enabled,
     )
@@ -842,6 +928,8 @@ fn perform_init_handshake(state: SessionState) -> SessionState {
     ..state,
     lifecycle: new_lifecycle,
     init_timer_ref: Some(timer_ref),
+    hooks: updated_hooks,
+    next_callback_id: next_callback_id,
   )
 }
 
@@ -971,11 +1059,23 @@ fn handle_message(
     InjectedPortClosed -> {
       handle_port_closed(state)
     }
+    StartInitHandshake -> {
+      case state.lifecycle {
+        Starting -> actor.continue(perform_init_handshake(state))
+        _ -> actor.continue(state)
+      }
+    }
     InitTimeoutFired -> {
       handle_init_timeout(state)
     }
+    PortMessageRaw(msg) -> {
+      handle_port_message(state, msg)
+    }
     SendControlRequest(request, reply_to) -> {
       handle_send_control_request(state, request, reply_to)
+    }
+    SendUserMessage(prompt) -> {
+      handle_send_user_message(state, prompt)
     }
     RequestTimeoutFired(request_id) -> {
       handle_request_timeout(state, request_id)
@@ -1007,9 +1107,18 @@ fn handle_hook_done(
 ) -> actor.Next(SessionState, ActorMessage) {
   case dict.get(state.pending_hooks, request_id) {
     Ok(pending) -> {
-      // Send success response to CLI
-      let response = HookResponse(request_id, HookSuccess(result))
-      send_control_response(state, response)
+      // Send success response to CLI (hook or permission)
+      case pending.callback_type {
+        HookType -> {
+          let response = HookResponse(request_id, HookSuccess(result))
+          send_control_response(state, response)
+        }
+        PermissionType -> {
+          let permission_result = permission_result_from_dynamic(result)
+          let response = PermissionResponse(request_id, permission_result)
+          send_control_response(state, response)
+        }
+      }
 
       // Clean up resources atomically
       let new_state =
@@ -1020,6 +1129,38 @@ fn handle_hook_done(
       // Already handled (timeout won), ignore
       actor.continue(state)
     }
+  }
+}
+
+fn permission_result_from_dynamic(result: Dynamic) -> PermissionResult {
+  let behavior = case decode.run(result, decode.at(["behavior"], decode.string)) {
+    Ok(value) -> value
+    Error(_) -> "deny"
+  }
+
+  case behavior {
+    "deny" -> {
+      let message = case
+        decode.run(result, decode.at(["message"], decode.string))
+      {
+        Ok(value) -> Some(value)
+        Error(_) -> None
+      }
+      Deny(message)
+    }
+    "allow" -> Allow
+    "allowOnce" -> AllowOnce
+    "allowAll" -> AllowAll
+    "edit" -> {
+      let updated_input = case
+        decode.run(result, decode.at(["updatedInput"], decode.dynamic))
+      {
+        Ok(value) -> value
+        Error(_) -> result
+      }
+      Edit(updated_input)
+    }
+    _ -> Deny(Some("Invalid permission response"))
   }
 }
 
@@ -1413,18 +1554,27 @@ fn handle_control_request(
         CanUseTool(
           request_id,
           tool_name,
-          _tool_input,
+          tool_input,
           permission_suggestions,
-          _blocked_path,
+          blocked_path,
         ) -> {
           // Convert to Dynamic input for handler
+          let base =
+            [
+              #("tool_name", to_dynamic(tool_name)),
+              #("tool_input", tool_input),
+              #("permission_suggestions", to_dynamic(permission_suggestions)),
+            ]
           let input =
-            to_dynamic(
-              dict.from_list([
-                #("tool_name", to_dynamic(tool_name)),
-                #("permission_suggestions", to_dynamic(permission_suggestions)),
-              ]),
-            )
+            case blocked_path {
+              Some(path) ->
+                to_dynamic(
+                  dict.from_list(
+                    list.append(base, [#("blocked_path", to_dynamic(path))]),
+                  ),
+                )
+              None -> to_dynamic(dict.from_list(base))
+            }
           dispatch_permission_callback(state, request_id, tool_name, input)
         }
         McpMessage(..) -> {
@@ -1451,33 +1601,36 @@ fn dispatch_hook_callback(
   callback_id: String,
   input: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  // Check backpressure limit before spawning task
-  case dict.size(state.pending_hooks) >= max_pending_hooks {
-    True -> {
-      // At capacity - send fail-open response without spawning
-      let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
-      let response = HookResponse(request_id, HookSuccess(fail_open_result))
-      send_control_response(state, response)
-      actor.continue(state)
-    }
+  case callback_id == permission_hook_callback_id {
+    True -> dispatch_permission_hook_callback(state, request_id, input)
     False -> {
-      case dict.get(state.hooks.handlers, callback_id) {
-        Ok(handler) -> {
-          // Record start time for timeout duration logging
-          let started_at = port_ffi.monotonic_time_ms()
+      // Check backpressure limit before spawning task
+      case dict.size(state.pending_hooks) >= max_pending_hooks {
+        True -> {
+          // At capacity - send fail-open response without spawning
+          let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
+          let response = HookResponse(request_id, HookSuccess(fail_open_result))
+          send_control_response(state, response)
+          actor.continue(state)
+        }
+        False -> {
+          case dict.get(state.hooks.handlers, callback_id) {
+            Ok(handler) -> {
+              // Record start time for timeout duration logging
+              let started_at = port_ffi.monotonic_time_ms()
 
-          // Spawn a task to execute the handler asynchronously
-          // The task will send HookDone message back when complete
-          let parent_pid = process.self()
-          let #(task_pid, monitor_ref) =
-            spawn_hook_task(parent_pid, request_id, handler, input)
+              // Spawn a task to execute the handler asynchronously
+              // The task will send HookDone message back when complete
+              let parent_pid = process.self()
+              let #(task_pid, monitor_ref) =
+                spawn_hook_task(parent_pid, request_id, handler, input)
 
-          // Schedule timeout for first-event-wins protocol
-          // Returns {TimerRef, VerifyRef} tuple
-          let #(timer_ref, verify_ref) =
-            schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
+              // Schedule timeout for first-event-wins protocol
+              // Returns {TimerRef, VerifyRef} tuple
+              let #(timer_ref, verify_ref) =
+                schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
 
-          // Record the pending hook with timer and verify references
+              // Record the pending hook with timer and verify references
           let pending =
             PendingHook(
               task_pid: task_pid,
@@ -1491,20 +1644,105 @@ fn dispatch_hook_callback(
             )
           let new_pending =
             dict.insert(state.pending_hooks, request_id, pending)
+          let async_response =
+            HookResponse(
+              request_id,
+              HookSuccess(
+                to_dynamic(
+                  dict.from_list([
+                    #("async", to_dynamic(True)),
+                    #(
+                      "asyncTimeout",
+                      to_dynamic(state.default_hook_timeout_ms),
+                    ),
+                  ]),
+                ),
+              ),
+            )
+          send_control_response(state, async_response)
           actor.continue(SessionState(..state, pending_hooks: new_pending))
         }
-        Error(Nil) -> {
-          // Unknown callback_id - send fail-open success response
-          // This allows the CLI to proceed rather than hang waiting for a response
-          let fail_open_result =
-            to_dynamic(dict.from_list([#("continue", True)]))
-          let response = HookResponse(request_id, HookSuccess(fail_open_result))
-          send_control_response(state, response)
-          actor.continue(state)
+            Error(Nil) -> {
+              // Unknown callback_id - send fail-open success response
+              // This allows the CLI to proceed rather than hang waiting for a response
+              let fail_open_result =
+                to_dynamic(dict.from_list([#("continue", True)]))
+              let response =
+                HookResponse(request_id, HookSuccess(fail_open_result))
+              send_control_response(state, response)
+              actor.continue(state)
+            }
+          }
         }
       }
     }
   }
+}
+
+/// Handle permission checks via PreToolUse hook callbacks.
+fn dispatch_permission_hook_callback(
+  state: SessionState,
+  request_id: String,
+  input: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    decode.success(#(tool_name, tool_input))
+  }
+
+  let response_output =
+    case decode.run(input, decoder) {
+      Ok(#(tool_name, tool_input)) -> {
+        case dict.get(state.hooks.permission_handlers, tool_name) {
+          Ok(handler) -> {
+            let permission_input =
+              to_dynamic(
+                dict.from_list([
+                  #("tool_name", to_dynamic(tool_name)),
+                  #("tool_input", tool_input),
+                ]),
+              )
+            let result = handler(permission_input)
+            let behavior = case
+              decode.run(result, decode.at(["behavior"], decode.string))
+            {
+              Ok(value) -> value
+              Error(_) -> "allow"
+            }
+            let message = case
+              decode.run(result, decode.at(["message"], decode.string))
+            {
+              Ok(value) -> Some(value)
+              Error(_) -> None
+            }
+            case behavior {
+              "deny" -> {
+                let reason = case message {
+                  Some(msg) -> msg
+                  None -> "Permission denied"
+                }
+                to_dynamic(
+                  dict.from_list([
+                    #("continue", to_dynamic(False)),
+                    #("stopReason", to_dynamic(reason)),
+                  ]),
+                )
+              }
+              _ ->
+                to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
+            }
+          }
+          Error(Nil) ->
+            to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
+        }
+      }
+      Error(_) -> to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
+    }
+
+  let response = HookResponse(request_id, HookSuccess(response_output))
+  send_control_response(state, response)
+  actor.continue(state)
 }
 
 /// Dispatch a can_use_tool request to the registered permission handler.
@@ -1702,6 +1940,52 @@ fn handle_init_timeout(
   }
 }
 
+/// Handle raw port message from CLI.
+fn handle_port_message(
+  state: SessionState,
+  msg: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  case bidir_runner.decode_port_message(msg, state.runner.port) {
+    Ok(bidir_runner.PortData(data)) -> handle_port_data(state, data)
+    Ok(bidir_runner.PortExitStatus(_code)) -> handle_port_closed(state)
+    Error(_) -> actor.continue(state)
+  }
+}
+
+/// Handle incoming port data and forward complete JSON lines to the actor.
+fn handle_port_data(
+  state: SessionState,
+  data: BitArray,
+) -> actor.Next(SessionState, ActorMessage) {
+  case stream.handle_port_data(state.line_buffer, data) {
+    stream.Lines(lines, new_buffer) -> {
+      let updated_state = SessionState(..state, line_buffer: new_buffer)
+      list.each(lines, fn(line) {
+        actor.send(updated_state.self_subject, InjectedMessage(line))
+      })
+      actor.continue(updated_state)
+    }
+    stream.PushBufferOverflow -> {
+      actor.continue(state)
+    }
+  }
+}
+
+/// Encode a user prompt for bidirectional input streaming.
+fn encode_user_message(prompt: String) -> String {
+  json.object([
+    #("type", json.string("user")),
+    #(
+      "message",
+      json.object([
+        #("role", json.string("user")),
+        #("content", json.string(prompt)),
+      ]),
+    ),
+  ])
+  |> json.to_string
+}
+
 /// Handle SDK-initiated control request.
 ///
 /// If Running, encodes the request, sends to CLI, schedules timeout, and
@@ -1772,6 +2056,33 @@ fn handle_send_control_request(
       process.send(reply_to, RequestSessionStopped)
       actor.continue(state)
     }
+  }
+}
+
+/// Handle SDK-initiated user message.
+///
+/// If Running, encodes the prompt and sends to CLI. If InitSent, queues the
+/// message for later. Otherwise, the message is dropped.
+fn handle_send_user_message(
+  state: SessionState,
+  prompt: String,
+) -> actor.Next(SessionState, ActorMessage) {
+  let json_payload = encode_user_message(prompt)
+  let write_fn = state.runner.write
+
+  case state.lifecycle {
+    Running -> {
+      let _result = write_fn(json_payload <> "\n")
+      actor.continue(state)
+    }
+    InitSent -> {
+      let queued_op = QueuedUserMessage(json_payload)
+      case queue_operation(state, queued_op) {
+        Ok(new_state) -> actor.continue(new_state)
+        Error(_) -> actor.continue(state)
+      }
+    }
+    _ -> actor.continue(state)
   }
 }
 
@@ -1896,6 +2207,11 @@ pub fn flush_queued_ops(state: SessionState) -> SessionState {
               }
             }
           }
+          QueuedUserMessage(json_payload) -> {
+            let write_fn = runner.write
+            let _result = write_fn(json_payload <> "\n")
+            #(pending, runner)
+          }
         }
       },
     )
@@ -1964,6 +2280,7 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
       QueuedRequest(_request_id, _payload, reply_to) -> {
         process.send(reply_to, RequestSessionStopped)
       }
+      QueuedUserMessage(_) -> Nil
     }
   })
 
@@ -2028,6 +2345,13 @@ pub fn send_control_request(
   reply_to: Subject(RequestResult),
 ) -> Nil {
   actor.send(session, SendControlRequest(request, reply_to))
+}
+
+/// Send a user prompt to the CLI via bidirectional input streaming.
+///
+/// Messages are queued if initialization is still in progress.
+pub fn send_user_message(session: Subject(ActorMessage), prompt: String) -> Nil {
+  actor.send(session, SendUserMessage(prompt))
 }
 
 /// Cancel a pending request by ID.
@@ -2387,7 +2711,7 @@ pub fn queue_operation(
   case list.length(state.queued_ops) >= max_queued_ops {
     True ->
       Error(InitQueueOverflow(
-        "Too many control operations queued during initialization (max 16)",
+        "Too many operations queued during initialization (max 16)",
       ))
     False -> Ok(SessionState(..state, queued_ops: [op, ..state.queued_ops]))
   }

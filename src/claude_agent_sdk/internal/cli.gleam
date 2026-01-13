@@ -13,7 +13,7 @@ import gleam/bit_array
 import gleam/float
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
 
@@ -257,7 +257,7 @@ pub fn format_version_error(
 pub fn build_cli_args(options: QueryOptions, prompt: String) -> List(String) {
   // Start with fixed arguments for standard (unidirectional) mode
   let base_args = ["--print", "--output-format", "stream-json", "--verbose"]
-  build_args_with_base(base_args, options, prompt)
+  build_args_with_base(base_args, options, Some(prompt))
 }
 
 /// Internal helper to build CLI arguments from a base set of flags.
@@ -265,7 +265,7 @@ pub fn build_cli_args(options: QueryOptions, prompt: String) -> List(String) {
 fn build_args_with_base(
   base_args: List(String),
   options: QueryOptions,
-  prompt: String,
+  prompt: Option(String),
 ) -> List(String) {
   // Add optional model
   let args = case options.model {
@@ -329,8 +329,11 @@ fn build_args_with_base(
       }
   }
 
-  // Add prompt separator and prompt at the end
-  list.append(args, ["--", prompt])
+  // Add prompt separator and prompt at the end (if provided)
+  case prompt {
+    Some(p) -> list.append(args, ["--", p])
+    None -> args
+  }
 }
 
 /// Add permission mode flags to argument list.
@@ -367,16 +370,15 @@ pub fn has_bidir_features(options: QueryOptions) -> Bool {
 /// Includes --input-format stream-json in addition to all standard args.
 pub fn build_bidir_cli_args(
   options: QueryOptions,
-  prompt: String,
+  _prompt: String,
 ) -> List(String) {
   // Start with fixed arguments for bidir mode (includes --input-format)
   let base_args = [
-    "--print",
     "--output-format",
     "stream-json",
     "--input-format",
     "stream-json",
     "--verbose",
   ]
-  build_args_with_base(base_args, options, prompt)
+  build_args_with_base(base_args, options, None)
 }

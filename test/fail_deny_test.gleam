@@ -40,6 +40,37 @@ fn receive_until_match(
   }
 }
 
+/// Receive messages until finding one containing target_id and required text.
+fn receive_until_match_contains(
+  subject: Subject(String),
+  target_id: String,
+  required: String,
+  max_attempts: Int,
+) -> Result(String, Nil) {
+  case max_attempts <= 0 {
+    True -> Error(Nil)
+    False -> {
+      case process.receive(subject, 500) {
+        Ok(msg) -> {
+          case string.contains(msg, target_id)
+            && string.contains(msg, required)
+          {
+            True -> Ok(msg)
+            False ->
+              receive_until_match_contains(
+                subject,
+                target_id,
+                required,
+                max_attempts - 1,
+              )
+          }
+        }
+        Error(Nil) -> Error(Nil)
+      }
+    }
+  }
+}
+
 // =============================================================================
 // Fail-Deny Tests - Permission Timeout
 // =============================================================================
@@ -245,7 +276,7 @@ pub fn hook_timeout_still_returns_continue_test() {
 
   // Should have received fail-open response (continue: true, NOT deny)
   let assert Ok(response_json) =
-    receive_until_match(mock.writes, "hook_timeout_1", 5)
+    receive_until_match_contains(mock.writes, "hook_timeout_1", "continue", 5)
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
   // Should NOT contain "deny"
@@ -312,7 +343,7 @@ pub fn hook_crash_still_returns_continue_test() {
 
   // Should have received fail-open response (continue: true, NOT deny)
   let assert Ok(response_json) =
-    receive_until_match(mock.writes, "hook_crash_1", 5)
+    receive_until_match_contains(mock.writes, "hook_crash_1", "continue", 5)
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
   // Should NOT contain "deny"

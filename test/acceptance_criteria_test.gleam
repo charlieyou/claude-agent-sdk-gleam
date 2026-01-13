@@ -563,7 +563,8 @@ pub fn test_ac10_hook_errors_fail_open_test() {
   process.sleep(100)
 
   // Verify fail-open response (continue: true)
-  let assert Ok(response) = receive_until_match(mock.writes, "cli_ac10", 5)
+  let assert Ok(response) = receive_until_match(mock.writes, "continue", 5)
+  should.be_true(string.contains(response, "cli_ac10"))
   should.be_true(string.contains(response, "continue"))
   should.be_true(string.contains(response, "success"))
   should.be_false(string.contains(response, "deny"))

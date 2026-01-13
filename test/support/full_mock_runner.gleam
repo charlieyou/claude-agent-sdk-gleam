@@ -24,6 +24,8 @@
 /// full_mock_runner.process_init(adapter)
 /// full_mock_runner.emit_next_message(adapter)
 /// ```
+import gleam/dict
+import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/json
@@ -92,6 +94,8 @@ pub type RunnerAdapter {
     pending_messages: List(QueuedMessage),
     /// Pending hook simulations (callback_id, json input).
     pending_hooks: List(#(String, json.Json)),
+    /// Callback IDs registered for hook event names.
+    hook_callback_map: dict.Dict(String, String),
     /// Counter for generating request IDs.
     next_request_id: Int,
   )
@@ -228,6 +232,7 @@ pub fn start(config: FullMockRunner) -> RunnerAdapter {
     state: AwaitingInit,
     pending_messages: config.message_queue,
     pending_hooks: config.hook_simulations,
+    hook_callback_map: dict.new(),
     next_request_id: 1,
   )
 }
@@ -294,7 +299,15 @@ pub fn trigger_hook_simulation(adapter: RunnerAdapter) -> RunnerAdapter {
   case adapter.pending_hooks, adapter.session_subject {
     [#(callback_id, input), ..rest], Some(session) -> {
       let req_id = "cli_hook_" <> int.to_string(adapter.next_request_id)
-      let json_str = build_hook_callback_json(callback_id, req_id, input)
+      let resolved_callback_id = case dict.get(
+        adapter.hook_callback_map,
+        callback_id,
+      ) {
+        Ok(mapped) -> mapped
+        Error(Nil) -> callback_id
+      }
+      let json_str =
+        build_hook_callback_json(resolved_callback_id, req_id, input)
       bidir.inject_message(session, json_str)
       RunnerAdapter(
         ..adapter,
@@ -318,6 +331,15 @@ pub fn get_mock_state(adapter: RunnerAdapter) -> MockState {
 /// Mark the adapter as closed (for state tracking after shutdown).
 pub fn mark_closed(adapter: RunnerAdapter) -> RunnerAdapter {
   RunnerAdapter(..adapter, state: Closed)
+}
+
+/// Capture the initialize request and extract hook callback IDs.
+pub fn capture_init_request(
+  adapter: RunnerAdapter,
+  init_json: String,
+) -> RunnerAdapter {
+  let hook_callback_map = extract_hook_callback_map(init_json)
+  RunnerAdapter(..adapter, hook_callback_map: hook_callback_map)
 }
 
 // =============================================================================
@@ -354,4 +376,34 @@ fn build_hook_callback_json(
     ),
   ])
   |> json.to_string
+}
+
+fn extract_hook_callback_map(init_json: String) -> dict.Dict(String, String) {
+  let hook_entry_decoder = {
+    use ids <- decode.field("hookCallbackIds", decode.list(decode.string))
+    decode.success(ids)
+  }
+
+  let hooks_decoder =
+    decode.dict(decode.string, decode.list(hook_entry_decoder))
+
+  case json.parse(init_json, decode.dynamic) {
+    Ok(dynamic) -> {
+      case decode.run(dynamic, decode.at(["request", "hooks"], hooks_decoder)) {
+        Ok(hooks) ->
+          dict.fold(hooks, dict.new(), fn(acc, event_name, entries) {
+            case entries {
+              [ids, ..] -> case ids {
+                [callback_id, ..] ->
+                  dict.insert(acc, event_name, callback_id)
+                [] -> acc
+              }
+              [] -> acc
+            }
+          })
+        Error(_) -> dict.new()
+      }
+    }
+    Error(_) -> dict.new()
+  }
 }

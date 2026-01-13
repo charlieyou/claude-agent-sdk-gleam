@@ -178,10 +178,10 @@ pub fn response_only_sent_after_callback_completes_test() {
   // Wait for callback to start
   let assert Ok("started") = process.receive(timing_receiver, 500)
 
-  // At this point, no response should be written yet (callback still running)
-  // Check that mock.writes is empty (only init message was sent earlier)
-  let immediate_check = process.receive(mock.writes, 10)
-  should.be_error(immediate_check)
+  // Async ack is sent immediately while callback runs
+  let assert Ok(async_response) = process.receive(mock.writes, 500)
+  should.be_true(string.contains(async_response, "cli_slow_1"))
+  should.be_true(string.contains(async_response, "async"))
 
   // Wait for callback to complete
   let assert Ok("completed") = process.receive(timing_receiver, 500)
@@ -190,6 +190,7 @@ pub fn response_only_sent_after_callback_completes_test() {
   process.sleep(50)
   let assert Ok(response_json) = process.receive(mock.writes, 500)
   should.be_true(string.contains(response_json, "cli_slow_1"))
+  should.be_true(string.contains(response_json, "continue"))
 
   // Cleanup
   bidir.shutdown(session)

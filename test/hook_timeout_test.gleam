@@ -18,6 +18,37 @@ import support/mock_bidir_runner
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> Dynamic
 
+/// Receive messages until finding one containing target_id and required text.
+fn receive_until_match_contains(
+  subject: process.Subject(String),
+  target_id: String,
+  required: String,
+  max_attempts: Int,
+) -> Result(String, Nil) {
+  case max_attempts <= 0 {
+    True -> Error(Nil)
+    False -> {
+      case process.receive(subject, 500) {
+        Ok(msg) -> {
+          case string.contains(msg, target_id)
+            && string.contains(msg, required)
+          {
+            True -> Ok(msg)
+            False ->
+              receive_until_match_contains(
+                subject,
+                target_id,
+                required,
+                max_attempts - 1,
+              )
+          }
+        }
+        Error(Nil) -> Error(Nil)
+      }
+    }
+  }
+}
+
 // =============================================================================
 // Hook Timeout Tests
 // =============================================================================
@@ -71,7 +102,8 @@ pub fn fast_callback_completes_before_timeout_test() {
 
   // Wait for response
   process.sleep(50)
-  let assert Ok(response_json) = process.receive(mock.writes, 500)
+  let assert Ok(response_json) =
+    receive_until_match_contains(mock.writes, "cli_fast_1", "continue", 5)
 
   // Should be a success response (not timeout/fail-open)
   should.be_true(string.contains(response_json, "cli_fast_1"))
@@ -144,7 +176,8 @@ pub fn slow_callback_times_out_test() {
   process.sleep(150)
 
   // Should have received fail-open response
-  let assert Ok(response_json) = process.receive(mock.writes, 500)
+  let assert Ok(response_json) =
+    receive_until_match_contains(mock.writes, "cli_slow_1", "continue", 5)
   should.be_true(string.contains(response_json, "cli_slow_1"))
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
@@ -212,7 +245,8 @@ pub fn late_hook_done_ignored_after_timeout_test() {
   process.sleep(100)
 
   // Should have received timeout response
-  let assert Ok(response_json) = process.receive(mock.writes, 500)
+  let assert Ok(response_json) =
+    receive_until_match_contains(mock.writes, "cli_gated_1", "continue", 5)
   should.be_true(string.contains(response_json, "cli_gated_1"))
 
   // Now signal the callback to complete (late)

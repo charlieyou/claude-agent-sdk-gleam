@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, otp_version/0, check_stderr_support/0, exact_equals/2]).
+-export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, port_connect/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, otp_version/0, check_stderr_support/0, exact_equals/2]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -8,8 +8,8 @@ open_port(Executable, Args, WorkingDir) ->
     ExecStr0 = binary_to_list(Executable),
     ArgsStr0 = [binary_to_list(A) || A <- Args],
     ensure_executable_exists(ExecStr0),
-    {ExecStr1, ArgsStr1} = wrap_with_stdbuf(ExecStr0, ArgsStr0),
-    {ExecStr, ArgsStr} = wrap_with_stdin_closed(ExecStr1, ArgsStr1),
+    {ExecStr1, ArgsStr1} = wrap_with_stdin_closed(ExecStr0, ArgsStr0),
+    {ExecStr, ArgsStr} = wrap_with_stdbuf(ExecStr1, ArgsStr1),
     Opts = case WorkingDir of
         <<>> -> [];
         _ -> [{cd, binary_to_list(WorkingDir)}]
@@ -30,8 +30,8 @@ open_port_safe(Executable, Args, WorkingDir) ->
     case executable_exists(ExecStr0) of
         false -> {<<"error">>, <<"not_found">>};
         true ->
-            {ExecStr1, ArgsStr1} = wrap_with_stdbuf(ExecStr0, ArgsStr0),
-            {ExecStr, ArgsStr} = wrap_with_stdin_closed(ExecStr1, ArgsStr1),
+            {ExecStr1, ArgsStr1} = wrap_with_stdin_closed(ExecStr0, ArgsStr0),
+            {ExecStr, ArgsStr} = wrap_with_stdbuf(ExecStr1, ArgsStr1),
             Opts = case WorkingDir of
                 <<>> -> [];
                 _ -> [{cd, binary_to_list(WorkingDir)}]
@@ -128,6 +128,15 @@ port_write(Port, Data) ->
     catch
         error:badarg -> {<<"error">>, <<"port_closed">>}
     end.
+
+%% Connect a port to a different process so it receives port messages.
+port_connect(Port, Pid) ->
+    try
+        erlang:port_connect(Port, Pid)
+    catch
+        error:badarg -> ok
+    end,
+    ok.
 
 %% Closes the port and drains any remaining messages.
 %% Drains first to capture any final messages (like exit_status) before close.

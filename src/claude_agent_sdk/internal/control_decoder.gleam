@@ -15,7 +15,7 @@ import claude_agent_sdk/control.{
   Error as ControlError, HookCallback, McpMessage, RegularMessage, Success,
 }
 import claude_agent_sdk/internal/decoder
-import gleam/dynamic.{type Dynamic}
+import gleam/dynamic.{type Dynamic, classify, nil}
 import gleam/dynamic/decode
 import gleam/json
 import gleam/option.{type Option, None, Some}
@@ -146,20 +146,32 @@ fn decode_can_use_tool(
 ) -> Result(IncomingMessage, DecodeError) {
   let decoder = {
     use tool_name <- decode.field("tool_name", decode.string)
-    use input <- decode.field("input", decode.dynamic)
-    use permission_suggestions <- decode.field(
+    use input <- decode.optional_field("input", nil(), decode.dynamic)
+    use permission_suggestions_opt <- decode.optional_field(
       "permission_suggestions",
-      decode.list(decode.string),
+      None,
+      decode.optional(decode.list(decode.string)),
     )
     use blocked_path <- decode.optional_field(
       "blocked_path",
       None,
       decode.optional(decode.string),
     )
+    let permission_suggestions = case permission_suggestions_opt {
+      Some(list) -> list
+      None -> []
+    }
+    let resolved_input = case classify(input) {
+      "Nil" -> case decode.run(request, decode.at(["tool_input"], decode.dynamic)) {
+        Ok(tool_input) -> tool_input
+        Error(_) -> input
+      }
+      _ -> input
+    }
     decode.success(CanUseTool(
       request_id:,
       tool_name:,
-      input:,
+      input: resolved_input,
       permission_suggestions:,
       blocked_path:,
     ))

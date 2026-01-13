@@ -2,6 +2,7 @@
 /// This module provides the Gleam interface to claude_agent_sdk_ffi.erl
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
+import gleam/erlang/process.{type Pid}
 import gleam/string
 
 /// Port reference - opaque wrapper around Erlang port term
@@ -115,6 +116,14 @@ pub fn port_write(port: Port, data: String) -> Result(Nil, WriteError) {
     Ok(_) -> Error(PortClosed)
     Error(_) -> Error(PortClosed)
   }
+}
+
+/// Connect a port to another process so it receives port messages.
+@external(erlang, "claude_agent_sdk_ffi", "port_connect")
+fn ffi_port_connect_raw(port: Dynamic, pid: Pid) -> Nil
+
+pub fn connect_port(port: Port, pid: Pid) -> Nil {
+  ffi_port_connect_raw(port_to_dynamic(port), pid)
 }
 
 /// Blocking receive - returns Result to propagate decode errors

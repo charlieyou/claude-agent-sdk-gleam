@@ -43,6 +43,37 @@ fn receive_until_match(
   }
 }
 
+/// Receive messages until finding one containing target_id and required text.
+fn receive_until_match_contains(
+  subject: Subject(String),
+  target_id: String,
+  required: String,
+  max_attempts: Int,
+) -> Result(String, Nil) {
+  case max_attempts <= 0 {
+    True -> Error(Nil)
+    False -> {
+      case process.receive(subject, 500) {
+        Ok(msg) -> {
+          case string.contains(msg, target_id)
+            && string.contains(msg, required)
+          {
+            True -> Ok(msg)
+            False ->
+              receive_until_match_contains(
+                subject,
+                target_id,
+                required,
+                max_attempts - 1,
+              )
+          }
+        }
+        Error(Nil) -> Error(Nil)
+      }
+    }
+  }
+}
+
 // =============================================================================
 // Test: PreToolUse Hook Receives Context
 // =============================================================================
@@ -102,7 +133,8 @@ pub fn pre_tool_use_receives_context_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -181,7 +213,8 @@ pub fn post_tool_use_receives_output_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -253,7 +286,8 @@ pub fn can_use_tool_permission_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let _adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -333,7 +367,8 @@ pub fn hook_timeout_fails_open_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -350,7 +385,12 @@ pub fn hook_timeout_fails_open_test() {
 
   // Should receive fail-open response with continue: true
   let assert Ok(response) =
-    receive_until_match(adapter.captured_writes, "cli_hook_", 5)
+    receive_until_match_contains(
+      adapter.captured_writes,
+      "cli_hook_",
+      "continue",
+      5,
+    )
   should.be_true(string.contains(response, "continue"))
   should.be_true(string.contains(response, "success"))
   // Should NOT contain "deny"
@@ -410,7 +450,8 @@ pub fn permission_timeout_fails_deny_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let _adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -480,7 +521,8 @@ pub fn hook_error_fails_open_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -495,7 +537,12 @@ pub fn hook_error_fails_open_test() {
 
   // Should receive fail-open response
   let assert Ok(response) =
-    receive_until_match(adapter.captured_writes, "cli_hook_", 5)
+    receive_until_match_contains(
+      adapter.captured_writes,
+      "cli_hook_",
+      "continue",
+      5,
+    )
   should.be_true(string.contains(response, "continue"))
   should.be_true(string.contains(response, "success"))
   should.be_false(string.contains(response, "deny"))
@@ -544,7 +591,8 @@ pub fn permission_error_fails_deny_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let _adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 

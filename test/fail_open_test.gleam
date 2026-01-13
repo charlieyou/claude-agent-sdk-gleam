@@ -17,11 +17,11 @@ import support/mock_bidir_runner
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> Dynamic
 
-/// Receive messages from a subject until finding one containing target_id.
-/// Returns the matching message or Error if max_attempts exceeded.
-fn receive_until_match(
+/// Receive messages until finding one containing target_id and required text.
+fn receive_until_match_contains(
   subject: Subject(String),
   target_id: String,
+  required: String,
   max_attempts: Int,
 ) -> Result(String, Nil) {
   case max_attempts <= 0 {
@@ -29,9 +29,17 @@ fn receive_until_match(
     False -> {
       case process.receive(subject, 500) {
         Ok(msg) -> {
-          case string.contains(msg, target_id) {
+          case string.contains(msg, target_id)
+            && string.contains(msg, required)
+          {
             True -> Ok(msg)
-            False -> receive_until_match(subject, target_id, max_attempts - 1)
+            False ->
+              receive_until_match_contains(
+                subject,
+                target_id,
+                required,
+                max_attempts - 1,
+              )
           }
         }
         Error(Nil) -> Error(Nil)
@@ -106,7 +114,7 @@ pub fn crashing_callback_returns_continue_true_test() {
 
   // Should have received fail-open response (loop until matching request_id)
   let assert Ok(response_json) =
-    receive_until_match(mock.writes, "cli_crash_1", 5)
+    receive_until_match_contains(mock.writes, "cli_crash_1", "continue", 5)
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
 
@@ -177,7 +185,7 @@ pub fn session_continues_after_crash_fail_open_test() {
 
   // Get fail-open response for crash (loop until matching request_id)
   let assert Ok(crash_response) =
-    receive_until_match(mock.writes, "cli_crash", 5)
+    receive_until_match_contains(mock.writes, "cli_crash", "continue", 5)
   should.be_true(string.contains(crash_response, "continue"))
 
   // Second: send working hook - should work normally
@@ -191,7 +199,7 @@ pub fn session_continues_after_crash_fail_open_test() {
 
   // Get success response for working hook (loop until matching request_id)
   let assert Ok(working_response) =
-    receive_until_match(mock.writes, "cli_working", 5)
+    receive_until_match_contains(mock.writes, "cli_working", "continue", 5)
   should.be_true(string.contains(working_response, "success"))
   should.be_true(string.contains(working_response, "continue"))
 
@@ -256,7 +264,7 @@ pub fn timeout_returns_continue_true_test() {
 
   // Should have received fail-open response (loop until matching request_id)
   let assert Ok(response_json) =
-    receive_until_match(mock.writes, "cli_timeout_1", 5)
+    receive_until_match_contains(mock.writes, "cli_timeout_1", "continue", 5)
   should.be_true(string.contains(response_json, "success"))
   should.be_true(string.contains(response_json, "continue"))
 

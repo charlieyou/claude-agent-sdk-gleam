@@ -76,14 +76,13 @@ pub fn start(args: List(String)) -> Result(BidirRunner, StartError) {
 }
 
 /// Start a BidirRunner with an explicit executable path.
-/// Prepends --print --verbose --output-format stream-json --input-format stream-json to args.
+/// Prepends --verbose --output-format stream-json --input-format stream-json to args.
 pub fn start_with_path(
   executable_path: String,
   args: List(String),
 ) -> Result(BidirRunner, StartError) {
-  // Build full args: --print --verbose --output-format stream-json --input-format stream-json + user args
+  // Build full args: --verbose --output-format stream-json --input-format stream-json + user args
   let full_args = [
-    "--print",
     "--verbose",
     "--output-format",
     "stream-json",

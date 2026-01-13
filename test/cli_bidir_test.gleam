@@ -180,11 +180,11 @@ pub fn bidir_cli_args_includes_standard_args_test() {
   let args = cli.build_bidir_cli_args(opts, "test prompt")
 
   // Standard args should be present
-  assert_contains(args, "--print")
   assert_contains(args, "--output-format")
   assert_contains(args, "--verbose")
-  assert_contains(args, "--")
-  assert_contains(args, "test prompt")
+  assert_not_contains(args, "--print")
+  assert_not_contains(args, "--")
+  assert_not_contains(args, "test prompt")
 }
 
 pub fn bidir_cli_args_with_model_test() {

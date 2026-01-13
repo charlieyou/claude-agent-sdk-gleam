@@ -14,12 +14,13 @@ import gleam/string
 import gleeunit/should
 
 import claude_agent_sdk/internal/bidir.{
-  type PendingHook, type PendingRequest, type SessionState,
+  type ActorMessage, type PendingHook, type PendingRequest, type SessionState,
   type SubscriberMessage, HookType, InitQueueOverflow, PendingHook,
   PendingRequest, QueuedRequest, RequestError, SessionState, Starting,
   TooManyPendingRequests, add_pending_hook, add_pending_request,
   empty_hook_config, flush_queued_ops, queue_operation,
 }
+import claude_agent_sdk/internal/stream
 import support/mock_bidir_runner
 
 // =============================================================================
@@ -29,6 +30,7 @@ import support/mock_bidir_runner
 /// Create a minimal SessionState for testing backpressure functions.
 fn test_state() -> SessionState {
   let mock = mock_bidir_runner.new()
+  let self_subject: process.Subject(ActorMessage) = process.new_subject()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   SessionState(
     runner: mock.runner,
@@ -41,6 +43,7 @@ fn test_state() -> SessionState {
     next_request_id: 0,
     next_callback_id: 0,
     subscriber: subscriber,
+    self_subject: self_subject,
     capabilities: None,
     default_timeout_ms: 60_000,
     hook_timeouts: dict.new(),
@@ -50,6 +53,7 @@ fn test_state() -> SessionState {
     init_timeout_ms: 10_000,
     init_timer_ref: None,
     file_checkpointing_enabled: False,
+    line_buffer: stream.LineBuffer(<<>>),
   )
 }
 

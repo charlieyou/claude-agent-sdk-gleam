@@ -55,7 +55,8 @@ pub fn full_session_lifecycle_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for init request to be captured
-  let assert Ok(_init_msg) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
 
   // Process init (sends auto-ack)
   let adapter = full_mock_runner.process_init(adapter)
@@ -136,7 +137,8 @@ pub fn message_routing_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Wait for and process init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -203,6 +205,7 @@ pub fn init_handshake_with_hooks_test() {
 
   // Capture init request
   let assert Ok(init_json) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_json)
 
   // Verify initialize structure
   should.be_true(string.contains(init_json, "\"type\":\"control_request\""))
@@ -259,7 +262,8 @@ pub fn hook_simulation_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Complete init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -306,7 +310,8 @@ pub fn arbitrary_sequence_injection_test() {
   let adapter = full_mock_runner.set_session(adapter, session)
 
   // Complete init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
@@ -353,7 +358,8 @@ pub fn session_state_tracking_test() {
   )
 
   // Complete init
-  let assert Ok(_) = process.receive(adapter.captured_writes, 500)
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let adapter = full_mock_runner.capture_init_request(adapter, init_msg)
   let adapter = full_mock_runner.process_init(adapter)
   process.sleep(50)
 
