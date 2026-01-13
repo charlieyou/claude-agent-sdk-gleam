@@ -113,12 +113,12 @@ pub type QueryOptions {
     file_checkpointing_enabled: Bool,
     // --- Timeout configuration ---
     /// Global timeout in milliseconds for operations. Applied in GenServer.
-    timeout_ms: Result(Int, Nil),
+    timeout_ms: Option(Int),
     /// Per-hook timeout overrides. Keys are HookEvent, values are timeout in ms.
     hook_timeouts: Dict(HookEvent, Int),
     // --- Testing seam for bidirectional mode ---
     /// Factory function for creating BidirRunner. Used by start_session() tests.
-    bidir_runner_factory: Result(fn() -> BidirRunner, Nil),
+    bidir_runner_factory: Option(fn() -> BidirRunner),
   )
 }
 
@@ -165,9 +165,9 @@ pub fn default_options() -> QueryOptions {
     on_can_use_tool: None,
     mcp_servers: [],
     file_checkpointing_enabled: False,
-    timeout_ms: Error(Nil),
+    timeout_ms: None,
     hook_timeouts: dict.new(),
-    bidir_runner_factory: Error(Nil),
+    bidir_runner_factory: None,
   )
 }
 
@@ -690,7 +690,7 @@ pub fn with_file_checkpointing(options: QueryOptions) -> QueryOptions {
 ///   |> with_timeout(60_000)  // 60 seconds
 /// ```
 pub fn with_timeout(options: QueryOptions, timeout_ms: Int) -> QueryOptions {
-  QueryOptions(..options, timeout_ms: Ok(timeout_ms))
+  QueryOptions(..options, timeout_ms: Some(timeout_ms))
 }
 
 /// Set a per-hook timeout override.
@@ -750,5 +750,5 @@ pub fn with_bidir_runner_factory(
   options: QueryOptions,
   factory: fn() -> BidirRunner,
 ) -> QueryOptions {
-  QueryOptions(..options, bidir_runner_factory: Ok(factory))
+  QueryOptions(..options, bidir_runner_factory: Some(factory))
 }

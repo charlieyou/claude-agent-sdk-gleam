@@ -5,6 +5,7 @@
 import claude_agent_sdk/options
 import gleam/dynamic.{type Dynamic}
 import gleam/list
+import gleam/option
 import gleeunit/should
 
 // Helper to convert any value to Dynamic (identity function in Erlang)
@@ -142,7 +143,7 @@ pub fn mcp_composes_with_other_options_test() {
   opts.max_turns |> should.equal(option.Some(5))
   list.length(opts.mcp_servers) |> should.equal(1)
   opts.file_checkpointing_enabled |> should.be_true
-  opts.timeout_ms |> should.equal(Ok(30_000))
+  opts.timeout_ms |> should.equal(option.Some(30_000))
 }
 
 pub fn multiple_mcp_servers_with_other_options_test() {

@@ -3,14 +3,12 @@
 /// TDD: Write failing tests first, then implement decoders.
 import gleam/dynamic.{type Dynamic}
 import gleam/json
-import gleam/option.{None, Some}
 import gleeunit/should
 
 import claude_agent_sdk/hook.{
-  CanUseTool, CanUseToolInput, MissingField, PostToolUse, PostToolUseInput,
-  PreCompact, PreCompactInput, PreToolUse, PreToolUseInput, Stop, StopInput,
-  SubagentStop, SubagentStopInput, UserPromptSubmit, UserPromptSubmitInput,
-  WrongType, decode_hook_input,
+  MissingField, PostToolUse, PostToolUseInput, PreCompact, PreCompactInput,
+  PreToolUse, PreToolUseInput, Stop, StopInput, SubagentStop, SubagentStopInput,
+  UserPromptSubmit, UserPromptSubmitInput, WrongType, decode_hook_input,
 }
 
 import gleam/dynamic/decode
@@ -228,44 +226,6 @@ pub fn decode_pre_compact_missing_session_id_test() {
 
   case result {
     Error(MissingField(field)) -> should.equal(field, "session_id")
-    _ -> should.fail()
-  }
-}
-
-// =============================================================================
-// CanUseTool Decoder Tests
-// =============================================================================
-
-pub fn decode_can_use_tool_success_test() {
-  let json_str =
-    "{\"hook_event_name\":\"CanUseTool\",\"session_id\":\"abc123\",\"tool_name\":\"Write\",\"tool_input\":{\"path\":\"/etc/passwd\"},\"permission_suggestions\":[\"allow_write\"],\"blocked_path\":\"/etc/passwd\"}"
-  let input = parse_json(json_str)
-
-  let result = decode_hook_input(CanUseTool, input)
-
-  case result {
-    Ok(CanUseToolInput(ctx)) -> {
-      should.equal(ctx.tool_name, "Write")
-      should.equal(ctx.session_id, "abc123")
-      should.equal(ctx.permission_suggestions, ["allow_write"])
-      should.equal(ctx.blocked_path, Some("/etc/passwd"))
-    }
-    _ -> should.fail()
-  }
-}
-
-pub fn decode_can_use_tool_no_blocked_path_test() {
-  let json_str =
-    "{\"hook_event_name\":\"CanUseTool\",\"session_id\":\"abc123\",\"tool_name\":\"Bash\",\"tool_input\":{\"command\":\"ls\"},\"permission_suggestions\":[]}"
-  let input = parse_json(json_str)
-
-  let result = decode_hook_input(CanUseTool, input)
-
-  case result {
-    Ok(CanUseToolInput(ctx)) -> {
-      should.equal(ctx.tool_name, "Bash")
-      should.equal(ctx.blocked_path, None)
-    }
     _ -> should.fail()
   }
 }

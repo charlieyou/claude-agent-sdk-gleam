@@ -3,6 +3,7 @@
 /// These tests verify that timeout_ms, hook_timeouts, and bidir_runner_factory
 /// fields and builder functions work correctly.
 import gleam/dict
+import gleam/option
 import gleeunit/should
 
 import claude_agent_sdk.{
@@ -21,14 +22,14 @@ pub fn with_timeout_sets_timeout_ms_test() {
     default_options()
     |> with_timeout(30_000)
 
-  should.equal(options.timeout_ms, Ok(30_000))
+  should.equal(options.timeout_ms, option.Some(30_000))
 }
 
 /// Test default options have no timeout set.
 pub fn default_options_no_timeout_test() {
   let options = default_options()
 
-  should.equal(options.timeout_ms, Error(Nil))
+  should.equal(options.timeout_ms, option.None)
 }
 
 /// Test with_timeout can be chained with other options.
@@ -39,7 +40,7 @@ pub fn with_timeout_chainable_test() {
     |> with_timeout(45_000)
 
   // Last one wins
-  should.equal(options.timeout_ms, Ok(45_000))
+  should.equal(options.timeout_ms, option.Some(45_000))
 }
 
 // =============================================================================
@@ -124,12 +125,12 @@ pub fn with_bidir_runner_factory_sets_factory_test() {
 
   // Verify factory is set (Option is Some)
   case options.bidir_runner_factory {
-    Ok(factory) -> {
+    option.Some(factory) -> {
       // Call the factory and verify it returns a BidirRunner
       let _runner = factory()
       should.be_true(True)
     }
-    Error(Nil) -> {
+    option.None -> {
       should.fail()
     }
   }
@@ -139,7 +140,7 @@ pub fn with_bidir_runner_factory_sets_factory_test() {
 pub fn default_options_no_bidir_runner_factory_test() {
   let options = default_options()
 
-  should.equal(options.bidir_runner_factory, Error(Nil))
+  should.equal(options.bidir_runner_factory, option.None)
 }
 
 /// Test that the factory can be invoked multiple times.
@@ -153,14 +154,14 @@ pub fn bidir_runner_factory_callable_test() {
     |> with_bidir_runner_factory(mock_factory)
 
   case options.bidir_runner_factory {
-    Ok(factory) -> {
+    option.Some(factory) -> {
       // Call factory multiple times - each should succeed
       let _r1 = factory()
       let _r2 = factory()
       let _r3 = factory()
       should.be_true(True)
     }
-    Error(Nil) -> {
+    option.None -> {
       should.fail()
     }
   }
@@ -183,11 +184,11 @@ pub fn timeout_options_combine_with_other_options_test() {
     |> with_bidir_runner_factory(mock_factory)
 
   // All three should be set
-  should.equal(options.timeout_ms, Ok(60_000))
+  should.equal(options.timeout_ms, option.Some(60_000))
   should.equal(dict.get(options.hook_timeouts, hook.PreToolUse), Ok(5000))
 
   case options.bidir_runner_factory {
-    Ok(_) -> should.be_true(True)
-    Error(Nil) -> should.fail()
+    option.Some(_) -> should.be_true(True)
+    option.None -> should.fail()
   }
 }

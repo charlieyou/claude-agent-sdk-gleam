@@ -7,12 +7,12 @@ import gleeunit/should
 
 import claude_agent_sdk/hook.{
   type HookExecutionResult, type PermissionCheckResult, Allow, Block,
-  CanUseToolContext, CanUseToolInput, Continue, Deny, MissingField, ModifyInput,
-  PostToolUse, PostToolUseContext, PostToolUseInput, PreCompact,
-  PreCompactContext, PreCompactInput, PreToolUse, PreToolUseContext,
-  PreToolUseInput, Stop, StopContext, StopInput, SubagentStop,
-  SubagentStopContext, SubagentStopInput, UserPromptSubmit,
-  UserPromptSubmitContext, UserPromptSubmitInput, WrongType, decode_hook_input,
+  CanUseToolContext, Continue, Deny, MissingField, ModifyInput, PostToolUse,
+  PostToolUseContext, PostToolUseInput, PreCompact, PreCompactContext,
+  PreCompactInput, PreToolUse, PreToolUseContext, PreToolUseInput, Stop,
+  StopContext, StopInput, SubagentStop, SubagentStopContext, SubagentStopInput,
+  UserPromptSubmit, UserPromptSubmitContext, UserPromptSubmitInput, WrongType,
+  decode_hook_input,
 }
 import gleam/dynamic/decode
 import gleam/json
@@ -200,21 +200,6 @@ pub fn hook_input_post_tool_use_test() {
   let input = PostToolUseInput(ctx)
   let PostToolUseInput(c) = input
   should.equal(c.tool_name, "Read")
-}
-
-pub fn hook_input_can_use_tool_test() {
-  let ctx =
-    CanUseToolContext(
-      tool_name: "Write",
-      tool_input: to_dynamic("/path/to/file"),
-      session_id: "session-perm",
-      permission_suggestions: ["allow_write"],
-      blocked_path: Some("/path/to/file"),
-    )
-  let input = CanUseToolInput(ctx)
-  let CanUseToolInput(c) = input
-  should.equal(c.tool_name, "Write")
-  should.equal(c.permission_suggestions, ["allow_write"])
 }
 
 pub fn hook_input_user_prompt_submit_test() {

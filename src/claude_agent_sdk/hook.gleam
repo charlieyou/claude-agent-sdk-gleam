@@ -31,7 +31,7 @@
 /// ```
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
-import gleam/option.{type Option, None, Some}
+import gleam/option.{type Option}
 
 // =============================================================================
 // Hook Events
@@ -53,8 +53,6 @@ pub type HookEvent {
   SubagentStop
   /// Fires before context compaction.
   PreCompact
-  /// Permission check for tool usage.
-  CanUseTool
 }
 
 /// Convert a HookEvent to its expected JSON hook_event_name string.
@@ -66,7 +64,6 @@ fn hook_event_to_string(event: HookEvent) -> String {
     Stop -> "Stop"
     SubagentStop -> "SubagentStop"
     PreCompact -> "PreCompact"
-    CanUseTool -> "CanUseTool"
   }
 }
 
@@ -212,8 +209,6 @@ pub type HookInput {
   PreToolUseInput(PreToolUseContext)
   /// Post-tool-use hook input.
   PostToolUseInput(PostToolUseContext)
-  /// Can-use-tool permission check input.
-  CanUseToolInput(CanUseToolContext)
   /// User-prompt-submit hook input.
   UserPromptSubmitInput(UserPromptSubmitContext)
   /// Stop hook input.
@@ -271,7 +266,6 @@ pub fn decode_hook_input(
             Stop -> decode_stop(input)
             SubagentStop -> decode_subagent_stop(input)
             PreCompact -> decode_pre_compact(input)
-            CanUseTool -> decode_can_use_tool(input)
           }
         }
       }
@@ -363,36 +357,6 @@ fn decode_pre_compact(input: Dynamic) -> Result(HookInput, HookDecodeError) {
   }
   case decode.run(input, decoder) {
     Ok(ctx) -> Ok(PreCompactInput(ctx))
-    Error(errors) -> Error(decode_errors_to_hook_error(errors))
-  }
-}
-
-/// Decode CanUseTool input to CanUseToolContext.
-fn decode_can_use_tool(input: Dynamic) -> Result(HookInput, HookDecodeError) {
-  let decoder = {
-    use tool_name <- decode.field("tool_name", decode.string)
-    use tool_input <- decode.field("tool_input", decode.dynamic)
-    use session_id <- decode.field("session_id", decode.string)
-    use permission_suggestions <- decode.optional_field(
-      "permission_suggestions",
-      [],
-      decode.list(decode.string),
-    )
-    use blocked_path <- decode.optional_field(
-      "blocked_path",
-      None,
-      decode.map(decode.string, Some),
-    )
-    decode.success(CanUseToolContext(
-      tool_name:,
-      tool_input:,
-      session_id:,
-      permission_suggestions:,
-      blocked_path:,
-    ))
-  }
-  case decode.run(input, decoder) {
-    Ok(ctx) -> Ok(CanUseToolInput(ctx))
     Error(errors) -> Error(decode_errors_to_hook_error(errors))
   }
 }

@@ -349,7 +349,8 @@ fn add_permission_mode(args: List(String), mode: PermissionMode) -> List(String)
 // ============================================================================
 
 /// Check if options contain any bidirectional features.
-/// Returns True if any hooks, can_use_tool handler, mcp_config_path, or timeout_ms are set.
+/// Returns True if any hooks, can_use_tool handler, or timeout_ms are set.
+/// Note: mcp_config_path is NOT a bidir-only feature - query() supports it via --mcp-config.
 pub fn has_bidir_features(options: QueryOptions) -> Bool {
   option.is_some(options.on_pre_tool_use)
   || option.is_some(options.on_post_tool_use)
@@ -358,8 +359,7 @@ pub fn has_bidir_features(options: QueryOptions) -> Bool {
   || option.is_some(options.on_subagent_stop)
   || option.is_some(options.on_pre_compact)
   || option.is_some(options.on_can_use_tool)
-  || option.is_some(options.mcp_config_path)
-  || result.is_ok(options.timeout_ms)
+  || option.is_some(options.timeout_ms)
 }
 
 /// Build CLI arguments for bidirectional mode.
