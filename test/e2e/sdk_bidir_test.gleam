@@ -23,28 +23,17 @@ import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage, HookConfig, RequestSuccess,
   Running, StartConfig, Stopped,
 }
+import e2e/helpers
 import support/mock_bidir_runner
-
-// ============================================================================
-// FFI Bindings
-// ============================================================================
-
-/// Get environment variable value.
-/// Returns Ok(value) if set, Error(Nil) if not set.
-@external(erlang, "e2e_helpers_ffi", "get_env")
-fn get_env(name: String) -> Result(String, Nil)
 
 // ============================================================================
 // Test Helpers
 // ============================================================================
 
 /// Check if E2E SDK tests are enabled.
+/// Delegates to shared helpers to avoid module-level FFI that would fail in non-E2E runs.
 fn skip_if_no_e2e() -> Result(Nil, String) {
-  case get_env("E2E_SDK_TEST") {
-    Ok("1") -> Ok(Nil)
-    Ok(_) -> Error("[SKIP] E2E_SDK_TEST is set but not '1'")
-    Error(_) -> Error("[SKIP] E2E_SDK_TEST not set; skipping E2E test")
-  }
+  helpers.skip_if_no_e2e()
 }
 
 /// FFI for creating Dynamic values
@@ -356,10 +345,13 @@ pub fn sdk_42_hook_timeout_test() {
       // Response should come within timeout + processing time
       let assert Ok(response_json) = process.receive(mock.writes, 500)
 
-      // Verify fail-open response was sent
+      // Verify fail-open response was sent with correct fields
       should.be_true(string.contains(response_json, "cli_slow_1"))
-      // For hooks, fail-open means continue: true
       should.be_true(string.contains(response_json, "success"))
+      // Verify fail-open semantics: continue must be true
+      should.be_true(string.contains(response_json, "continue"))
+      // Verify timeout was the reason (proves timeout handler fired, not slow hook completing)
+      should.be_true(string.contains(response_json, "\"reason\":\"timeout\""))
 
       io.println("[PASS] SDK-42: Hook timeout handled with fail-open behavior")
 
