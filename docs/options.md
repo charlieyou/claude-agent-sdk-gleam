@@ -7,7 +7,7 @@ SDK behaves while streaming. Start from `default_options()` and chain builders.
 import claude_agent_sdk
 import claude_agent_sdk/options
 
-let options = claude_agent_sdk.default_options()
+let opts = claude_agent_sdk.default_options()
   |> claude_agent_sdk.with_model("sonnet")
   |> claude_agent_sdk.with_max_turns(5)
   |> claude_agent_sdk.with_append_system_prompt("Be concise.")

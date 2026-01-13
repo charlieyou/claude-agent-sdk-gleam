@@ -14,14 +14,14 @@ import claude_agent_sdk
 import claude_agent_sdk/runner
 import gleam/dynamic
 
-let runner = runner.test_runner(
+let test_runner = runner.test_runner(
   on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.from("handle")) },
   on_read: fn(_handle) { runner.Eof },
   on_close: fn(_handle) { Nil },
 )
 
-let options = claude_agent_sdk.default_options()
-  |> claude_agent_sdk.with_test_mode(runner)
+let opts = claude_agent_sdk.default_options()
+  |> claude_agent_sdk.with_test_mode(test_runner)
 ```
 
 `ReadResult` options:
@@ -44,7 +44,7 @@ import gleam/bit_array
 import gleam/dynamic
 
 // Pseudocode structure: store remaining chunks per handle
-let runner = runner.test_runner(
+let test_runner = runner.test_runner(
   on_spawn: fn(_, _, _) {
     // return a handle key and store state in ETS or another store
     Ok(dynamic.from("handle"))
