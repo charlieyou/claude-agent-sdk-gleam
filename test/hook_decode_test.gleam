@@ -3,6 +3,7 @@
 /// TDD: Write failing tests first, then implement decoders.
 import gleam/dynamic.{type Dynamic}
 import gleam/json
+import gleam/option.{None, Some}
 import gleeunit/should
 
 import claude_agent_sdk/hook.{
@@ -205,7 +206,7 @@ pub fn decode_subagent_stop_missing_subagent_id_test() {
 
 pub fn decode_pre_compact_success_test() {
   let json_str =
-    "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"abc123\"}"
+    "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"abc123\",\"trigger\":\"auto\",\"custom_instructions\":null}"
   let input = parse_json(json_str)
 
   let result = decode_hook_input(PreCompact, input)
@@ -213,19 +214,52 @@ pub fn decode_pre_compact_success_test() {
   case result {
     Ok(PreCompactInput(ctx)) -> {
       should.equal(ctx.session_id, "abc123")
+      should.equal(ctx.trigger, "auto")
+      should.equal(ctx.custom_instructions, None)
+    }
+    _ -> should.fail()
+  }
+}
+
+pub fn decode_pre_compact_with_custom_instructions_test() {
+  let json_str =
+    "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"abc123\",\"trigger\":\"manual\",\"custom_instructions\":\"Focus on recent\"}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreCompact, input)
+
+  case result {
+    Ok(PreCompactInput(ctx)) -> {
+      should.equal(ctx.session_id, "abc123")
+      should.equal(ctx.trigger, "manual")
+      should.equal(ctx.custom_instructions, Some("Focus on recent"))
     }
     _ -> should.fail()
   }
 }
 
 pub fn decode_pre_compact_missing_session_id_test() {
-  let json_str = "{\"hook_event_name\":\"PreCompact\"}"
+  let json_str =
+    "{\"hook_event_name\":\"PreCompact\",\"trigger\":\"auto\",\"custom_instructions\":null}"
   let input = parse_json(json_str)
 
   let result = decode_hook_input(PreCompact, input)
 
   case result {
     Error(MissingField(field)) -> should.equal(field, "session_id")
+    _ -> should.fail()
+  }
+}
+
+pub fn decode_pre_compact_missing_trigger_test() {
+  let json_str =
+    "{\"hook_event_name\":\"PreCompact\",\"session_id\":\"abc123\",\"custom_instructions\":null}"
+  let input = parse_json(json_str)
+
+  let result = decode_hook_input(PreCompact, input)
+
+  case result {
+    Error(MissingField(field)) -> should.equal(field, "trigger")
     _ -> should.fail()
   }
 }

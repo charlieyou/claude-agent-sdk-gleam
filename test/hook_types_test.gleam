@@ -136,8 +136,27 @@ pub fn subagent_stop_context_test() {
 }
 
 pub fn pre_compact_context_test() {
-  let ctx = PreCompactContext(session_id: "session-mno")
+  let ctx =
+    PreCompactContext(
+      session_id: "session-mno",
+      trigger: "auto",
+      custom_instructions: None,
+    )
   should.equal(ctx.session_id, "session-mno")
+  should.equal(ctx.trigger, "auto")
+  should.equal(ctx.custom_instructions, None)
+}
+
+pub fn pre_compact_context_with_custom_instructions_test() {
+  let ctx =
+    PreCompactContext(
+      session_id: "session-xyz",
+      trigger: "manual",
+      custom_instructions: Some("Focus on recent context"),
+    )
+  should.equal(ctx.session_id, "session-xyz")
+  should.equal(ctx.trigger, "manual")
+  should.equal(ctx.custom_instructions, Some("Focus on recent context"))
 }
 
 // =============================================================================
@@ -230,10 +249,16 @@ pub fn hook_input_subagent_stop_test() {
 }
 
 pub fn hook_input_pre_compact_test() {
-  let ctx = PreCompactContext(session_id: "session-6")
+  let ctx =
+    PreCompactContext(
+      session_id: "session-6",
+      trigger: "auto",
+      custom_instructions: None,
+    )
   let input = PreCompactInput(ctx)
   let PreCompactInput(c) = input
   should.equal(c.session_id, "session-6")
+  should.equal(c.trigger, "auto")
 }
 
 // =============================================================================

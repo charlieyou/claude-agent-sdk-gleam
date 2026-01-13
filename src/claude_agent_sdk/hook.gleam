@@ -159,11 +159,15 @@ pub type SubagentStopContext {
 
 /// Context for pre-compact hooks.
 ///
-/// Provides session information before context compaction.
+/// Provides information before context compaction.
 pub type PreCompactContext {
   PreCompactContext(
     /// Session identifier.
     session_id: String,
+    /// What triggered compaction: "manual" or "auto".
+    trigger: String,
+    /// Custom instructions for compaction, if any.
+    custom_instructions: Option(String),
   )
 }
 
@@ -353,7 +357,16 @@ fn decode_subagent_stop(input: Dynamic) -> Result(HookInput, HookDecodeError) {
 fn decode_pre_compact(input: Dynamic) -> Result(HookInput, HookDecodeError) {
   let decoder = {
     use session_id <- decode.field("session_id", decode.string)
-    decode.success(PreCompactContext(session_id:))
+    use trigger <- decode.field("trigger", decode.string)
+    use custom_instructions <- decode.field(
+      "custom_instructions",
+      decode.optional(decode.string),
+    )
+    decode.success(PreCompactContext(
+      session_id:,
+      trigger:,
+      custom_instructions:,
+    ))
   }
   case decode.run(input, decoder) {
     Ok(ctx) -> Ok(PreCompactInput(ctx))
