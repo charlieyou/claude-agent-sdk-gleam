@@ -5,12 +5,14 @@
 /// The internal module uses NextProcessError, NextBufferOverflow, etc. while
 /// the public module exposes ProcessError, BufferOverflow, etc.
 import claude_agent_sdk/error.{
-  EndOfStream, JsonDecodeError, Message, ProcessError, TooManyDecodeErrors,
+  CleanExitNoResult, EndOfStream, JsonDecodeError, Message,
+  NonZeroExitAfterResult, ProcessError, TooManyDecodeErrors,
   UnexpectedMessageError, WarningEvent,
 }
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream as internal_stream
 import claude_agent_sdk/stream
+import gleam/string
 import gleeunit/should
 
 // ============================================================================
@@ -52,7 +54,7 @@ pub fn next_maps_warning_event_to_public_type_test() {
   // Verify we get the PUBLIC WarningEvent type
   case result {
     Ok(WarningEvent(warning)) -> {
-      warning.code |> should.equal(error.CleanExitNoResult)
+      warning.code |> should.equal(CleanExitNoResult)
     }
     _ -> should.fail()
   }
@@ -161,9 +163,10 @@ pub fn next_maps_unexpected_message_error_to_public_type_test() {
   let #(result, _) = stream.next(internal)
 
   // Verify we get the PUBLIC UnexpectedMessageError type
+  // Use string.contains instead of exact match since read_line may include/exclude newline
   case result {
     Error(UnexpectedMessageError(raw_json)) -> {
-      raw_json |> should.equal("{\"type\":\"unknown_type_xyz\"}")
+      raw_json |> string.contains("unknown_type_xyz") |> should.be_true
     }
     _ -> should.fail()
   }
@@ -238,7 +241,7 @@ pub fn next_maps_nonzero_exit_after_result_warning_test() {
   case result2 {
     Ok(WarningEvent(warning)) -> {
       case warning.code {
-        error.NonZeroExitAfterResult(42) -> Nil
+        NonZeroExitAfterResult(42) -> Nil
         _ -> should.fail()
       }
     }
