@@ -586,9 +586,10 @@ pub fn sdk_34_can_use_tool_test() {
                   io.println(
                     "[FAIL] Permission handler not invoked within timeout",
                   )
+                  // Collect messages to flush session before shutdown
+                  let _ = collect_messages(subscriber, 5000, [])
                   bidir.shutdown(session)
                   should.fail()
-                  Nil
                 }
               }
             }
