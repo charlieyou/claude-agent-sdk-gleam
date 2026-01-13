@@ -34,6 +34,7 @@ import gleam/string
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream as internal_stream
+import claude_agent_sdk/session
 
 // =============================================================================
 // Query Options (from options.gleam)
@@ -60,6 +61,15 @@ pub type Handle =
 /// Result of reading from a process handle.
 pub type ReadResult =
   runner.ReadResult
+
+// =============================================================================
+// Session Types (from session.gleam)
+// =============================================================================
+
+/// Opaque session handle for bidirectional mode.
+/// Wraps a Subject for communicating with the session GenServer.
+pub type Session =
+  session.Session
 
 /// Create a test runner with user-provided callbacks.
 pub const test_runner = runner.test_runner
@@ -218,8 +228,14 @@ pub type Warning =
 pub type WarningCode =
   error.WarningCode
 
+pub type StartError =
+  error.StartError
+
 /// Check if a StreamError is terminal (stream closed, no more items)
 pub const is_terminal = error.is_terminal
+
+/// Convert a StartError to a human-readable string
+pub const start_error_to_string = error.start_error_to_string
 
 // =============================================================================
 // Stream Helpers (from claude_agent_sdk/stream.gleam)
@@ -495,4 +511,52 @@ fn spawn_query_with_warnings(
         Ok(port) -> Ok(internal_stream.new_with_warnings(port, warnings))
       }
   }
+}
+
+// =============================================================================
+// Bidirectional Session Entry Point
+// =============================================================================
+
+/// Start a bidirectional session with Claude CLI.
+///
+/// This creates an interactive session where you can send prompts and receive
+/// responses, with support for hooks, control operations, and message streaming.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(NotImplemented)` as a placeholder.
+/// The actual implementation will be added in Epic 8.
+///
+/// ## Parameters
+///
+/// - `prompt`: Initial prompt to send to the CLI
+/// - `options`: Query options (same as `query()`)
+///
+/// ## Returns
+///
+/// - `Ok(Session)`: A session handle for interacting with the CLI
+/// - `Error(StartError)`: If session initialization fails
+///
+/// ## Example
+///
+/// ```gleam
+/// import claude_agent_sdk
+///
+/// let options = claude_agent_sdk.default_options()
+///
+/// case claude_agent_sdk.start_session("Hello, Claude!", options) {
+///   Ok(session) -> {
+///     // Use session for bidirectional communication
+///     // session.send_prompt(session, "Follow-up question")
+///   }
+///   Error(err) -> {
+///     // Handle StartError
+///   }
+/// }
+/// ```
+pub fn start_session(
+  _prompt: String,
+  _options: QueryOptions,
+) -> Result(Session, StartError) {
+  Error(error.NotImplemented)
 }

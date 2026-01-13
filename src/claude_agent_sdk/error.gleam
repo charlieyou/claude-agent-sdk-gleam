@@ -294,6 +294,37 @@ pub fn error_to_string(error: QueryError) -> String {
   }
 }
 
+// ============================================================================
+// StartError Type (Session Startup Errors)
+// ============================================================================
+
+/// Errors that can occur when starting a bidirectional session.
+///
+/// StartError is returned by `start_session()` when the SDK cannot establish
+/// a bidirectional CLI session. These errors occur during session initialization.
+pub type StartError {
+  /// Initialization timed out waiting for CLI response.
+  /// The CLI process may be slow to start or unresponsive.
+  Timeout
+  /// Failed to spawn the CLI process.
+  /// May indicate permission issues, missing dependencies, or resource limits.
+  SpawnFailed(reason: String)
+  /// Placeholder for TDD: start_session is not yet implemented.
+  /// This variant will be removed once the actual implementation is complete.
+  NotImplemented
+}
+
+/// Convert a StartError to a human-readable string.
+///
+/// Useful for logging or displaying errors to users.
+pub fn start_error_to_string(error: StartError) -> String {
+  case error {
+    Timeout -> "Session initialization timed out"
+    SpawnFailed(reason) -> "Failed to spawn CLI process: " <> reason
+    NotImplemented -> "start_session is not yet implemented"
+  }
+}
+
 /// Convert a StreamError to a human-readable string.
 ///
 /// Useful for logging or displaying errors to users.
