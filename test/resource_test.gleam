@@ -20,7 +20,6 @@ import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
-import support/ets_helpers
 
 // ============================================================================
 // Shell escaping helper
@@ -164,7 +163,7 @@ pub fn with_stream_closes_port_on_panic_test() {
 
   // Use rescue to catch the panic, but verify cleanup still happens
   let panic_result =
-    ets_helpers.rescue(fn() {
+    port_ffi.rescue(fn() {
       with_stream(query_result, fn(_s) { panic as "Simulated user panic" })
     })
 
