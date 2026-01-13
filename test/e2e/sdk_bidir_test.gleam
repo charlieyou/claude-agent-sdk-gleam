@@ -481,8 +481,14 @@ pub fn sdk_43c_shutdown_after_malformed_test() {
   // Session should still be running
   should.equal(bidir.get_lifecycle(session, 1000), Running)
 
-  // Shutdown should work cleanly (don't check lifecycle after - actor may have exited)
+  // Shutdown should work cleanly
   bidir.shutdown(session)
+
+  // Verify shutdown completed by checking actor process is no longer alive
+  let pid = bidir.get_pid(session)
+  // Give the actor time to process shutdown and stop
+  process.sleep(100)
+  should.equal(process.is_alive(pid), False)
 
   io.println("[PASS] SDK-43c: Clean shutdown after malformed data")
 }
