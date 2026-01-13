@@ -2212,29 +2212,32 @@ pub fn set_model(
   model: String,
 ) -> Result(Nil, SetModelError) {
   // Check if actor is alive - if dead, return SessionStopped immediately
-  let assert Ok(pid) = process.subject_owner(session)
-  case process.is_alive(pid) {
-    False -> Error(SetModelSessionStopped)
-    True -> {
-      // Generate a request ID for this operation
-      let request_id = generate_request_id()
-      let request = SetModel(request_id, model)
+  case process.subject_owner(session) {
+    Error(Nil) -> Error(SetModelSessionStopped)
+    Ok(pid) ->
+      case process.is_alive(pid) {
+        False -> Error(SetModelSessionStopped)
+        True -> {
+          // Generate a request ID for this operation
+          let request_id = generate_request_id()
+          let request = SetModel(request_id, model)
 
-      // Create subject to receive the result
-      let result_subject: Subject(RequestResult) = process.new_subject()
+          // Create subject to receive the result
+          let result_subject: Subject(RequestResult) = process.new_subject()
 
-      // Send the request
-      send_control_request(session, request, result_subject)
+          // Send the request
+          send_control_request(session, request, result_subject)
 
-      // Wait for response with 5000ms timeout
-      case process.receive(result_subject, set_model_timeout_ms) {
-        Ok(RequestSuccess(_)) -> Ok(Nil)
-        Ok(RequestError(message)) -> Error(SetModelCliError(message))
-        Ok(RequestTimeout) -> Error(SetModelTimeout)
-        Ok(RequestSessionStopped) -> Error(SetModelSessionStopped)
-        Error(Nil) -> Error(SetModelTimeout)
+          // Wait for response with 5000ms timeout
+          case process.receive(result_subject, set_model_timeout_ms) {
+            Ok(RequestSuccess(_)) -> Ok(Nil)
+            Ok(RequestError(message)) -> Error(SetModelCliError(message))
+            Ok(RequestTimeout) -> Error(SetModelTimeout)
+            Ok(RequestSessionStopped) -> Error(SetModelSessionStopped)
+            Error(Nil) -> Error(SetModelTimeout)
+          }
+        }
       }
-    }
   }
 }
 
