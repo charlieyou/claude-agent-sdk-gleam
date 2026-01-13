@@ -348,8 +348,8 @@ pub fn sdk_42_hook_timeout_test() {
       // Verify fail-open response was sent with correct fields
       should.be_true(string.contains(response_json, "cli_slow_1"))
       should.be_true(string.contains(response_json, "success"))
-      // Verify fail-open semantics: continue must be true
-      should.be_true(string.contains(response_json, "continue"))
+      // Verify fail-open semantics: continue must be explicitly true
+      should.be_true(string.contains(response_json, "\"continue\":true"))
       // Verify timeout was the reason (proves timeout handler fired, not slow hook completing)
       should.be_true(string.contains(response_json, "\"reason\":\"timeout\""))
 

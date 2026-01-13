@@ -9,6 +9,7 @@ import claude_agent_sdk/error.{EndOfStream, Message, WarningEvent}
 import claude_agent_sdk/message.{
   type MessageEnvelope, Assistant, Result, System, User,
 }
+import gleam/dynamic
 import gleam/list
 import gleam/option.{type Option, None, Some}
 
@@ -30,10 +31,34 @@ pub fn skip_if_no_e2e() -> Result(Nil, String) {
   }
 }
 
-/// Get environment variable value via FFI.
+/// Get environment variable value via Erlang's built-in os module.
+/// Uses os:getenv/1 directly to avoid FFI module load issues.
 /// Returns Ok(value) if set, Error(Nil) if not set.
-@external(erlang, "e2e_helpers_ffi", "get_env")
-fn get_env(name: String) -> Result(String, Nil)
+fn get_env(name: String) -> Result(String, Nil) {
+  // Convert Gleam string (binary) to charlist for os:getenv
+  let charlist_name = binary_to_list(name)
+  let result = os_getenv_charlist(charlist_name)
+  // os:getenv returns charlist on success, false (Bool) if not set
+  case dynamic.classify(result) {
+    // false is classified as "Bool", meaning var not set
+    "Bool" -> Error(Nil)
+    // Otherwise it's a charlist (List) - convert to binary string
+    _ -> Ok(list_to_binary(result))
+  }
+}
+
+/// Convert binary (Gleam string) to charlist for Erlang interop.
+@external(erlang, "erlang", "binary_to_list")
+fn binary_to_list(binary: String) -> dynamic.Dynamic
+
+/// Raw FFI to Erlang's os:getenv/1 - always available as built-in module.
+/// Takes charlist, returns charlist or false.
+@external(erlang, "os", "getenv")
+fn os_getenv_charlist(name: dynamic.Dynamic) -> dynamic.Dynamic
+
+/// Convert charlist to binary (Gleam string).
+@external(erlang, "erlang", "list_to_binary")
+fn list_to_binary(charlist: dynamic.Dynamic) -> String
 
 /// Result of consuming a stream.
 pub type ConsumeResult {
