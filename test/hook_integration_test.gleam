@@ -6,6 +6,7 @@
 /// - Timeout behavior (fail-open vs fail-deny)
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/json
 import gleam/string
@@ -49,7 +50,7 @@ fn receive_until_match(
 /// Test that PreToolUse hook callback is invoked with context.
 /// Verifies: hook receives input as Dynamic (context is passed).
 pub fn pre_tool_use_receives_context_test() {
-  // Subject to capture hook invocation
+  // Subject to capture hook invocation - sends True if all expected fields present
   let hook_called: Subject(Bool) = process.new_subject()
 
   // Mock runner with PreToolUse hook simulation
@@ -67,14 +68,24 @@ pub fn pre_tool_use_receives_context_test() {
 
   let adapter = full_mock_runner.start(mock)
 
-  // Hook handler verifies it receives non-nil input
+  // Hook handler verifies expected context fields are present
   let hooks =
     HookConfig(
       handlers: dict.from_list([
         #("PreToolUse", fn(input: Dynamic) -> Dynamic {
-          // Verify input is not Nil (context was passed)
-          let is_nil = dynamic.classify(input) == "Nil"
-          process.send(hook_called, !is_nil)
+          // Decode and verify expected fields: tool_name, tool_input, session_id
+          let decoder = {
+            use tool_name <- decode.field("tool_name", decode.string)
+            use _tool_input <- decode.field("tool_input", decode.dynamic)
+            use session_id <- decode.field("session_id", decode.string)
+            decode.success(#(tool_name, session_id))
+          }
+          let result = decode.run(input, decoder)
+          let valid = case result {
+            Ok(#("bash", "test-session")) -> True
+            _ -> False
+          }
+          process.send(hook_called, valid)
           to_dynamic(dict.from_list([#("continue", True)]))
         }),
       ]),
@@ -116,7 +127,7 @@ pub fn pre_tool_use_receives_context_test() {
 /// Test that PostToolUse hook callback is invoked with context.
 /// Verifies: hook receives input as Dynamic (context with output is passed).
 pub fn post_tool_use_receives_output_test() {
-  // Subject to capture hook invocation
+  // Subject to capture hook invocation - sends True if all expected fields present
   let hook_called: Subject(Bool) = process.new_subject()
 
   // Mock runner with PostToolUse hook simulation including tool_result
@@ -135,14 +146,25 @@ pub fn post_tool_use_receives_output_test() {
 
   let adapter = full_mock_runner.start(mock)
 
-  // Hook handler verifies it receives non-nil input
+  // Hook handler verifies expected context fields are present
   let hooks =
     HookConfig(
       handlers: dict.from_list([
         #("PostToolUse", fn(input: Dynamic) -> Dynamic {
-          // Verify input is not Nil (context with tool_result was passed)
-          let is_nil = dynamic.classify(input) == "Nil"
-          process.send(hook_called, !is_nil)
+          // Decode and verify expected fields: tool_name, tool_input, tool_result, session_id
+          let decoder = {
+            use tool_name <- decode.field("tool_name", decode.string)
+            use _tool_input <- decode.field("tool_input", decode.dynamic)
+            use tool_result <- decode.field("tool_result", decode.string)
+            use session_id <- decode.field("session_id", decode.string)
+            decode.success(#(tool_name, tool_result, session_id))
+          }
+          let result = decode.run(input, decoder)
+          let valid = case result {
+            Ok(#("bash", "hello\n", "test-session")) -> True
+            _ -> False
+          }
+          process.send(hook_called, valid)
           to_dynamic(dict.from_list([#("continue", True)]))
         }),
       ]),
@@ -186,7 +208,7 @@ pub fn post_tool_use_receives_output_test() {
 /// Note: The current implementation passes tool_name and permission_suggestions
 /// to permission handlers (bidir.gleam:1421-1426), not the tool input.
 pub fn can_use_tool_permission_test() {
-  // Subject to capture permission invocation
+  // Subject to capture permission invocation - sends True if expected fields present
   let permission_called: Subject(Bool) = process.new_subject()
 
   let mock =
@@ -195,16 +217,27 @@ pub fn can_use_tool_permission_test() {
 
   let adapter = full_mock_runner.start(mock)
 
-  // Permission handler captures invocation and allows
+  // Permission handler verifies expected context fields
   let hooks =
     HookConfig(
       handlers: dict.new(),
       permission_handlers: dict.from_list([
         #("test_tool", fn(input: Dynamic) -> Dynamic {
-          // Verify input is not Nil (context was passed)
-          // bidir.gleam passes tool_name and permission_suggestions
-          let is_nil = dynamic.classify(input) == "Nil"
-          process.send(permission_called, !is_nil)
+          // Decode and verify expected fields: tool_name, permission_suggestions
+          let decoder = {
+            use tool_name <- decode.field("tool_name", decode.string)
+            use _suggestions <- decode.field(
+              "permission_suggestions",
+              decode.list(decode.dynamic),
+            )
+            decode.success(tool_name)
+          }
+          let result = decode.run(input, decoder)
+          let valid = case result {
+            Ok("test_tool") -> True
+            _ -> False
+          }
+          process.send(permission_called, valid)
           to_dynamic(dict.from_list([#("behavior", "allow")]))
         }),
       ]),
