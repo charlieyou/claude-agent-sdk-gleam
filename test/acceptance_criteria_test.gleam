@@ -23,6 +23,7 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Subject}
+import gleam/option
 import gleam/string
 import gleeunit/should
 
@@ -135,16 +136,21 @@ pub fn test_ac2_ndjson_framing_test() {
 /// - generate_id_produces_unique_ids_test
 /// - test_control_request_id_correlation_test
 pub fn test_ac3_request_id_correlation_test() {
-  // Test request_tracker generates unique IDs
+  // Test request_tracker generates unique IDs with req_ prefix
   let tracker = request_tracker.new()
   let #(tracker, id1) = request_tracker.generate_id(tracker)
   let #(tracker, id2) = request_tracker.generate_id(tracker)
   let #(_tracker, id3) = request_tracker.generate_id(tracker)
 
-  // IDs follow req_<counter> pattern
-  should.equal(id1, "req_0")
-  should.equal(id2, "req_1")
-  should.equal(id3, "req_2")
+  // IDs must be non-empty and follow req_ prefix pattern
+  should.be_true(string.starts_with(id1, "req_"))
+  should.be_true(string.starts_with(id2, "req_"))
+  should.be_true(string.starts_with(id3, "req_"))
+
+  // IDs must be unique
+  should.not_equal(id1, id2)
+  should.not_equal(id2, id3)
+  should.not_equal(id1, id3)
 
   // Test that responses correlate to correct requests via integration test
   // (Full correlation test is in control_integration_test.gleam)
@@ -210,11 +216,18 @@ pub fn test_ac4_init_handshake_test() {
   let assert Ok(init_msg) = process.receive(mock.writes, 500)
   should.be_true(string.contains(init_msg, "control_request"))
   should.be_true(string.contains(init_msg, "initialize"))
-  should.be_true(string.contains(init_msg, "req_0"))
+  // Verify request_id is present with req_ prefix (don't pin exact counter value)
+  should.be_true(string.contains(init_msg, "\"request_id\":\"req_"))
 
-  // Send success response with capabilities
+  // Extract request_id from init message for response correlation
+  // The init message contains a request_id we need to echo back
+  let assert Ok(req_id) = extract_request_id(init_msg)
+
+  // Send success response with matching request_id
   let success_json =
-    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{\"hooks_supported\":true}}}}"
+    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\""
+    <> req_id
+    <> "\",\"response\":{\"capabilities\":{\"hooks_supported\":true}}}}"
   bidir.inject_message(session, success_json)
 
   process.sleep(50)
@@ -343,10 +356,14 @@ pub fn test_ac6_permission_callbacks_test() {
 
 /// AC #7: Verify MCP servers can be registered and handlers are callable.
 ///
+/// NOTE: This test verifies configuration/registration. Runtime routing of
+/// McpMessage requests to SDK-registered handlers is marked as TODO in
+/// bidir.gleam and covered by E2E tests when available.
+///
 /// Covered by: permission_options_test.gleam, e2e/sdk_mcp_test.gleam
 /// - with_mcp_server_adds_to_list_test
 /// - mcp_server_handler_is_callable_test
-/// - sdk_50_mcp_config_test (E2E)
+/// - sdk_50_mcp_config_test (E2E - tests CLI MCP config passthrough)
 pub fn test_ac7_mcp_routing_test() {
   // Test that MCP servers can be registered via options
   let handler = fn(request: Dynamic) -> Dynamic {
@@ -367,11 +384,14 @@ pub fn test_ac7_mcp_routing_test() {
     _ -> 0
   })
 
-  // Verify handler is callable
+  // Verify handler is callable (registration test)
   let assert [#(_, stored_handler)] = opts.mcp_servers
   let test_input = to_dynamic("test_request")
   let result = stored_handler(test_input)
   should.equal(result, test_input)
+  // NOTE: Runtime routing test would require bidir.McpMessage handling
+  // to be implemented (currently TODO in src/claude_agent_sdk/internal/bidir.gleam).
+  // E2E tests in e2e/sdk_mcp_test.gleam verify CLI MCP config passthrough.
 }
 
 // =============================================================================
@@ -439,7 +459,7 @@ pub fn test_ac8_control_requests_test() {
 // AC #9: Timeouts default 60s, configurable per-hook
 // =============================================================================
 
-/// AC #9: Verify timeouts are configurable per-hook.
+/// AC #9: Verify timeouts default to 60s and are configurable per-hook.
 ///
 /// Covered by: timeout_options_test.gleam, hook_timeout_test.gleam
 /// - with_timeout_sets_timeout_ms_test
@@ -447,6 +467,11 @@ pub fn test_ac8_control_requests_test() {
 /// - with_hook_timeout_accumulates_test
 /// - slow_callback_times_out_test
 pub fn test_ac9_hook_timeouts_test() {
+  // Test 0: Verify default timeout is 60_000ms (60s) per AC #9
+  let subscriber: Subject(SubscriberMessage) = process.new_subject()
+  let default_config = bidir.default_config(subscriber)
+  should.equal(default_config.default_timeout_ms, 60_000)
+
   // Test 1: Global timeout can be set
   let opts1 =
     options.default_options()
@@ -619,6 +644,22 @@ pub fn test_ac11_permission_errors_fail_deny_test() {
 // Helpers
 // =============================================================================
 
+/// Extract request_id from a JSON message string.
+/// Looks for "request_id":"<id>" pattern.
+fn extract_request_id(json: String) -> Result(String, Nil) {
+  let marker = "\"request_id\":\""
+  case string.split(json, marker) {
+    [_, after, ..] -> {
+      // Find the closing quote
+      case string.split(after, "\"") {
+        [id, ..] -> Ok(id)
+        _ -> Error(Nil)
+      }
+    }
+    _ -> Error(Nil)
+  }
+}
+
 fn contains_arg(args: List(String), target: String) -> Bool {
   case args {
     [] -> False
@@ -644,9 +685,3 @@ fn count_occurrences_helper(args: List(String), target: String, acc: Int) -> Int
       }
   }
 }
-
-// =============================================================================
-// Import for option module
-// =============================================================================
-
-import gleam/option
