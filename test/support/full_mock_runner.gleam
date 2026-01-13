@@ -24,8 +24,6 @@
 /// full_mock_runner.process_init(adapter)
 /// full_mock_runner.emit_next_message(adapter)
 /// ```
-import gleam/dict
-import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Subject}
 import gleam/int
 import gleam/json
@@ -35,10 +33,6 @@ import gleam/option.{type Option, None, Some}
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 import claude_agent_sdk/internal/port_ffi.{type WriteError}
-
-/// FFI for creating Dynamic values
-@external(erlang, "gleam_stdlib", "identity")
-fn to_dynamic(a: a) -> Dynamic
 
 // =============================================================================
 // Types
@@ -59,7 +53,7 @@ pub type QueuedMessage {
   /// A regular message (assistant/system/user/result).
   RegularMsg(json: String)
   /// A hook callback control request.
-  HookCallbackMsg(callback_id: String, request_id: String, input: Dynamic)
+  HookCallbackMsg(callback_id: String, request_id: String, input: json.Json)
   /// Raw JSON string (for arbitrary injection).
   RawMsg(json: String)
 }
@@ -71,8 +65,8 @@ pub opaque type FullMockRunner {
     auto_init_ack: Bool,
     /// Queue of messages to emit.
     message_queue: List(QueuedMessage),
-    /// Simulated hooks to trigger.
-    hook_simulations: List(#(String, Dynamic)),
+    /// Simulated hooks to trigger (callback_id, json input).
+    hook_simulations: List(#(String, json.Json)),
   )
 }
 
@@ -96,8 +90,8 @@ pub type RunnerAdapter {
     state: MockState,
     /// Pending messages to emit.
     pending_messages: List(QueuedMessage),
-    /// Pending hook simulations.
-    pending_hooks: List(#(String, Dynamic)),
+    /// Pending hook simulations (callback_id, json input).
+    pending_hooks: List(#(String, json.Json)),
     /// Counter for generating request IDs.
     next_request_id: Int,
   )
@@ -141,10 +135,13 @@ pub fn with_raw_sequence(
 }
 
 /// Add a hook simulation to trigger later.
+///
+/// The input must be a json.Json value that will be serialized into the
+/// hook callback request's input field.
 pub fn with_hook_simulation(
   mock: FullMockRunner,
   callback_id: String,
-  input: Dynamic,
+  input: json.Json,
 ) -> FullMockRunner {
   FullMockRunner(
     ..mock,
@@ -186,9 +183,18 @@ pub fn regular_message(text: String) -> QueuedMessage {
   RegularMsg(json_str)
 }
 
-/// Create a hook callback control request.
+/// Create a hook callback control request with empty input.
 pub fn hook_callback(callback_id: String, request_id: String) -> QueuedMessage {
-  HookCallbackMsg(callback_id, request_id, to_dynamic(dict.new()))
+  HookCallbackMsg(callback_id, request_id, json.object([]))
+}
+
+/// Create a hook callback control request with custom input.
+pub fn hook_callback_with_input(
+  callback_id: String,
+  request_id: String,
+  input: json.Json,
+) -> QueuedMessage {
+  HookCallbackMsg(callback_id, request_id, input)
 }
 
 // =============================================================================
@@ -321,19 +327,19 @@ pub fn mark_closed(adapter: RunnerAdapter) -> RunnerAdapter {
 /// Convert a queued message to JSON string.
 fn queued_message_to_json(msg: QueuedMessage, _next_id: Int) -> String {
   case msg {
-    RegularMsg(json) -> json
-    RawMsg(json) -> json
-    HookCallbackMsg(callback_id, request_id, _input) -> {
-      build_hook_callback_json(callback_id, request_id, to_dynamic(dict.new()))
+    RegularMsg(json_str) -> json_str
+    RawMsg(json_str) -> json_str
+    HookCallbackMsg(callback_id, request_id, input) -> {
+      build_hook_callback_json(callback_id, request_id, input)
     }
   }
 }
 
-/// Build hook callback JSON.
+/// Build hook callback JSON with the provided input.
 fn build_hook_callback_json(
   callback_id: String,
   request_id: String,
-  _input: Dynamic,
+  input: json.Json,
 ) -> String {
   json.object([
     #("type", json.string("control_request")),
@@ -343,7 +349,7 @@ fn build_hook_callback_json(
       json.object([
         #("subtype", json.string("hook_callback")),
         #("callback_id", json.string(callback_id)),
-        #("input", json.object([])),
+        #("input", input),
       ]),
     ),
   ])

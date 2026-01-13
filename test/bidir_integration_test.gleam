@@ -5,6 +5,7 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process
+import gleam/json
 import gleam/string
 import gleeunit/should
 
@@ -230,7 +231,7 @@ pub fn hook_simulation_test() {
     |> full_mock_runner.with_auto_init_ack()
     |> full_mock_runner.with_hook_simulation(
       "pre_tool_hook",
-      to_dynamic(dict.from_list([#("tool_name", to_dynamic("bash"))])),
+      json.object([#("tool_name", json.string("bash"))]),
     )
 
   let adapter = full_mock_runner.start(mock)
