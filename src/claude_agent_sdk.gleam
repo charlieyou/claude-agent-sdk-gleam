@@ -374,7 +374,7 @@ pub fn query(
   case cli.has_bidir_features(options) {
     True ->
       io.println_error(
-        "Warning: query() ignores hooks/can_use_tool. Use start_session() for bidirectional features.",
+        "Warning: query() ignores hooks/can_use_tool/mcp_config/timeout_ms. Use start_session() for bidirectional features.",
       )
     False -> Nil
   }

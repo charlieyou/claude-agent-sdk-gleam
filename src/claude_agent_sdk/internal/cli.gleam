@@ -255,13 +255,22 @@ pub fn format_version_error(
 /// Fixed arguments are always included: --print --output-format stream-json --verbose
 /// Prompt is added at the end after -- separator.
 pub fn build_cli_args(options: QueryOptions, prompt: String) -> List(String) {
-  // Start with fixed arguments
-  let args = ["--print", "--output-format", "stream-json", "--verbose"]
+  // Start with fixed arguments for standard (unidirectional) mode
+  let base_args = ["--print", "--output-format", "stream-json", "--verbose"]
+  build_args_with_base(base_args, options, prompt)
+}
 
+/// Internal helper to build CLI arguments from a base set of flags.
+/// Shared by both build_cli_args and build_bidir_cli_args.
+fn build_args_with_base(
+  base_args: List(String),
+  options: QueryOptions,
+  prompt: String,
+) -> List(String) {
   // Add optional model
   let args = case options.model {
-    Some(m) -> list.append(args, ["--model", m])
-    None -> args
+    Some(m) -> list.append(base_args, ["--model", m])
+    None -> base_args
   }
 
   // Add optional max_turns
@@ -340,36 +349,17 @@ fn add_permission_mode(args: List(String), mode: PermissionMode) -> List(String)
 // ============================================================================
 
 /// Check if options contain any bidirectional features.
-/// Returns True if any hooks or can_use_tool handler are set.
+/// Returns True if any hooks, can_use_tool handler, mcp_config_path, or timeout_ms are set.
 pub fn has_bidir_features(options: QueryOptions) -> Bool {
-  case options.on_pre_tool_use {
-    Some(_) -> True
-    None ->
-      case options.on_post_tool_use {
-        Some(_) -> True
-        None ->
-          case options.on_user_prompt_submit {
-            Some(_) -> True
-            None ->
-              case options.on_stop {
-                Some(_) -> True
-                None ->
-                  case options.on_subagent_stop {
-                    Some(_) -> True
-                    None ->
-                      case options.on_pre_compact {
-                        Some(_) -> True
-                        None ->
-                          case options.on_can_use_tool {
-                            Some(_) -> True
-                            None -> False
-                          }
-                      }
-                  }
-              }
-          }
-      }
-  }
+  option.is_some(options.on_pre_tool_use)
+  || option.is_some(options.on_post_tool_use)
+  || option.is_some(options.on_user_prompt_submit)
+  || option.is_some(options.on_stop)
+  || option.is_some(options.on_subagent_stop)
+  || option.is_some(options.on_pre_compact)
+  || option.is_some(options.on_can_use_tool)
+  || option.is_some(options.mcp_config_path)
+  || result.is_ok(options.timeout_ms)
 }
 
 /// Build CLI arguments for bidirectional mode.
@@ -379,7 +369,7 @@ pub fn build_bidir_cli_args(
   prompt: String,
 ) -> List(String) {
   // Start with fixed arguments for bidir mode (includes --input-format)
-  let args = [
+  let base_args = [
     "--print",
     "--output-format",
     "stream-json",
@@ -387,69 +377,5 @@ pub fn build_bidir_cli_args(
     "stream-json",
     "--verbose",
   ]
-
-  // Add optional model
-  let args = case options.model {
-    Some(m) -> list.append(args, ["--model", m])
-    None -> args
-  }
-
-  // Add optional max_turns
-  let args = case options.max_turns {
-    Some(n) -> list.append(args, ["--max-turns", int.to_string(n)])
-    None -> args
-  }
-
-  // Add optional max_budget_usd
-  let args = case options.max_budget_usd {
-    Some(usd) -> list.append(args, ["--max-budget-usd", float.to_string(usd)])
-    None -> args
-  }
-
-  // Precedence: system_prompt > append_system_prompt
-  let args = case options.system_prompt {
-    Some(p) -> list.append(args, ["--system-prompt", p])
-    None ->
-      case options.append_system_prompt {
-        Some(p) -> list.append(args, ["--append-system-prompt", p])
-        None -> args
-      }
-  }
-
-  // Precedence: allowed_tools > disallowed_tools
-  let args = case options.allowed_tools {
-    Some(tools) ->
-      list.append(args, ["--allowed-tools", string.join(tools, ",")])
-    None ->
-      case options.disallowed_tools {
-        Some(tools) ->
-          list.append(args, ["--disallowed-tools", string.join(tools, ",")])
-        None -> args
-      }
-  }
-
-  // Add optional mcp_config_path
-  let args = case options.mcp_config_path {
-    Some(path) -> list.append(args, ["--mcp-config", path])
-    None -> args
-  }
-
-  // Add optional permission_mode
-  let args = case options.permission_mode {
-    Some(mode) -> add_permission_mode(args, mode)
-    None -> args
-  }
-
-  // Precedence: resume_session_id > continue_session
-  let args = case options.resume_session_id {
-    Some(id) -> list.append(args, ["--resume", id])
-    None ->
-      case options.continue_session {
-        True -> list.append(args, ["--continue"])
-        False -> args
-      }
-  }
-
-  // Add prompt separator and prompt at the end
-  list.append(args, ["--", prompt])
+  build_args_with_base(base_args, options, prompt)
 }
