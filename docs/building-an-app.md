@@ -47,8 +47,8 @@ fn collect_text(
                 blocks
                 |> list.filter_map(fn(block) {
                   case block {
-                    content.TextBlock(t) -> option.Some(t)
-                    _ -> option.None
+                    content.TextBlock(t) -> Ok(t)
+                    _ -> Error(Nil)
                   }
                 })
               collect_text(stream, list.append(acc, text))
