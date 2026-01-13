@@ -32,6 +32,9 @@ import gleam/io
 import gleam/option.{None, Some}
 import gleam/string
 
+import gleam/erlang/process.{type Subject}
+
+import claude_agent_sdk/event
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream as internal_stream
@@ -71,6 +74,11 @@ pub type ReadResult =
 /// Wraps a Subject for communicating with the session GenServer.
 pub type Session =
   session.Session
+
+/// Session lifecycle event variants.
+/// Use events() to get a Subject for receiving these.
+pub type SessionEvent =
+  event.SessionEvent
 
 /// Create a test runner with user-provided callbacks.
 pub const test_runner = runner.test_runner
@@ -709,4 +717,73 @@ pub fn rewind_files(
 /// - `Error(StopNotImplemented)`: Not yet implemented (current)
 pub fn stop(_session: Session) -> Result(Nil, StopError) {
   Error(error.StopNotImplemented)
+}
+
+// =============================================================================
+// Session Subscriptions (Bidirectional Mode)
+// =============================================================================
+
+/// Get the message stream from an active session.
+///
+/// Non-blocking; returns immediately with Subject for receiving messages.
+/// The GenServer pushes Message values to this Subject as they arrive.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+///
+/// ## Returns
+///
+/// - `Subject(Message)`: Subject for receiving message pushes
+///
+/// ## Example
+///
+/// ```gleam
+/// import gleam/erlang/process
+/// import claude_agent_sdk
+///
+/// let messages_subject = claude_agent_sdk.messages(session)
+///
+/// // Receive messages with timeout
+/// case process.receive(messages_subject, 5000) {
+///   Ok(message) -> handle_message(message)
+///   Error(Nil) -> handle_timeout()
+/// }
+/// ```
+pub fn messages(session: Session) -> Subject(Message) {
+  session.get_messages(session)
+}
+
+/// Get session lifecycle events (completion, stop, failure).
+///
+/// Non-blocking; returns immediately with Subject for receiving events.
+/// Separate from messages() to avoid changing the Message type.
+///
+/// ## Parameters
+///
+/// - `session`: The session handle from `start_session()`
+///
+/// ## Returns
+///
+/// - `Subject(SessionEvent)`: Subject for receiving lifecycle events
+///
+/// ## Example
+///
+/// ```gleam
+/// import gleam/erlang/process
+/// import claude_agent_sdk
+/// import claude_agent_sdk/event
+///
+/// let events_subject = claude_agent_sdk.events(session)
+///
+/// // Receive events with timeout
+/// case process.receive(events_subject, 5000) {
+///   Ok(event.SessionCompleted(result)) -> handle_complete(result)
+///   Ok(event.SessionStopped) -> handle_stop()
+///   Ok(event.SessionFailed(error)) -> handle_error(error)
+///   Error(Nil) -> handle_timeout()
+/// }
+/// ```
+pub fn events(session: Session) -> Subject(SessionEvent) {
+  session.get_events(session)
 }
