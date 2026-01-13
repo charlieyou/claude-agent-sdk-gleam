@@ -18,6 +18,7 @@ import claude_agent_sdk
 import claude_agent_sdk/error.{error_to_string}
 import e2e/helpers.{skip_if_no_e2e}
 import gleam/io
+import gleam/json
 import gleam/string
 import gleeunit/should
 
@@ -34,6 +35,9 @@ pub fn sdk_50_mcp_config_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_50_mcp_config")
+
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_mcp_config(
@@ -41,19 +45,26 @@ pub fn sdk_50_mcp_config_test() {
         )
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case claude_agent_sdk.query("Hello", opts) {
         Ok(stream) -> {
           // Close immediately to avoid blocking if CLI hangs during MCP startup
           let _ = claude_agent_sdk.close(stream)
-          // MCP config was accepted - query started
-          should.be_true(True)
+          helpers.log_info(ctx, "mcp_config_accepted")
+          helpers.log_test_complete(ctx, True, "MCP config was accepted")
         }
         Error(err) -> {
           // Document the error - MCP server startup may fail
-          io.println("MCP config error: " <> error_to_string(err))
+          helpers.log_info_with(ctx, "mcp_config_error", [
+            #("error", json.string(error_to_string(err))),
+          ])
           // Config passthrough may still have worked even if MCP server failed
           // This is acceptable behavior
-          Nil
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "MCP server startup may fail - acceptable",
+          )
         }
       }
     }
@@ -73,6 +84,9 @@ pub fn sdk_51_mcp_tools_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_51_mcp_tools")
+
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_mcp_config(
@@ -80,16 +94,22 @@ pub fn sdk_51_mcp_tools_test() {
         )
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case claude_agent_sdk.query("Hello", opts) {
         Ok(stream) -> {
           // Close immediately to avoid blocking if CLI hangs during MCP startup
           let _ = claude_agent_sdk.close(stream)
-          // Report that MCP query started; detailed server status is environment-dependent
-          io.println("[INFO] MCP query started; stream closed early to avoid hang")
+          helpers.log_info(ctx, "mcp_query_started")
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "MCP query started; stream closed early to avoid hang",
+          )
           should.be_true(True)
         }
         Error(err) -> {
-          io.println("Query failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed to start")
           Nil
         }
       }
@@ -110,6 +130,9 @@ pub fn sdk_52_mcp_failure_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_52_mcp_failure")
+
+      let ctx = helpers.test_step(ctx, "configure_bad_mcp_path")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_mcp_config(
@@ -117,20 +140,33 @@ pub fn sdk_52_mcp_failure_test() {
         )
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query_with_bad_config")
       case claude_agent_sdk.query("Hello", opts) {
         Ok(stream) -> {
           // Query started despite bad MCP config; close early to avoid blocking
           let _ = claude_agent_sdk.close(stream)
-          io.println("Query started with bad MCP config (stream closed early)")
+          helpers.log_info(ctx, "query_started_with_bad_config")
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Query started with bad MCP config (stream closed early)",
+          )
           should.be_true(True)
         }
         Error(err) -> {
           // Error should be clear about MCP config issue
           let err_str = error_to_string(err)
-          io.println("MCP failure error: " <> err_str)
+          helpers.log_info_with(ctx, "mcp_failure_error", [
+            #("error", json.string(err_str)),
+          ])
           // Verify error message is meaningful (not empty)
           string.length(err_str)
           |> should.not_equal(0)
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "MCP failure handled gracefully with meaningful error",
+          )
         }
       }
     }

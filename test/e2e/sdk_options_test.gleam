@@ -26,6 +26,7 @@ import claude_agent_sdk/message.{System}
 import claude_agent_sdk/options.{AcceptEdits, BypassPermissions, Default}
 import e2e/helpers
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -44,24 +45,32 @@ pub fn sdk_20_model_selection_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_20_model_selection")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_model("claude-sonnet-4-20250514")
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
         helpers.QuerySuccess(_result) -> {
-          // Model accepted - test passes
-          should.be_true(True)
+          helpers.log_info(ctx, "model_accepted")
+          helpers.log_test_complete(ctx, True, "Model selection test passed")
         }
         helpers.QueryFailure(err) -> {
-          // Model error is valid behavior (may not exist in all environments)
-          io.println("Model error: " <> string.inspect(err))
-          should.be_true(True)
+          helpers.log_info_with(ctx, "model_error", [
+            #("error", json.string(string.inspect(err))),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Model error is valid behavior (may not exist in all environments)",
+          )
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-20")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
       }
     }
@@ -81,25 +90,30 @@ pub fn sdk_21_max_turns_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_21_max_turns")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          // Infra/config error (CLI not found, auth, etc.) - skip test
-          io.println(
-            "[SKIP] query() failed (infra/config): " <> error_to_string(err),
-          )
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, True, "Infra/config error - skip test")
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-21")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          helpers.log_info_with(ctx, "query_success", [
+            #("message_count", json.int(list.length(result.messages))),
+          ])
           // Should terminate (not hang forever)
           list.length(result.messages)
           |> should.not_equal(0)
+          helpers.log_test_complete(ctx, True, "Max turns test passed")
         }
       }
     }
@@ -119,31 +133,33 @@ pub fn sdk_22_max_budget_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_22_max_budget")
+      let ctx = helpers.test_step(ctx, "configure_options")
       // Very low budget - may or may not trigger budget exceeded
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_budget(0.001)
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          // Infra/config error (CLI not found, auth, etc.) - skip test
-          io.println(
-            "[SKIP] query() failed (infra/config): " <> error_to_string(err),
-          )
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, True, "Infra/config error - skip test")
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-22")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
-          // May or may not exceed budget - just verify no crash and stream terminates
-          io.println(
-            "Max budget test: "
-            <> string.inspect(list.length(result.messages))
-            <> " messages",
+          helpers.log_info_with(ctx, "query_success", [
+            #("message_count", json.int(list.length(result.messages))),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Max budget test passed - stream terminates without crash",
           )
-          should.be_true(True)
         }
       }
     }
@@ -163,6 +179,8 @@ pub fn sdk_23_system_prompt_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_23_system_prompt")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_system_prompt(
@@ -170,19 +188,25 @@ pub fn sdk_23_system_prompt_test() {
         )
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-23")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          helpers.log_info_with(ctx, "query_success", [
+            #("message_count", json.int(list.length(result.messages))),
+          ])
           // Query completed - system prompt was accepted
           list.length(result.messages)
           |> should.not_equal(0)
+          helpers.log_test_complete(ctx, True, "System prompt test passed")
         }
       }
     }
@@ -202,24 +226,28 @@ pub fn sdk_24_allowed_tools_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_24_allowed_tools")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let allowed_tools = ["Read"]
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_allowed_tools(allowed_tools)
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          // Infra/config error (CLI not found, auth, etc.) - skip test
-          io.println(
-            "[SKIP] query() failed (infra/config): " <> error_to_string(err),
-          )
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, True, "Infra/config error - skip test")
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-24")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          helpers.log_info_with(ctx, "query_success", [
+            #("message_count", json.int(list.length(result.messages))),
+          ])
           // Consume stream and find SystemMessage (handles WarningEvent first)
           let system_msg =
             list.find(result.messages, fn(envelope) {
@@ -231,12 +259,15 @@ pub fn sdk_24_allowed_tools_test() {
 
           case system_msg {
             Error(Nil) -> {
-              io.println("[INFO] No SystemMessage found in stream")
+              helpers.log_info(ctx, "no_system_message_found")
             }
             Ok(envelope) -> {
               let assert System(sys_msg) = envelope.message
               case sys_msg.tools {
                 Some(tools) -> {
+                  helpers.log_info_with(ctx, "tools_found", [
+                    #("tool_count", json.int(list.length(tools))),
+                  ])
                   // All tools should be in allowed list (case-insensitive membership)
                   list.each(tools, fn(tool) {
                     let tool_lower = string.lowercase(tool)
@@ -248,12 +279,12 @@ pub fn sdk_24_allowed_tools_test() {
                   })
                 }
                 None -> {
-                  io.println("[INFO] SystemMessage.tools is None")
+                  helpers.log_info(ctx, "system_message_tools_none")
                 }
               }
             }
           }
-          should.be_true(True)
+          helpers.log_test_complete(ctx, True, "Allowed tools test passed")
         }
       }
     }
@@ -273,24 +304,28 @@ pub fn sdk_25_disallowed_tools_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_25_disallowed_tools")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let disallowed_tools = ["Bash"]
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_disallowed_tools(disallowed_tools)
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          // Infra/config error (CLI not found, auth, etc.) - skip test
-          io.println(
-            "[SKIP] query() failed (infra/config): " <> error_to_string(err),
-          )
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, True, "Infra/config error - skip test")
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-25")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          helpers.log_info_with(ctx, "query_success", [
+            #("message_count", json.int(list.length(result.messages))),
+          ])
           // Consume stream and find SystemMessage (handles WarningEvent first)
           let system_msg =
             list.find(result.messages, fn(envelope) {
@@ -302,12 +337,15 @@ pub fn sdk_25_disallowed_tools_test() {
 
           case system_msg {
             Error(Nil) -> {
-              io.println("[INFO] No SystemMessage found in stream")
+              helpers.log_info(ctx, "no_system_message_found")
             }
             Ok(envelope) -> {
               let assert System(sys_msg) = envelope.message
               case sys_msg.tools {
                 Some(tools) -> {
+                  helpers.log_info_with(ctx, "tools_found", [
+                    #("tool_count", json.int(list.length(tools))),
+                  ])
                   // Verify no disallowed tools present (case-insensitive)
                   list.each(tools, fn(tool) {
                     let tool_lower = string.lowercase(tool)
@@ -319,12 +357,12 @@ pub fn sdk_25_disallowed_tools_test() {
                   })
                 }
                 None -> {
-                  io.println("[INFO] SystemMessage.tools is None")
+                  helpers.log_info(ctx, "system_message_tools_none")
                 }
               }
             }
           }
-          should.be_true(True)
+          helpers.log_test_complete(ctx, True, "Disallowed tools test passed")
         }
       }
     }
@@ -344,23 +382,31 @@ pub fn sdk_26_permission_default_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_26_permission_default")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_permission_mode(Default)
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-26")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(_result) -> {
-          // Just verify it doesn't crash
-          should.be_true(True)
+          helpers.log_info(ctx, "query_success")
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Permission default mode test passed",
+          )
         }
       }
     }
@@ -380,23 +426,31 @@ pub fn sdk_27_permission_accept_edits_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_27_permission_accept_edits")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_permission_mode(AcceptEdits)
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-27")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(_result) -> {
-          // Just verify it doesn't crash
-          should.be_true(True)
+          helpers.log_info(ctx, "query_success")
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Permission accept edits mode test passed",
+          )
         }
       }
     }
@@ -416,23 +470,31 @@ pub fn sdk_28_permission_bypass_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_28_permission_bypass")
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_permission_mode(BypassPermissions)
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed unexpectedly")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-28")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(_result) -> {
-          // Just verify it doesn't crash
-          should.be_true(True)
+          helpers.log_info(ctx, "query_success")
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Permission bypass mode test passed",
+          )
         }
       }
     }

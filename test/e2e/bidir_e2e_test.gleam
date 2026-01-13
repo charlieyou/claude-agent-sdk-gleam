@@ -31,6 +31,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/io
+import gleam/json
 import gleam/string
 import gleeunit/should
 
@@ -154,12 +155,20 @@ fn wait_for_running_loop(
   }
 }
 
-fn handle_wait_failure(
+fn handle_wait_failure_with_ctx(
+  ctx: helpers.TestContext,
   session: process.Subject(bidir.ActorMessage),
   state: bidir.SessionLifecycle,
 ) -> Nil {
-  io.println("[INFO] Lifecycle state: " <> string.inspect(state))
-  io.println("[FAIL] Session failed to reach Running state")
+  helpers.log_error_with(
+    ctx,
+    "session_not_running",
+    "Session failed to reach Running state",
+    [
+      #("lifecycle_state", json.string(string.inspect(state))),
+    ],
+  )
+  helpers.log_test_complete(ctx, False, "Session failed to reach Running state")
   bidir.shutdown(session)
   should.fail()
 }
@@ -201,6 +210,8 @@ pub fn real_session_with_hook_test() {
           Nil
         }
         True -> {
+          let ctx = helpers.new_test_context("bidir_real_session_hook")
+          let ctx = helpers.test_step(ctx, "setup_hooks")
           let hook_subject: process.Subject(Dynamic) = process.new_subject()
 
           let hooks =
@@ -214,33 +225,58 @@ pub fn real_session_with_hook_test() {
               permission_handlers: dict.new(),
             )
 
+          let ctx = helpers.test_step(ctx, "start_session")
           case start_session_with_hooks(hooks, "Run echo hello") {
             Error(err) -> {
-              io.println("[SKIP] " <> err)
-              Nil
+              helpers.log_info_with(ctx, "session_skip", [
+                #("reason", json.string(err)),
+              ])
+              helpers.log_test_complete(ctx, True, "Skipped: " <> err)
             }
             Ok(#(session, subscriber)) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_running")
               case wait_for_running(session, 50) {
-                Error(state) -> handle_wait_failure(session, state)
+                Error(state) ->
+                  handle_wait_failure_with_ctx(ctx, session, state)
                 Ok(Nil) -> {
+                  let ctx = helpers.test_step(ctx, "wait_for_hook")
                   case process.receive(hook_subject, 30_000) {
                     Ok(hook_input) -> {
                       // Verify hook received tool context
                       case decode_string_field(hook_input, "tool_name") {
                         Ok(tool_name) -> {
-                          io.println(
-                            "[PASS] Hook fired with tool_name: " <> tool_name,
+                          helpers.log_info_with(ctx, "hook_fired", [
+                            #("tool_name", json.string(tool_name)),
+                          ])
+                          helpers.log_test_complete(
+                            ctx,
+                            True,
+                            "Hook fired with tool_name: " <> tool_name,
                           )
                         }
                         Error(Nil) -> {
-                          io.println("[PASS] Hook fired (no tool_name field)")
+                          helpers.log_info(ctx, "hook_fired_no_tool_name")
+                          helpers.log_test_complete(
+                            ctx,
+                            True,
+                            "Hook fired (no tool_name field)",
+                          )
                         }
                       }
                       let _ = collect_messages(subscriber, 5000, [])
                       bidir.shutdown(session)
                     }
                     Error(Nil) -> {
-                      io.println("[FAIL] Hook not invoked within timeout")
+                      helpers.log_error(
+                        ctx,
+                        "hook_timeout",
+                        "Hook not invoked within timeout",
+                      )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "Hook not invoked within timeout",
+                      )
                       bidir.shutdown(session)
                       should.fail()
                     }
@@ -277,19 +313,27 @@ pub fn real_control_operations_test() {
           Nil
         }
         True -> {
+          let ctx = helpers.new_test_context("bidir_real_control_ops")
+          let ctx = helpers.test_step(ctx, "setup_hooks")
           let hooks =
             HookConfig(handlers: dict.new(), permission_handlers: dict.new())
 
+          let ctx = helpers.test_step(ctx, "start_session")
           case start_session_with_hooks(hooks, "Say hi") {
             Error(err) -> {
-              io.println("[SKIP] " <> err)
-              Nil
+              helpers.log_info_with(ctx, "session_skip", [
+                #("reason", json.string(err)),
+              ])
+              helpers.log_test_complete(ctx, True, "Skipped: " <> err)
             }
             Ok(#(session, subscriber)) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_running")
               case wait_for_running(session, 50) {
-                Error(state) -> handle_wait_failure(session, state)
+                Error(state) ->
+                  handle_wait_failure_with_ctx(ctx, session, state)
                 Ok(Nil) -> {
                   // Send set_model request
+                  let ctx = helpers.test_step(ctx, "send_set_model")
                   let result_subject: process.Subject(RequestResult) =
                     process.new_subject()
                   bidir.send_control_request(
@@ -301,25 +345,52 @@ pub fn real_control_operations_test() {
                   // Wait for response (may succeed or fail depending on CLI version)
                   case process.receive(result_subject, 10_000) {
                     Ok(RequestSuccess(_)) -> {
-                      io.println("[PASS] set_model succeeded")
+                      helpers.log_info(ctx, "set_model_succeeded")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "set_model succeeded",
+                      )
                     }
                     Ok(bidir.RequestError(msg)) -> {
                       // Error is acceptable - CLI may not support this operation
-                      io.println(
-                        "[PASS] set_model returned error (expected for some CLI versions): "
-                        <> msg,
+                      helpers.log_info_with(ctx, "set_model_error", [
+                        #("error", json.string(msg)),
+                      ])
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "set_model returned error (expected for some CLI versions): "
+                          <> msg,
                       )
                     }
                     Ok(bidir.RequestTimeout) -> {
-                      io.println(
-                        "[PASS] set_model timed out (CLI may not respond)",
+                      helpers.log_info(ctx, "set_model_timeout")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "set_model timed out (CLI may not respond)",
                       )
                     }
                     Ok(bidir.RequestSessionStopped) -> {
-                      io.println("[INFO] Session stopped before response")
+                      helpers.log_info(ctx, "session_stopped_before_response")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "Session stopped before response",
+                      )
                     }
                     Error(Nil) -> {
-                      io.println("[FAIL] No response received")
+                      helpers.log_error(
+                        ctx,
+                        "no_response",
+                        "No response received",
+                      )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "No response received",
+                      )
                       should.fail()
                     }
                   }
@@ -359,6 +430,8 @@ pub fn real_permission_callback_test() {
           Nil
         }
         True -> {
+          let ctx = helpers.new_test_context("bidir_real_permission_callback")
+          let ctx = helpers.test_step(ctx, "setup_handlers")
           let permission_subject: process.Subject(String) =
             process.new_subject()
           let post_tool_subject: process.Subject(String) = process.new_subject()
@@ -386,26 +459,43 @@ pub fn real_permission_callback_test() {
               ]),
             )
 
+          let ctx = helpers.test_step(ctx, "start_runner")
           let args = ["--max-turns", "1"]
           case bidir_runner.start(args) {
             Error(err) -> {
-              io.println("[SKIP] Failed to start runner: " <> runner_error_to_string(err))
-              Nil
+              helpers.log_info_with(ctx, "runner_skip", [
+                #("reason", json.string(runner_error_to_string(err))),
+              ])
+              helpers.log_test_complete(
+                ctx,
+                True,
+                "Skipped: Failed to start runner",
+              )
             }
             Ok(runner) -> {
+              let ctx = helpers.test_step(ctx, "start_session")
               let subscriber: process.Subject(SubscriberMessage) =
                 process.new_subject()
               let config = bidir.default_config(subscriber)
               case bidir.start_with_hooks(runner, config, hooks) {
                 Error(err) -> {
-                  io.println("[SKIP] Failed to start session: " <> start_error_to_string(err))
-                  Nil
+                  helpers.log_info_with(ctx, "session_skip", [
+                    #("reason", json.string(start_error_to_string(err))),
+                  ])
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "Skipped: Failed to start session",
+                  )
                 }
                 Ok(session) -> {
+                  let ctx = helpers.test_step(ctx, "wait_for_running")
                   case wait_for_running(session, 50) {
-                    Error(state) -> handle_wait_failure(session, state)
+                    Error(state) ->
+                      handle_wait_failure_with_ctx(ctx, session, state)
                     Ok(Nil) -> {
                       // Ensure permission mode is set to default before prompt
+                      let ctx = helpers.test_step(ctx, "set_permission_mode")
                       let perm_subject: process.Subject(RequestResult) =
                         process.new_subject()
                       bidir.send_control_request(
@@ -416,35 +506,63 @@ pub fn real_permission_callback_test() {
                       let _ = process.receive(perm_subject, 5000)
 
                       // Send prompt after permission mode is set
+                      let ctx = helpers.test_step(ctx, "send_user_message")
                       bidir.send_user_message(session, "Run echo hello")
 
                       // Wait for permission handler invocation
+                      let ctx =
+                        helpers.test_step(ctx, "wait_for_permission_handler")
                       case process.receive(permission_subject, 30_000) {
                         Ok(msg) -> {
-                          io.println("[INFO] Permission handler invoked: " <> msg)
+                          helpers.log_info_with(
+                            ctx,
+                            "permission_handler_invoked",
+                            [
+                              #("message", json.string(msg)),
+                            ],
+                          )
 
                           // Wait for session to complete
                           let _ = collect_messages(subscriber, 10_000, [])
 
-                      // Verify tool did NOT execute
-                      case process.receive(post_tool_subject, 500) {
-                        Ok(_) -> {
-                          io.println(
-                            "[WARN] Tool executed despite permission deny",
-                          )
-                          bidir.shutdown(session)
-                        }
-                        Error(Nil) -> {
-                          io.println(
-                            "[PASS] Permission deny prevented tool execution",
-                          )
-                          bidir.shutdown(session)
+                          // Verify tool did NOT execute
+                          case process.receive(post_tool_subject, 500) {
+                            Ok(_) -> {
+                              helpers.log_info(
+                                ctx,
+                                "tool_executed_despite_deny",
+                              )
+                              helpers.log_test_complete(
+                                ctx,
+                                True,
+                                "Tool executed despite permission deny (warning)",
+                              )
+                              bidir.shutdown(session)
+                            }
+                            Error(Nil) -> {
+                              helpers.log_info(
+                                ctx,
+                                "permission_deny_prevented_execution",
+                              )
+                              helpers.log_test_complete(
+                                ctx,
+                                True,
+                                "Permission deny prevented tool execution",
+                              )
+                              bidir.shutdown(session)
                             }
                           }
                         }
                         Error(Nil) -> {
-                          io.println(
-                            "[FAIL] Permission handler not invoked within timeout",
+                          helpers.log_error(
+                            ctx,
+                            "permission_handler_timeout",
+                            "Permission handler not invoked within timeout",
+                          )
+                          helpers.log_test_complete(
+                            ctx,
+                            False,
+                            "Permission handler not invoked within timeout",
                           )
                           let _ = collect_messages(subscriber, 5000, [])
                           bidir.shutdown(session)
@@ -486,23 +604,32 @@ pub fn real_interrupt_test() {
           Nil
         }
         True -> {
+          let ctx = helpers.new_test_context("bidir_real_interrupt")
+          let ctx = helpers.test_step(ctx, "setup_hooks")
           let hooks =
             HookConfig(handlers: dict.new(), permission_handlers: dict.new())
 
           // Use a prompt that may take longer to process
+          let ctx = helpers.test_step(ctx, "start_session")
           case start_session_with_hooks(hooks, "Write a haiku about testing") {
             Error(err) -> {
-              io.println("[SKIP] " <> err)
-              Nil
+              helpers.log_info_with(ctx, "session_skip", [
+                #("reason", json.string(err)),
+              ])
+              helpers.log_test_complete(ctx, True, "Skipped: " <> err)
             }
             Ok(#(session, subscriber)) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_running")
               case wait_for_running(session, 50) {
-                Error(state) -> handle_wait_failure(session, state)
+                Error(state) ->
+                  handle_wait_failure_with_ctx(ctx, session, state)
                 Ok(Nil) -> {
                   // Give CLI a moment to start processing
+                  let ctx = helpers.test_step(ctx, "delay_before_interrupt")
                   process.sleep(500)
 
                   // Send interrupt
+                  let ctx = helpers.test_step(ctx, "send_interrupt")
                   let result_subject: process.Subject(RequestResult) =
                     process.new_subject()
                   bidir.send_control_request(
@@ -514,29 +641,27 @@ pub fn real_interrupt_test() {
                   // Wait for response
                   case process.receive(result_subject, 10_000) {
                     Ok(RequestSuccess(_)) -> {
-                      io.println("[PASS] Interrupt succeeded")
+                      helpers.log_info(ctx, "interrupt_succeeded")
                     }
                     Ok(bidir.RequestError(msg)) -> {
                       // Error may occur if nothing to interrupt
-                      io.println(
-                        "[PASS] Interrupt returned error (may be expected): "
-                        <> msg,
-                      )
+                      helpers.log_info_with(ctx, "interrupt_error", [
+                        #("error", json.string(msg)),
+                      ])
                     }
                     Ok(bidir.RequestTimeout) -> {
-                      io.println(
-                        "[PASS] Interrupt timed out (CLI may not respond)",
-                      )
+                      helpers.log_info(ctx, "interrupt_timeout")
                     }
                     Ok(bidir.RequestSessionStopped) -> {
-                      io.println("[INFO] Session stopped before response")
+                      helpers.log_info(ctx, "session_stopped_before_response")
                     }
                     Error(Nil) -> {
-                      io.println("[INFO] No response received for interrupt")
+                      helpers.log_info(ctx, "no_response_for_interrupt")
                     }
                   }
 
                   // Ensure session can be shut down cleanly
+                  let ctx = helpers.test_step(ctx, "cleanup_and_verify")
                   let _ = collect_messages(subscriber, 2000, [])
                   bidir.shutdown(session)
 
@@ -545,8 +670,11 @@ pub fn real_interrupt_test() {
                   process.sleep(100)
                   should.equal(process.is_alive(pid), False)
 
-                  io.println(
-                    "[PASS] Session stopped gracefully after interrupt",
+                  helpers.log_info(ctx, "session_stopped_gracefully")
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "Session stopped gracefully after interrupt",
                   )
                 }
               }
@@ -579,12 +707,18 @@ pub fn is_cli_available_helper_test() {
       )
     }
     Ok(Nil) -> {
-      // --e2e - result depends on whether CLI is in PATH
-      io.println(
-        "[INFO] is_cli_available() returned: " <> bool_to_string(result),
-      )
+      // --e2e set - use structured logging
+      let ctx = helpers.new_test_context("bidir_cli_available_helper")
+      let ctx = helpers.test_step(ctx, "check_cli_available")
+      helpers.log_info_with(ctx, "cli_available_result", [
+        #("result", json.bool(result)),
+      ])
       // Either result is valid depending on environment
-      Nil
+      helpers.log_test_complete(
+        ctx,
+        True,
+        "is_cli_available() returned: " <> bool_to_string(result),
+      )
     }
   }
 }

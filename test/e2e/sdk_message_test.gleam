@@ -17,8 +17,8 @@ import claude_agent_sdk/message.{
 }
 import claude_agent_sdk/options.{BypassPermissions}
 import e2e/helpers
-import gleam/int
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
@@ -37,20 +37,26 @@ pub fn sdk_10_system_message_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_10_system_message")
+
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-10")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          let ctx = helpers.test_step(ctx, "find_system_message")
 
           // Find SystemMessage
           let system_msg =
@@ -63,48 +69,72 @@ pub fn sdk_10_system_message_test() {
 
           case system_msg {
             Error(Nil) -> {
-              io.println("[FAIL] No SystemMessage found")
+              helpers.log_error(
+                ctx,
+                "no_system_message",
+                "No SystemMessage found",
+              )
+              helpers.log_test_complete(ctx, False, "No SystemMessage found")
               should.fail()
             }
             Ok(envelope) -> {
               let assert System(sys) = envelope.message
+              let ctx = helpers.test_step(ctx, "validate_session_id")
 
               // Protocol invariant: session_id should be present and non-empty
               case sys.session_id {
                 Some(id) -> {
                   string.length(id)
                   |> should.not_equal(0)
+                  helpers.log_info_with(ctx, "session_id_valid", [
+                    #("session_id_length", json.int(string.length(id))),
+                  ])
                 }
                 None -> {
-                  io.println("[FAIL] session_id is None")
+                  helpers.log_error(
+                    ctx,
+                    "session_id_missing",
+                    "session_id is None",
+                  )
+                  helpers.log_test_complete(ctx, False, "session_id is None")
                   should.fail()
                 }
               }
 
+              let ctx = helpers.test_step(ctx, "validate_tools")
               // Protocol invariant: tools should be a list (may be empty)
               case sys.tools {
                 Some(tools) -> {
                   // Just verify it's a list by checking length >= 0
                   { list.length(tools) >= 0 }
                   |> should.be_true
+                  helpers.log_info_with(ctx, "tools_present", [
+                    #("tools_count", json.int(list.length(tools))),
+                  ])
                 }
                 None -> {
                   // tools field may be absent in some configurations
-                  Nil
+                  helpers.log_info(ctx, "tools_absent")
                 }
               }
 
+              let ctx = helpers.test_step(ctx, "validate_mcp_servers")
               // Protocol invariant: mcp_servers should be a list (may be empty)
               case sys.mcp_servers {
                 Some(servers) -> {
                   { list.length(servers) >= 0 }
                   |> should.be_true
+                  helpers.log_info_with(ctx, "mcp_servers_present", [
+                    #("mcp_servers_count", json.int(list.length(servers))),
+                  ])
                 }
                 None -> {
                   // mcp_servers field may be absent
-                  Nil
+                  helpers.log_info(ctx, "mcp_servers_absent")
                 }
               }
+
+              helpers.log_test_complete(ctx, True, "SystemMessage validated")
             }
           }
         }
@@ -126,20 +156,32 @@ pub fn sdk_11_content_blocks_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_11_content_blocks")
+
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
-      case helpers.query_and_consume_with_timeout("Say hello briefly", opts, 30_000) {
+      let ctx = helpers.test_step(ctx, "execute_query")
+      case
+        helpers.query_and_consume_with_timeout(
+          "Say hello briefly",
+          opts,
+          30_000,
+        )
+      {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-11")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          let ctx = helpers.test_step(ctx, "find_text_block")
 
           // Find AssistantMessage with TextBlock
           let has_text_block =
@@ -167,9 +209,15 @@ pub fn sdk_11_content_blocks_test() {
               }
             })
 
+          let ctx = helpers.test_step(ctx, "validate_text_block")
           // Protocol invariant: simple query should produce text response
           has_text_block
           |> should.be_true
+
+          helpers.log_info_with(ctx, "text_block_found", [
+            #("has_text_block", json.bool(has_text_block)),
+          ])
+          helpers.log_test_complete(ctx, True, "TextBlock validated")
         }
       }
     }
@@ -189,25 +237,33 @@ pub fn sdk_12_tool_result_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_12_tool_result")
+
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(2)
         |> claude_agent_sdk.with_permission_mode(BypassPermissions)
 
-      case helpers.query_and_consume_with_timeout(
-        "Read the file gleam.toml",
-        opts,
-        30_000,
-      ) {
+      let ctx = helpers.test_step(ctx, "execute_query")
+      case
+        helpers.query_and_consume_with_timeout(
+          "Read the file gleam.toml",
+          opts,
+          30_000,
+        )
+      {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-12")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          let ctx = helpers.test_step(ctx, "find_tool_use_block")
 
           // Look for ToolUseBlock in any AssistantMessage
           let has_tool_use =
@@ -243,7 +299,8 @@ pub fn sdk_12_tool_result_test() {
           // If tool use occurred, validate structure and check for ToolResultBlock
           case has_tool_use {
             True -> {
-              io.println("[INFO] Tool use detected and parsed successfully")
+              let ctx = helpers.test_step(ctx, "validate_tool_result_block")
+              helpers.log_info(ctx, "tool_use_detected")
 
               // Finding 2 fix: Check for ToolResultBlock in User messages
               // When there's a ToolUseBlock, there should be a corresponding ToolResultBlock
@@ -276,16 +333,26 @@ pub fn sdk_12_tool_result_test() {
               // If tool use occurred, we should have tool results too
               has_tool_result
               |> should.be_true
-              io.println("[INFO] ToolResultBlock found with valid tool_use_id")
+              helpers.log_info_with(ctx, "tool_result_found", [
+                #("has_tool_result", json.bool(has_tool_result)),
+              ])
+
+              let ctx = helpers.test_step(ctx, "validate_stream_termination")
+              // Stream should still terminate normally
+              result.terminated_normally
+              |> should.be_true
+              helpers.log_test_complete(ctx, True, "Tool flow validated")
             }
             False -> {
-              io.println("[INFO] No tool use in this response (acceptable)")
+              helpers.log_info(ctx, "no_tool_use_acceptable")
+
+              let ctx = helpers.test_step(ctx, "validate_stream_termination")
+              // Stream should still terminate normally
+              result.terminated_normally
+              |> should.be_true
+              helpers.log_test_complete(ctx, True, "No tool use (acceptable)")
             }
           }
-
-          // Stream should still terminate normally
-          result.terminated_normally
-          |> should.be_true
         }
       }
     }
@@ -305,54 +372,70 @@ pub fn sdk_13_usage_data_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_13_usage_data")
+
+      let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       case helpers.query_and_consume_with_timeout("Say hello", opts, 30_000) {
         helpers.QueryFailure(err) -> {
-          io.println("[FAIL] query() failed: " <> error_to_string(err))
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Query failed")
           should.fail()
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-13")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          let ctx = helpers.test_step(ctx, "find_usage_data")
 
           // Find ResultMessage with usage
           let result_usage = find_result_usage(result.messages)
 
           case result_usage {
             Some(usage) -> {
+              let ctx = helpers.test_step(ctx, "validate_input_tokens")
               // Protocol invariant: token counts should be >= 0
               case usage.input_tokens {
                 Some(tokens) -> {
                   { tokens >= 0 }
                   |> should.be_true
-                  io.println("[INFO] input_tokens: " <> int.to_string(tokens))
+                  helpers.log_info_with(ctx, "input_tokens_valid", [
+                    #("input_tokens", json.int(tokens)),
+                  ])
                 }
                 None -> {
-                  io.println("[INFO] input_tokens not present")
+                  helpers.log_info(ctx, "input_tokens_absent")
                 }
               }
 
+              let ctx = helpers.test_step(ctx, "validate_output_tokens")
               case usage.output_tokens {
                 Some(tokens) -> {
                   { tokens >= 0 }
                   |> should.be_true
-                  io.println("[INFO] output_tokens: " <> int.to_string(tokens))
+                  helpers.log_info_with(ctx, "output_tokens_valid", [
+                    #("output_tokens", json.int(tokens)),
+                  ])
                 }
                 None -> {
-                  io.println("[INFO] output_tokens not present")
+                  helpers.log_info(ctx, "output_tokens_absent")
                 }
               }
 
+              let ctx = helpers.test_step(ctx, "validate_cache_tokens")
               // Cache tokens are optional but should be >= 0 if present
               case usage.cache_creation_input_tokens {
                 Some(tokens) -> {
                   { tokens >= 0 }
                   |> should.be_true
+                  helpers.log_info_with(ctx, "cache_creation_tokens", [
+                    #("cache_creation_input_tokens", json.int(tokens)),
+                  ])
                 }
                 None -> Nil
               }
@@ -361,14 +444,19 @@ pub fn sdk_13_usage_data_test() {
                 Some(tokens) -> {
                   { tokens >= 0 }
                   |> should.be_true
+                  helpers.log_info_with(ctx, "cache_read_tokens", [
+                    #("cache_read_input_tokens", json.int(tokens)),
+                  ])
                 }
                 None -> Nil
               }
+
+              helpers.log_test_complete(ctx, True, "Usage data validated")
             }
             None -> {
-              io.println("[WARN] No usage data in ResultMessage")
+              helpers.log_info(ctx, "no_usage_data_acceptable")
               // Usage may not always be present; document behavior
-              Nil
+              helpers.log_test_complete(ctx, True, "No usage data (acceptable)")
             }
           }
         }
@@ -406,6 +494,9 @@ pub fn sdk_14_error_message_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_14_error_message")
+
+      let ctx = helpers.test_step(ctx, "configure_invalid_options")
       // Test error scenario: use invalid model to trigger API error
       // This tests that error responses are handled gracefully
       // Finding 1 & 3 fix: Actually use an invalid model to trigger error
@@ -414,23 +505,28 @@ pub fn sdk_14_error_message_test() {
         |> claude_agent_sdk.with_model("invalid-model-xyz-does-not-exist")
         |> claude_agent_sdk.with_max_turns(1)
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       // Query with invalid model should trigger an error
       case helpers.query_and_consume_with_timeout("Say hi", opts, 30_000) {
         helpers.QueryFailure(err) -> {
+          let ctx = helpers.test_step(ctx, "validate_error_surfacing")
           // Query-level errors are expected with invalid model
           // Key assertion: error is surfaced properly, no panic
-          io.println("[INFO] Query error (expected): " <> error_to_string(err))
           let err_str = error_to_string(err)
+          helpers.log_info_with(ctx, "query_error_expected", [
+            #("error", json.string(err_str)),
+          ])
           // Verify we got a meaningful error, not empty
           { string.length(err_str) > 0 }
           |> should.be_true
-          io.println("[PASS] Error surfaced cleanly without panic")
+          helpers.log_test_complete(ctx, True, "Error surfaced cleanly")
         }
         helpers.QueryTimedOut -> {
-          io.println("[WARN] query() timed out; skipping SDK-14")
-          Nil
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "Skipped due to timeout")
         }
         helpers.QuerySuccess(result) -> {
+          let ctx = helpers.test_step(ctx, "validate_result_error_flags")
           // If query somehow succeeds, the model should still report an error
 
           // Find ResultMessage and check is_error field
@@ -441,16 +537,13 @@ pub fn sdk_14_error_message_test() {
               // With invalid model, we expect is_error=True or errors list populated
               case res.is_error {
                 Some(is_err) -> {
-                  io.println(
-                    "[INFO] is_error: "
-                    <> case is_err {
-                      True -> "true"
-                      False -> "false"
-                    },
-                  )
+                  helpers.log_info_with(ctx, "is_error_field", [
+                    #("is_error", json.bool(is_err)),
+                  ])
                   // We expect an error condition
                   is_err
                   |> should.be_true
+                  helpers.log_test_complete(ctx, True, "Error flag validated")
                 }
                 None -> {
                   // If is_error not present, check for errors list
@@ -458,12 +551,26 @@ pub fn sdk_14_error_message_test() {
                     Some(errs) -> {
                       { errs != [] }
                       |> should.be_true
-                      io.println("[INFO] errors list populated")
+                      helpers.log_info_with(ctx, "errors_list_populated", [
+                        #("errors_count", json.int(list.length(errs))),
+                      ])
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "Errors list validated",
+                      )
                     }
                     None -> {
                       // Neither is_error nor errors populated - fail for invalid model
-                      io.println(
-                        "[FAIL] No error indicators with invalid model - expected is_error or errors",
+                      helpers.log_error(
+                        ctx,
+                        "no_error_indicators",
+                        "Expected is_error or errors",
+                      )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "No error indicators",
                       )
                       should.fail()
                     }
@@ -472,13 +579,17 @@ pub fn sdk_14_error_message_test() {
               }
             }
             None -> {
-              io.println("[WARN] No ResultMessage found")
+              helpers.log_info(ctx, "no_result_message")
+              // Key invariant: stream consumed without crash
+              { list.length(result.messages) >= 0 }
+              |> should.be_true
+              helpers.log_test_complete(
+                ctx,
+                True,
+                "Stream consumed without crash",
+              )
             }
           }
-
-          // Key invariant: stream consumed without crash
-          { list.length(result.messages) >= 0 }
-          |> should.be_true
         }
       }
     }

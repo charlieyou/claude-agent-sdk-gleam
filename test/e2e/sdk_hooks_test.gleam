@@ -23,16 +23,16 @@ import claude_agent_sdk/internal/bidir.{
   SessionEnded,
 }
 import claude_agent_sdk/internal/bidir_runner
+import e2e/helpers.{skip_if_no_e2e}
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/io
+import gleam/json
 import gleam/list
 import gleam/string
 import gleeunit/should
-
-import e2e/helpers.{skip_if_no_e2e}
 
 // FFI for creating Dynamic values
 @external(erlang, "gleam_stdlib", "identity")
@@ -157,12 +157,13 @@ fn wait_for_running_loop(
   }
 }
 
-fn handle_wait_failure(
+fn handle_wait_failure_with_ctx(
+  ctx: helpers.TestContext,
   session: process.Subject(bidir.ActorMessage),
   state: bidir.SessionLifecycle,
 ) -> Nil {
-  io.println("[INFO] Lifecycle state: " <> string.inspect(state))
-  io.println("[FAIL] Session failed to reach Running state")
+  helpers.log_error(ctx, "session_failed", string.inspect(state))
+  helpers.log_test_complete(ctx, False, "Session failed to reach Running state")
   bidir.shutdown(session)
   should.fail()
 }
@@ -231,6 +232,9 @@ pub fn sdk_30_pre_tool_use_hook_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_30_pre_tool_use_hook")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       // Create a subject to capture hook invocations
       let hook_subject: process.Subject(Dynamic) = process.new_subject()
 
@@ -248,17 +252,22 @@ pub fn sdk_30_pre_tool_use_hook_test() {
           permission_handlers: dict.new(),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       // Start session with a prompt that triggers tool use
       case start_session_with_hooks(hooks, "Run echo hello") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           // Wait for session to be running
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_hook")
               // Wait for hook invocation or timeout
               case process.receive(hook_subject, 30_000) {
                 Ok(hook_input) -> {
@@ -266,7 +275,12 @@ pub fn sdk_30_pre_tool_use_hook_test() {
                   has_field(hook_input, "tool_name")
                   |> should.be_true
 
-                  io.println("[PASS] PreToolUse hook received tool_name")
+                  helpers.log_info(ctx, "hook_received")
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "PreToolUse hook received tool_name",
+                  )
 
                   // Collect remaining messages and cleanup
                   let _ = collect_messages(subscriber, 5000, [])
@@ -275,9 +289,12 @@ pub fn sdk_30_pre_tool_use_hook_test() {
                 Error(Nil) -> {
                   // Hook not invoked - this is a test failure since we explicitly
                   // asked for tool use with "Run echo hello"
-                  io.println(
-                    "[FAIL] PreToolUse hook not invoked - tool may not have been used",
+                  helpers.log_error(
+                    ctx,
+                    "hook_timeout",
+                    "Hook not invoked within timeout",
                   )
+                  helpers.log_test_complete(ctx, False, "Hook not invoked")
                   bidir.shutdown(session)
                   should.fail()
                 }
@@ -303,6 +320,9 @@ pub fn sdk_31_pre_tool_use_block_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_31_pre_tool_use_block")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       // Track hook invocations and whether PostToolUse was called
       let pre_hook_subject: process.Subject(String) = process.new_subject()
       let post_hook_subject: process.Subject(String) = process.new_subject()
@@ -329,41 +349,64 @@ pub fn sdk_31_pre_tool_use_block_test() {
           permission_handlers: dict.new(),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       case start_session_with_hooks(hooks, "Run echo hello") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_pre_hook")
               // Wait for PreToolUse hook to be invoked
               case process.receive(pre_hook_subject, 30_000) {
                 Ok(tool_name) -> {
-                  io.println("[INFO] PreToolUse blocked tool: " <> tool_name)
+                  helpers.log_info_with(ctx, "pre_hook_blocked", [
+                    #("tool_name", json.string(tool_name)),
+                  ])
 
                   // Wait for session to complete
                   let _ = collect_messages(subscriber, 10_000, [])
 
+                  let ctx = helpers.test_step(ctx, "verify_block")
                   // Verify PostToolUse was NOT called (block worked)
                   case process.receive(post_hook_subject, 500) {
                     Ok(_) -> {
-                      io.println(
-                        "[WARN] PostToolUse fired - block did not prevent execution",
+                      helpers.log_info(ctx, "post_hook_fired_unexpectedly")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "PostToolUse fired - block did not prevent execution",
                       )
                       bidir.shutdown(session)
                     }
                     Error(Nil) -> {
-                      io.println(
-                        "[PASS] PostToolUse did not fire - block prevented execution",
+                      helpers.log_info(ctx, "block_prevented_execution")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "PostToolUse did not fire - block prevented execution",
                       )
                       bidir.shutdown(session)
                     }
                   }
                 }
                 Error(Nil) -> {
-                  io.println("[FAIL] PreToolUse hook not invoked")
+                  helpers.log_error(
+                    ctx,
+                    "hook_timeout",
+                    "PreToolUse hook not invoked",
+                  )
+                  helpers.log_test_complete(
+                    ctx,
+                    False,
+                    "PreToolUse hook not invoked",
+                  )
                   bidir.shutdown(session)
                   should.fail()
                 }
@@ -389,6 +432,9 @@ pub fn sdk_32_pre_tool_use_modify_input_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_32_pre_tool_use_modify_input")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       let hook_subject: process.Subject(String) = process.new_subject()
 
       // Define hook that modifies input (changes command)
@@ -414,24 +460,41 @@ pub fn sdk_32_pre_tool_use_modify_input_test() {
           permission_handlers: dict.new(),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       case start_session_with_hooks(hooks, "Run echo original") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_hook")
               case process.receive(hook_subject, 30_000) {
                 Ok(msg) -> {
-                  io.println("[PASS] Hook invoked: " <> msg)
+                  helpers.log_info_with(ctx, "hook_invoked", [
+                    #("message", json.string(msg)),
+                  ])
+                  helpers.log_test_complete(ctx, True, "Hook invoked: " <> msg)
                   // Hook was invoked and sent modification response
                   let _ = collect_messages(subscriber, 5000, [])
                   bidir.shutdown(session)
                 }
                 Error(Nil) -> {
-                  io.println("[FAIL] PreToolUse hook not invoked")
+                  helpers.log_error(
+                    ctx,
+                    "hook_timeout",
+                    "PreToolUse hook not invoked",
+                  )
+                  helpers.log_test_complete(
+                    ctx,
+                    False,
+                    "PreToolUse hook not invoked",
+                  )
                   bidir.shutdown(session)
                   should.fail()
                 }
@@ -456,6 +519,9 @@ pub fn sdk_33_post_tool_use_hook_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_33_post_tool_use_hook")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       let hook_subject: process.Subject(Dynamic) = process.new_subject()
 
       let hooks =
@@ -474,15 +540,20 @@ pub fn sdk_33_post_tool_use_hook_test() {
           permission_handlers: dict.new(),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       case start_session_with_hooks(hooks, "Run echo hello") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_post_hook")
               // Wait for PostToolUse hook
               case process.receive(hook_subject, 30_000) {
                 Ok(hook_input) -> {
@@ -492,19 +563,38 @@ pub fn sdk_33_post_tool_use_hook_test() {
                     || has_field(hook_input, "tool_output")
 
                   case has_output {
-                    True ->
-                      io.println("[PASS] PostToolUse received tool output")
-                    False ->
-                      io.println(
-                        "[WARN] PostToolUse missing tool output fields",
+                    True -> {
+                      helpers.log_info(ctx, "post_hook_received_output")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "PostToolUse received tool output",
                       )
+                    }
+                    False -> {
+                      helpers.log_info(ctx, "post_hook_missing_output_fields")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "PostToolUse missing tool output fields",
+                      )
+                    }
                   }
 
                   let _ = collect_messages(subscriber, 5000, [])
                   bidir.shutdown(session)
                 }
                 Error(Nil) -> {
-                  io.println("[FAIL] PostToolUse hook not invoked")
+                  helpers.log_error(
+                    ctx,
+                    "hook_timeout",
+                    "PostToolUse hook not invoked",
+                  )
+                  helpers.log_test_complete(
+                    ctx,
+                    False,
+                    "PostToolUse hook not invoked",
+                  )
                   bidir.shutdown(session)
                   should.fail()
                 }
@@ -531,6 +621,9 @@ pub fn sdk_34_can_use_tool_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_34_can_use_tool")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       let hook_subject: process.Subject(String) = process.new_subject()
       let post_hook_subject: process.Subject(String) = process.new_subject()
 
@@ -560,34 +653,48 @@ pub fn sdk_34_can_use_tool_test() {
           ]),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       case start_session_with_hooks(hooks, "Run echo hello") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_permission")
               // Wait for permission check
               case process.receive(hook_subject, 30_000) {
                 Ok(msg) -> {
-                  io.println("[INFO] " <> msg)
+                  helpers.log_info_with(ctx, "permission_check", [
+                    #("message", json.string(msg)),
+                  ])
 
                   // Wait for session to complete
                   let _ = collect_messages(subscriber, 10_000, [])
 
+                  let ctx = helpers.test_step(ctx, "verify_deny")
                   // Verify tool did NOT execute (deny worked)
                   case process.receive(post_hook_subject, 500) {
                     Ok(_) -> {
-                      io.println(
-                        "[WARN] Tool executed despite permission deny",
+                      helpers.log_info(ctx, "tool_executed_despite_deny")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "Tool executed despite permission deny",
                       )
                       bidir.shutdown(session)
                     }
                     Error(Nil) -> {
-                      io.println(
-                        "[PASS] Permission deny prevented tool execution",
+                      helpers.log_info(ctx, "deny_prevented_execution")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "Permission deny prevented tool execution",
                       )
                       bidir.shutdown(session)
                     }
@@ -596,8 +703,15 @@ pub fn sdk_34_can_use_tool_test() {
                 Error(Nil) -> {
                   // Permission handler was not invoked - this means the test
                   // cannot validate permission handling behavior
-                  io.println(
-                    "[FAIL] Permission handler not invoked within timeout",
+                  helpers.log_error(
+                    ctx,
+                    "permission_timeout",
+                    "Permission handler not invoked within timeout",
+                  )
+                  helpers.log_test_complete(
+                    ctx,
+                    False,
+                    "Permission handler not invoked",
                   )
                   // Collect messages to flush session before shutdown
                   let _ = collect_messages(subscriber, 5000, [])
@@ -625,6 +739,9 @@ pub fn sdk_35_stop_hook_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_35_stop_hook")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       let hook_subject: process.Subject(String) = process.new_subject()
 
       let hooks =
@@ -643,30 +760,46 @@ pub fn sdk_35_stop_hook_test() {
           permission_handlers: dict.new(),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       // Use a simple prompt that completes quickly
       case start_session_with_hooks(hooks, "Say hello") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "wait_for_session_end")
               // Wait for session to complete naturally
               let _ = collect_messages(subscriber, 30_000, [])
 
+              let ctx = helpers.test_step(ctx, "check_stop_hook")
               // Check if stop hook was invoked
               case process.receive(hook_subject, 2000) {
                 Ok(msg) -> {
-                  io.println("[PASS] Stop hook invoked: " <> msg)
+                  helpers.log_info_with(ctx, "stop_hook_invoked", [
+                    #("message", json.string(msg)),
+                  ])
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "Stop hook invoked: " <> msg,
+                  )
                   bidir.shutdown(session)
                 }
                 Error(Nil) -> {
                   // Stop hook may not fire for all session end scenarios
                   // This depends on CLI behavior which may vary
-                  io.println(
-                    "[INFO] Stop hook not invoked (CLI may not send Stop for this scenario)",
+                  helpers.log_info(ctx, "stop_hook_not_invoked")
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "Stop hook not invoked (CLI may not send Stop for this scenario)",
                   )
                   bidir.shutdown(session)
                   // Don't fail - Stop hook firing depends on CLI implementation
@@ -696,6 +829,9 @@ pub fn sdk_36_multiple_hooks_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_36_multiple_hooks")
+      let ctx = helpers.test_step(ctx, "setup_hooks")
+
       let hook_subject: process.Subject(String) = process.new_subject()
 
       // Register multiple different hook types
@@ -714,27 +850,33 @@ pub fn sdk_36_multiple_hooks_test() {
           permission_handlers: dict.new(),
         )
 
+      let ctx = helpers.test_step(ctx, "start_session")
       case start_session_with_hooks(hooks, "Run echo test") {
         Error(err) -> {
-          io.println("[SKIP] " <> err)
-          Nil
+          helpers.log_info_with(ctx, "session_skip", [
+            #("reason", json.string(err)),
+          ])
+          helpers.log_test_complete(ctx, True, "Skipped: " <> err)
         }
         Ok(#(session, subscriber)) -> {
+          let ctx = helpers.test_step(ctx, "wait_for_running")
           case wait_for_running(session, 50) {
-            Error(state) -> handle_wait_failure(session, state)
+            Error(state) -> handle_wait_failure_with_ctx(ctx, session, state)
             Ok(Nil) -> {
+              let ctx = helpers.test_step(ctx, "collect_hooks")
               // Collect hook invocations (give time for both hooks to fire)
               let hooks_fired =
                 collect_hook_invocations(hook_subject, [], 30_000)
 
-              io.println(
-                "[INFO] Hooks fired: " <> hooks_list_to_string(hooks_fired),
-              )
+              helpers.log_info_with(ctx, "hooks_collected", [
+                #("hooks", json.string(hooks_list_to_string(hooks_fired))),
+              ])
 
               // Verify at least one hook fired
               case list.length(hooks_fired) {
                 0 -> {
-                  io.println("[FAIL] No hooks fired")
+                  helpers.log_error(ctx, "no_hooks_fired", "No hooks fired")
+                  helpers.log_test_complete(ctx, False, "No hooks fired")
                   let _ = collect_messages(subscriber, 5000, [])
                   bidir.shutdown(session)
                   should.fail()
@@ -744,19 +886,34 @@ pub fn sdk_36_multiple_hooks_test() {
                   let has_pre = list.contains(hooks_fired, "pre_tool_use")
                   let has_post = list.contains(hooks_fired, "post_tool_use")
 
+                  let ctx = helpers.test_step(ctx, "verify_hooks")
                   case has_pre && has_post {
                     True -> {
-                      io.println(
-                        "[PASS] Both PreToolUse and PostToolUse hooks fired",
+                      helpers.log_info(ctx, "both_hooks_fired")
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "Both PreToolUse and PostToolUse hooks fired",
                       )
                     }
                     False -> {
-                      io.println(
-                        "[FAIL] Not all hooks fired (pre: "
-                        <> bool_to_string(has_pre)
-                        <> ", post: "
-                        <> bool_to_string(has_post)
-                        <> ")",
+                      helpers.log_error_with(
+                        ctx,
+                        "missing_hooks",
+                        "Not all hooks fired",
+                        [
+                          #("has_pre", json.bool(has_pre)),
+                          #("has_post", json.bool(has_post)),
+                        ],
+                      )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "Not all hooks fired (pre: "
+                          <> bool_to_string(has_pre)
+                          <> ", post: "
+                          <> bool_to_string(has_post)
+                          <> ")",
                       )
                     }
                   }

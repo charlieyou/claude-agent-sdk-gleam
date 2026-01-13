@@ -22,6 +22,7 @@ import claude_agent_sdk/runner
 import e2e/helpers
 import gleam/dynamic
 import gleam/io
+import gleam/json
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleeunit/should
@@ -80,20 +81,22 @@ pub fn sdk_60_cli_not_found_test() {
       Nil
     }
     Ok(Nil) -> {
-      // Save original PATH
+      let ctx = helpers.new_test_context("sdk_60_cli_not_found")
+
+      let ctx = helpers.test_step(ctx, "save_env")
       let original_path = save_env("PATH")
 
-      // Set PATH to exclude claude CLI
+      let ctx = helpers.test_step(ctx, "modify_path")
       set_env("PATH", "/nonexistent/path/only")
 
-      // Attempt query - should fail with CliNotFoundError
+      let ctx = helpers.test_step(ctx, "execute_query")
       let result =
         claude_agent_sdk.query("test", claude_agent_sdk.default_options())
 
       // Restore PATH immediately (before any assertions that might panic)
       restore_env("PATH", original_path)
 
-      // Now assert on the result
+      let ctx = helpers.test_step(ctx, "validate_error")
       case result {
         Error(error.CliNotFoundError(msg)) -> {
           // Verify message contains helpful installation instructions
@@ -105,18 +108,34 @@ pub fn sdk_60_cli_not_found_test() {
           |> string.contains("npm install")
           |> should.be_true
 
-          io.println("[PASS] SDK-60: CliNotFoundError with helpful message")
+          helpers.log_info_with(ctx, "cli_not_found_error", [
+            #("message", json.string(msg)),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "CliNotFoundError with helpful message",
+          )
         }
         Error(other_error) -> {
-          io.println(
-            "[FAIL] SDK-60: Expected CliNotFoundError, got: "
-            <> error.error_to_string(other_error),
+          helpers.log_error(
+            ctx,
+            "unexpected_error",
+            error.error_to_string(other_error),
           )
+          helpers.log_test_complete(ctx, False, "Expected CliNotFoundError")
           should.fail()
         }
         Ok(_stream) -> {
-          io.println(
-            "[FAIL] SDK-60: Expected CliNotFoundError, but query succeeded",
+          helpers.log_error(
+            ctx,
+            "unexpected_success",
+            "Query succeeded when should have failed",
+          )
+          helpers.log_test_complete(
+            ctx,
+            False,
+            "Expected CliNotFoundError but query succeeded",
           )
           should.fail()
         }
@@ -146,6 +165,9 @@ pub fn sdk_61_auth_failure_test() {
       Nil
     }
     Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_61_auth_failure")
+
+      let ctx = helpers.test_step(ctx, "create_mock_runner")
       // Create a mock runner that simulates CLI auth failure:
       // - Spawns successfully
       // - Returns EOF immediately (empty stdout)
@@ -160,6 +182,7 @@ pub fn sdk_61_auth_failure_test() {
           on_close: fn(_handle) { Nil },
         )
 
+      let ctx = helpers.test_step(ctx, "execute_query")
       let result =
         claude_agent_sdk.query(
           "test",
@@ -169,13 +192,18 @@ pub fn sdk_61_auth_failure_test() {
             |> claude_agent_sdk.with_skip_version_check,
         )
 
+      let ctx = helpers.test_step(ctx, "validate_error")
       // Assert: SDK handles auth failure gracefully
       case result {
         Error(query_error) -> {
           // Query failed at startup - acceptable
-          io.println(
-            "[PASS] SDK-61: Auth failure surfaced as QueryError: "
-            <> error.error_to_string(query_error),
+          helpers.log_info_with(ctx, "query_error", [
+            #("error", json.string(error.error_to_string(query_error))),
+          ])
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Auth failure surfaced as QueryError",
           )
         }
         Ok(stream) -> {
@@ -200,21 +228,38 @@ pub fn sdk_61_auth_failure_test() {
                   |> string.contains("Authenticate")
                   |> should.be_true
 
-                  io.println(
-                    "[PASS] SDK-61: Auth failure surfaced as ProcessError with helpful diagnostics",
+                  helpers.log_info_with(ctx, "process_error", [
+                    #("exit_code", json.int(exit_code)),
+                    #("hint", json.string(diagnostic.exit_code_hint)),
+                  ])
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "Auth failure surfaced as ProcessError with helpful diagnostics",
                   )
                 }
                 _ -> {
-                  io.println(
-                    "[PASS] SDK-61: Auth failure surfaced as StreamError: "
-                    <> error.stream_error_to_string(err),
+                  helpers.log_info_with(ctx, "stream_error", [
+                    #("error", json.string(error.stream_error_to_string(err))),
+                  ])
+                  helpers.log_test_complete(
+                    ctx,
+                    True,
+                    "Auth failure surfaced as StreamError",
                   )
                 }
               }
             }
             StreamCompleted -> {
-              io.println(
-                "[FAIL] SDK-61: Expected error but stream completed normally",
+              helpers.log_error(
+                ctx,
+                "unexpected_completion",
+                "Expected error but stream completed normally",
+              )
+              helpers.log_test_complete(
+                ctx,
+                False,
+                "Expected error but stream completed normally",
               )
               should.fail()
             }
