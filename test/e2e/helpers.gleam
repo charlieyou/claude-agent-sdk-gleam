@@ -38,12 +38,11 @@ fn get_env(name: String) -> Result(String, Nil) {
   // Convert Gleam string (binary) to charlist for os:getenv
   let charlist_name = binary_to_list(name)
   let result = os_getenv_charlist(charlist_name)
-  // os:getenv returns charlist on success, false (Bool) if not set
-  case dynamic.classify(result) {
-    // false is classified as "Bool", meaning var not set
-    "Bool" -> Error(Nil)
-    // Otherwise it's a charlist (List) - convert to binary string
-    _ -> Ok(list_to_binary(result))
+  // os:getenv returns charlist on success, atom false if not set
+  // Compare directly to the atom false to avoid confusion with string "false"
+  case result == dynamic.bool(False) {
+    True -> Error(Nil)
+    False -> Ok(list_to_binary(result))
   }
 }
 
