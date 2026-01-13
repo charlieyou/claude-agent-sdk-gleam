@@ -45,9 +45,9 @@ pub fn with_mcp_server_accumulates_test() {
   list.length(opts.mcp_servers)
   |> should.equal(2)
 
-  // Check names (most recent first due to prepend)
+  // Check names (oldest first so newest wins in dict.from_list)
   let names = list.map(opts.mcp_servers, fn(pair) { pair.0 })
-  names |> should.equal(["server-b", "server-a"])
+  names |> should.equal(["server-a", "server-b"])
 }
 
 pub fn mcp_server_handler_is_callable_test() {
@@ -159,10 +159,10 @@ pub fn multiple_mcp_servers_with_other_options_test() {
     |> options.with_file_checkpointing()
     |> options.with_mcp_server("server-3", handler3)
 
-  // Should have 3 servers (most recent first)
+  // Should have 3 servers (oldest first so newest wins in dict.from_list)
   list.length(opts.mcp_servers) |> should.equal(3)
   let names = list.map(opts.mcp_servers, fn(pair) { pair.0 })
-  names |> should.equal(["server-3", "server-2", "server-1"])
+  names |> should.equal(["server-1", "server-2", "server-3"])
 
   // Other options should be set
   opts.permission_mode |> should.equal(option.Some(options.BypassPermissions))

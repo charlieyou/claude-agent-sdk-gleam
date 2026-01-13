@@ -44,6 +44,7 @@ import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
 import claude_agent_sdk/runner.{type Runner}
 import gleam/dict.{type Dict}
 import gleam/dynamic
+import gleam/list
 import gleam/option.{type Option, None, Some}
 
 /// Permission mode for controlling tool execution behavior.
@@ -647,7 +648,7 @@ pub fn with_mcp_server(
   name: String,
   handler: fn(dynamic.Dynamic) -> dynamic.Dynamic,
 ) -> QueryOptions {
-  let new_servers = [#(name, handler), ..options.mcp_servers]
+  let new_servers = list.append(options.mcp_servers, [#(name, handler)])
   QueryOptions(..options, mcp_servers: new_servers)
 }
 
