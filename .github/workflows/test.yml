@@ -29,7 +29,10 @@ jobs:
       - run: gleam format --check src test
 
   e2e:
-    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        os: [ubuntu-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
     # Only run when explicitly requested: label, manual dispatch, or weekly schedule
     if: |
       github.event_name == 'workflow_dispatch' ||
@@ -73,7 +76,7 @@ jobs:
         if: always() && steps.prereq.outputs.skip != 'true'
         uses: actions/upload-artifact@v4
         with:
-          name: e2e-artifacts
+          name: e2e-artifacts-${{ matrix.os }}
           path: artifacts/e2e/
           retention-days: 7
           if-no-files-found: ignore
