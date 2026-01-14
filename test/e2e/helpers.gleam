@@ -102,6 +102,14 @@ fn ensure_dir(path: String) -> Result(Nil, String)
 @external(erlang, "e2e_helpers_ffi", "append_line")
 fn append_line(path: String, line: String) -> Result(Nil, String)
 
+/// Check if concurrent mode is enabled (E2E_ALLOW_CONCURRENT=1).
+@external(erlang, "e2e_helpers_ffi", "is_concurrent_mode")
+pub fn is_concurrent_mode() -> Bool
+
+/// Check if --soak flag is present in plain arguments.
+@external(erlang, "e2e_helpers_ffi", "has_soak_flag")
+fn has_soak_flag_ffi() -> Bool
+
 // ============================================================================
 // Structured E2E Logging
 // ============================================================================
@@ -519,3 +527,143 @@ pub fn count_message_types(messages: List(MessageEnvelope)) -> MessageCounts {
     }
   })
 }
+
+// ============================================================================
+// Soak Test Helpers
+// ============================================================================
+
+/// Check if soak tests should run (--soak flag present).
+/// Returns Ok(Nil) if present, Error with skip message otherwise.
+pub fn skip_if_no_soak() -> Result(Nil, String) {
+  case has_soak_flag_ffi() {
+    True -> Ok(Nil)
+    False -> Error("[SKIP] --soak flag not provided; skipping soak test")
+  }
+}
+
+// ============================================================================
+// Port Helpers
+// ============================================================================
+
+/// Erlang port reference (opaque).
+pub type ErlangPort
+
+/// Get the Erlang port from a QueryStream, if accessible.
+/// Note: QueryStream is opaque, so we cannot extract the port directly.
+/// Returns None (port access not supported on opaque streams).
+pub fn get_stream_port(
+  _stream: claude_agent_sdk.QueryStream,
+) -> Option(ErlangPort) {
+  // QueryStream is opaque and does not expose its internal port.
+  // This function is provided for API completeness; callers should
+  // use alternative approaches (e.g., kill_pid on the owning process).
+  None
+}
+
+/// Close an Erlang port immediately.
+/// Returns Ok(Nil) on success, Error with reason on failure.
+pub fn force_close_port(port: ErlangPort) -> Result(Nil, String) {
+  // ErlangPort is passed to FFI which handles the underlying Erlang port type
+  port_close_safe_impl(port)
+}
+
+/// Internal FFI wrapper that accepts ErlangPort directly.
+/// Erlang is dynamically typed, so the type is erased at runtime.
+@external(erlang, "e2e_helpers_ffi", "port_close_safe")
+fn port_close_safe_impl(port: ErlangPort) -> Result(Nil, String)
+
+// ============================================================================
+// Concurrent Mode Helpers
+// ============================================================================
+
+/// Run a function with concurrent mode enabled.
+/// Sets E2E_ALLOW_CONCURRENT=1 for the duration of the function, then restores.
+pub fn with_concurrent_mode(f: fn() -> a) -> a {
+  // Set env var
+  set_env_ffi("E2E_ALLOW_CONCURRENT", "1")
+  let result = f()
+  // Restore (unset)
+  unset_env_ffi("E2E_ALLOW_CONCURRENT")
+  result
+}
+
+/// FFI for set_env (internal use).
+@external(erlang, "e2e_helpers_ffi", "set_env")
+fn set_env_ffi(name: String, value: String) -> Nil
+
+/// FFI for unset_env (internal use).
+@external(erlang, "e2e_helpers_ffi", "unset_env")
+fn unset_env_ffi(name: String) -> Nil
+
+// ============================================================================
+// Contract Validation
+// ============================================================================
+
+/// Error type for contract validation failures.
+pub type ContractError {
+  /// Golden file not found at the given path.
+  GoldenFileNotFound(path: String)
+  /// Failed to read or parse the golden file.
+  GoldenFileParseError(path: String, reason: String)
+  /// Message count mismatch.
+  MessageCountMismatch(expected: Int, actual: Int)
+  /// Message type mismatch at the given index.
+  MessageTypeMismatch(index: Int, expected: String, actual: String)
+}
+
+/// Validate messages against a golden contract file.
+/// The golden file should contain one message type per line (e.g., "system", "assistant", "result").
+/// Returns Ok(Nil) if messages match, Error(ContractError) otherwise.
+pub fn validate_contract(
+  messages: List(MessageEnvelope),
+  golden_path: String,
+) -> Result(Nil, ContractError) {
+  // Read golden file
+  case read_file_lines(golden_path) {
+    Error(_) -> Error(GoldenFileNotFound(golden_path))
+    Ok(expected_types) -> {
+      let actual_types =
+        list.map(messages, fn(env) {
+          case env.message {
+            System(_) -> "system"
+            Assistant(_) -> "assistant"
+            User(_) -> "user"
+            Result(_) -> "result"
+          }
+        })
+
+      // Check count
+      let expected_count = list.length(expected_types)
+      let actual_count = list.length(actual_types)
+      case expected_count == actual_count {
+        False -> Error(MessageCountMismatch(expected_count, actual_count))
+        True -> {
+          // Check each type
+          validate_types(expected_types, actual_types, 0)
+        }
+      }
+    }
+  }
+}
+
+/// Validate message types match expected types.
+fn validate_types(
+  expected: List(String),
+  actual: List(String),
+  index: Int,
+) -> Result(Nil, ContractError) {
+  case expected, actual {
+    [], [] -> Ok(Nil)
+    [e, ..rest_e], [a, ..rest_a] -> {
+      case e == a {
+        True -> validate_types(rest_e, rest_a, index + 1)
+        False -> Error(MessageTypeMismatch(index, e, a))
+      }
+    }
+    _, _ -> Ok(Nil)
+  }
+}
+
+/// Read file lines (for golden file parsing).
+@external(erlang, "e2e_helpers_ffi", "read_file_lines")
+fn read_file_lines(path: String) -> Result(List(String), String)

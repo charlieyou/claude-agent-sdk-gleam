@@ -1,6 +1,7 @@
 -module(e2e_helpers_ffi).
 -export([get_env/1, set_env/2, unset_env/1, get_plain_args/0, kill_pid/1, acquire_lock/0, release_lock/0,
-         get_timestamp_iso8601/0, get_monotonic_ms/0, ensure_dir/1, append_line/2]).
+         get_timestamp_iso8601/0, get_monotonic_ms/0, ensure_dir/1, append_line/2,
+         is_concurrent_mode/0, port_close_safe/1, has_soak_flag/0, read_file_lines/1]).
 
 -define(LOCK_TABLE, e2e_query_lock_table).
 
@@ -55,16 +56,28 @@ ensure_lock_table() ->
         _ -> ok
     end.
 
+%% Check if concurrent mode is enabled (E2E_ALLOW_CONCURRENT=1).
+is_concurrent_mode() ->
+    case os:getenv("E2E_ALLOW_CONCURRENT") of
+        "1" -> true;
+        _ -> false
+    end.
+
 %% Acquire a global lock to serialize E2E CLI queries.
+%% Skips lock acquisition if concurrent mode is enabled.
 acquire_lock() ->
-    ensure_lock_table(),
-    case ets:insert_new(?LOCK_TABLE, {lock, self()}) of
-        true -> ok;
+    case is_concurrent_mode() of
+        true -> nil;
         false ->
-            timer:sleep(50),
-            acquire_lock()
-    end,
-    nil.
+            ensure_lock_table(),
+            case ets:insert_new(?LOCK_TABLE, {lock, self()}) of
+                true -> ok;
+                false ->
+                    timer:sleep(50),
+                    acquire_lock()
+            end,
+            nil
+    end.
 
 %% Release the global lock for E2E CLI queries.
 release_lock() ->
@@ -98,4 +111,34 @@ append_line(Path, Line) ->
     case file:write_file(PathStr, LineWithNewline, [append]) of
         ok -> {ok, nil};
         {error, Reason} -> {error, list_to_binary(atom_to_list(Reason))}
+    end.
+
+%% Close an Erlang port immediately.
+%% Returns ok on success, {error, Reason} on failure.
+port_close_safe(Port) ->
+    try
+        erlang:port_close(Port),
+        {ok, nil}
+    catch
+        error:badarg -> {error, <<"port_not_found">>};
+        _:Reason -> {error, list_to_binary(io_lib:format("~p", [Reason]))}
+    end.
+
+%% Check if --soak flag is present in plain arguments.
+has_soak_flag() ->
+    Args = init:get_plain_arguments(),
+    lists:any(fun(Arg) -> Arg =:= "--soak" end, Args).
+
+%% Read file lines (for golden file parsing).
+%% Returns {ok, [Binary]} on success, {error, Reason} on failure.
+read_file_lines(Path) ->
+    PathStr = binary_to_list(Path),
+    case file:read_file(PathStr) of
+        {ok, Content} ->
+            Lines = binary:split(Content, <<"\n">>, [global, trim]),
+            %% Filter empty lines
+            NonEmpty = [L || L <- Lines, L =/= <<>>],
+            {ok, NonEmpty};
+        {error, Reason} ->
+            {error, list_to_binary(atom_to_list(Reason))}
     end.
