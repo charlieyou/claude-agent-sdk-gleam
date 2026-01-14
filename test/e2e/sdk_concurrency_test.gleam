@@ -37,7 +37,8 @@ type SessionResult {
 
 /// Test concurrent session isolation.
 /// Spawns 3 concurrent queries and verifies each has a distinct session_id.
-pub fn sdk_concurrent_session_isolation_test() {
+pub fn sdk_concurrent_session_isolation_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

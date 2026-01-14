@@ -43,7 +43,8 @@ pub type ResourceCounts {
 
 /// SOAK-01: Run multiple sequential queries and verify resource stability.
 /// Skips unless --soak flag provided.
-pub fn soak_01_resource_stability_test() {
+pub fn soak_01_resource_stability_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

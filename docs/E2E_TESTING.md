@@ -208,6 +208,40 @@ jobs:
 | **Manual** | Use "Run workflow" button in Actions tab |
 | **Schedule** | Automatic weekly run (Sundays 02:00 UTC) |
 
+## Test Timeouts
+
+E2E tests use EUnit test generators to configure per-test timeouts (120 seconds by default). The default EUnit timeout of 5 seconds is too short for real CLI interactions.
+
+### How It Works
+
+Test functions ending in `_test_` (note trailing underscore) are EUnit test generators. They return a `Timeout` tuple that EUnit interprets as a test with a custom timeout:
+
+```gleam
+pub fn my_e2e_test_() {
+  use <- helpers.with_e2e_timeout()  // 120 second timeout
+  // test body here
+}
+```
+
+### Available Timeout Helpers
+
+```gleam
+// Default E2E timeout (120 seconds)
+with_e2e_timeout(test_fn: fn() -> Nil) -> Timeout
+
+// Custom timeout in seconds
+with_timeout(timeout_seconds: Int, test_fn: fn() -> Nil) -> Timeout
+```
+
+### Example with Custom Timeout
+
+```gleam
+pub fn my_slow_test_() {
+  use <- helpers.with_timeout(300)  // 5 minute timeout
+  // very slow test body
+}
+```
+
 ## Troubleshooting
 
 ### "Session failed to reach Running state"
@@ -284,6 +318,12 @@ query_and_consume_with_timeout(
   options: QueryOptions,
   timeout_ms: Int,
 ) -> QueryOutcome
+
+// Test timeout wrapper (EUnit generator)
+with_e2e_timeout(test_fn: fn() -> Nil) -> Timeout
+
+// Custom timeout wrapper
+with_timeout(timeout_seconds: Int, test_fn: fn() -> Nil) -> Timeout
 ```
 
 ## Example Test Pattern
@@ -299,7 +339,8 @@ import e2e/helpers.{
 }
 import gleam/io
 
-pub fn my_e2e_test() {
+pub fn my_e2e_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

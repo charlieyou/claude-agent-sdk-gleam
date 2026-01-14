@@ -19,6 +19,8 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 
+import e2e/helpers
+
 // ============================================================================
 // Required fields contract per message type
 // ============================================================================
@@ -34,7 +36,8 @@ import gleeunit/should
 
 /// Contract test: Parse basic_query.ndjson golden fixture.
 /// Validates that SDK decoders handle actual CLI output format.
-pub fn contract_01_basic_query_golden_test() {
+pub fn contract_01_basic_query_golden_test_() {
+  use <- helpers.with_e2e_timeout()
   let path = "test/fixtures/golden/basic_query.ndjson"
 
   case read_golden_file(path) {
@@ -61,7 +64,8 @@ pub fn contract_01_basic_query_golden_test() {
 
 /// Contract test: Verify message types match expected sequence.
 /// The basic_query fixture should have: system, assistant, result
-pub fn contract_02_message_sequence_test() {
+pub fn contract_02_message_sequence_test_() {
+  use <- helpers.with_e2e_timeout()
   let path = "test/fixtures/golden/basic_query.ndjson"
 
   case read_and_parse_golden(path) {
@@ -92,7 +96,8 @@ pub fn contract_02_message_sequence_test() {
 
 /// Contract test: Verify required field presence per message type.
 /// Validates that golden fixtures contain all fields the SDK needs.
-pub fn contract_03_required_fields_test() {
+pub fn contract_03_required_fields_test_() {
+  use <- helpers.with_e2e_timeout()
   let path = "test/fixtures/golden/basic_query.ndjson"
 
   case read_golden_file(path) {
@@ -130,7 +135,8 @@ pub fn contract_03_required_fields_test() {
 // ============================================================================
 
 /// Verify decoder rejects JSON without type field.
-pub fn contract_04_missing_type_rejected_test() {
+pub fn contract_04_missing_type_rejected_test_() {
+  use <- helpers.with_e2e_timeout()
   let malformed = "{\"session_id\": \"abc123\"}"
   case decode_message(malformed) {
     Error(JsonDecodeError(msg)) -> {
@@ -148,7 +154,8 @@ pub fn contract_04_missing_type_rejected_test() {
 }
 
 /// Verify decoder rejects unknown message type.
-pub fn contract_05_unknown_type_rejected_test() {
+pub fn contract_05_unknown_type_rejected_test_() {
+  use <- helpers.with_e2e_timeout()
   let unknown = "{\"type\": \"foobar\"}"
   case decode_message(unknown) {
     Error(UnexpectedMessageType(t)) -> {
@@ -165,7 +172,8 @@ pub fn contract_05_unknown_type_rejected_test() {
 }
 
 /// Verify decoder rejects invalid JSON syntax.
-pub fn contract_06_invalid_json_rejected_test() {
+pub fn contract_06_invalid_json_rejected_test_() {
+  use <- helpers.with_e2e_timeout()
   let invalid = "{type: system}"
   case decode_message(invalid) {
     Error(JsonSyntaxError(_)) -> {

@@ -240,7 +240,8 @@ fn permission_deny_response(message: String) -> Dynamic {
 
 /// SDK-30: PreToolUse hook is invoked when Claude uses a tool.
 /// Verifies hook receives tool_name and tool_input.
-pub fn sdk_30_pre_tool_use_hook_test() {
+pub fn sdk_30_pre_tool_use_hook_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -328,7 +329,8 @@ pub fn sdk_30_pre_tool_use_hook_test() {
 
 /// SDK-31: PreToolUse hook can block tool execution.
 /// Verifies Block response prevents tool from running.
-pub fn sdk_31_pre_tool_use_block_test() {
+pub fn sdk_31_pre_tool_use_block_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -440,7 +442,8 @@ pub fn sdk_31_pre_tool_use_block_test() {
 
 /// SDK-32: PreToolUse hook can modify tool input.
 /// Verifies the hook mechanism for input modification.
-pub fn sdk_32_pre_tool_use_modify_input_test() {
+pub fn sdk_32_pre_tool_use_modify_input_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -527,7 +530,8 @@ pub fn sdk_32_pre_tool_use_modify_input_test() {
 // ============================================================================
 
 /// SDK-33: PostToolUse hook receives tool_output after execution.
-pub fn sdk_33_post_tool_use_hook_test() {
+pub fn sdk_33_post_tool_use_hook_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -629,7 +633,8 @@ pub fn sdk_33_post_tool_use_hook_test() {
 /// SDK-34: Permission handler can Allow or Deny tool use.
 /// Note: permission_handlers dispatch by tool_name. We register handlers for
 /// both "Bash" and "bash" to handle case sensitivity, plus a wildcard pattern.
-pub fn sdk_34_can_use_tool_test() {
+pub fn sdk_34_can_use_tool_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -747,7 +752,8 @@ pub fn sdk_34_can_use_tool_test() {
 // ============================================================================
 
 /// SDK-35: Stop hook fires when session ends.
-pub fn sdk_35_stop_hook_test() {
+pub fn sdk_35_stop_hook_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -837,7 +843,8 @@ pub fn sdk_35_stop_hook_test() {
 /// Note: The current HookConfig uses a Dict keyed by callback_id, so each
 /// callback_id can only have one handler. This test verifies that DIFFERENT
 /// hook types (PreToolUse, PostToolUse) all fire for a single tool invocation.
-pub fn sdk_36_multiple_hooks_test() {
+pub fn sdk_36_multiple_hooks_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

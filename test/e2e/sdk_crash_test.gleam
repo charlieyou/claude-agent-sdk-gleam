@@ -45,7 +45,8 @@ import gleeunit/should
 ///
 /// Note: This tests SDK resilience to process disruption. The SDK's opaque
 /// QueryStream doesn't expose CLI port/PID for direct crash simulation.
-pub fn sdk_crash_handling_test() {
+pub fn sdk_crash_handling_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

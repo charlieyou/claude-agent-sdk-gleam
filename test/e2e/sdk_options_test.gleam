@@ -38,7 +38,8 @@ import gleeunit/should
 
 /// SDK-20: Verify with_model() selects model correctly.
 /// If model is invalid, query may fail; if valid, should succeed.
-pub fn sdk_20_model_selection_test() {
+pub fn sdk_20_model_selection_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -83,7 +84,8 @@ pub fn sdk_20_model_selection_test() {
 
 /// SDK-21: Verify with_max_turns() limits turns.
 /// Should terminate without hanging.
-pub fn sdk_21_max_turns_test() {
+pub fn sdk_21_max_turns_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -126,7 +128,8 @@ pub fn sdk_21_max_turns_test() {
 
 /// SDK-22: Verify with_max_budget() is accepted.
 /// Very low budget may trigger budget stop; we just verify no crash.
-pub fn sdk_22_max_budget_test() {
+pub fn sdk_22_max_budget_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -172,7 +175,8 @@ pub fn sdk_22_max_budget_test() {
 
 /// SDK-23: Verify with_system_prompt() is accepted.
 /// We can't verify semantic effect, just that query completes.
-pub fn sdk_23_system_prompt_test() {
+pub fn sdk_23_system_prompt_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -219,7 +223,8 @@ pub fn sdk_23_system_prompt_test() {
 
 /// SDK-24: Verify with_allowed_tools() filters tools.
 /// Check SystemMessage.tools reflects the filter.
-pub fn sdk_24_allowed_tools_test() {
+pub fn sdk_24_allowed_tools_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -297,7 +302,8 @@ pub fn sdk_24_allowed_tools_test() {
 
 /// SDK-25: Verify with_disallowed_tools() excludes tools.
 /// Check SystemMessage.tools doesn't include disallowed tool.
-pub fn sdk_25_disallowed_tools_test() {
+pub fn sdk_25_disallowed_tools_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -375,7 +381,8 @@ pub fn sdk_25_disallowed_tools_test() {
 
 /// SDK-26: Verify with_permission_mode(Default) is accepted.
 /// Default mode prompts for permission interactively.
-pub fn sdk_26_permission_default_test() {
+pub fn sdk_26_permission_default_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -419,7 +426,8 @@ pub fn sdk_26_permission_default_test() {
 
 /// SDK-27: Verify with_permission_mode(AcceptEdits) is accepted.
 /// AcceptEdits mode auto-accepts file edits.
-pub fn sdk_27_permission_accept_edits_test() {
+pub fn sdk_27_permission_accept_edits_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -463,7 +471,8 @@ pub fn sdk_27_permission_accept_edits_test() {
 
 /// SDK-28: Verify with_permission_mode(BypassPermissions) is accepted.
 /// BypassPermissions skips all permission prompts.
-pub fn sdk_28_permission_bypass_test() {
+pub fn sdk_28_permission_bypass_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

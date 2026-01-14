@@ -63,7 +63,8 @@ fn is_acceptable_outcome(outcome: BackpressureOutcome) -> Bool {
 
 /// T005: Backpressure/large payload test.
 /// Requests large output and consumes slowly to simulate slow consumer.
-pub fn t005_backpressure_large_payload_test() {
+pub fn t005_backpressure_large_payload_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

@@ -53,7 +53,8 @@ fn complete_init(mock: mock_bidir_runner.MockRunner, session) -> Nil {
 ///
 /// Tests that set_permission_mode sends the expected JSON structure
 /// and handles CLI success response appropriately.
-pub fn sdk_40_set_permission_mode_test() {
+pub fn sdk_40_set_permission_mode_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_40_set_permission_mode")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -120,7 +121,8 @@ pub fn sdk_40_set_permission_mode_test() {
 /// SDK-40b: SetPermissionMode error response handling.
 ///
 /// Verifies that CLI error responses are properly surfaced.
-pub fn sdk_40b_set_permission_mode_error_test() {
+pub fn sdk_40b_set_permission_mode_error_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_40b_permission_error")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -179,7 +181,8 @@ pub fn sdk_40b_set_permission_mode_error_test() {
 ///
 /// Tests that interrupt() sends the expected JSON structure
 /// and handles CLI success response appropriately.
-pub fn sdk_41_interrupt_test() {
+pub fn sdk_41_interrupt_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_41_interrupt")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -231,7 +234,8 @@ pub fn sdk_41_interrupt_test() {
 ///
 /// Verifies that interrupt returns appropriate error when
 /// there's nothing to interrupt.
-pub fn sdk_41b_interrupt_no_operation_test() {
+pub fn sdk_41b_interrupt_no_operation_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_41b_interrupt_no_op")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -286,7 +290,8 @@ pub fn sdk_41b_interrupt_no_operation_test() {
 ///
 /// Tests that slow hook handlers are timed out and fail-open behavior
 /// is applied (allowing the operation to continue).
-pub fn sdk_42_hook_timeout_test() {
+pub fn sdk_42_hook_timeout_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_42_hook_timeout")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -371,7 +376,8 @@ pub fn sdk_42_hook_timeout_test() {
 ///
 /// This test uses mock runner - no E2E gate needed.
 /// Verifies that malformed JSON in control responses doesn't crash the session.
-pub fn sdk_43_malformed_response_test() {
+pub fn sdk_43_malformed_response_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_43_malformed_response")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -429,7 +435,8 @@ pub fn sdk_43_malformed_response_test() {
 ///
 /// Verifies that valid messages are still processed even when
 /// interspersed with malformed JSON.
-pub fn sdk_43b_malformed_mixed_with_valid_test() {
+pub fn sdk_43b_malformed_mixed_with_valid_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_43b_malformed_mixed")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -488,7 +495,8 @@ pub fn sdk_43b_malformed_mixed_with_valid_test() {
 /// SDK-43c: Session stops cleanly after receiving malformed data.
 ///
 /// Verifies that shutdown works properly even after malformed data injection.
-pub fn sdk_43c_shutdown_after_malformed_test() {
+pub fn sdk_43c_shutdown_after_malformed_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_43c_shutdown_after_malformed")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -527,7 +535,8 @@ pub fn sdk_43c_shutdown_after_malformed_test() {
 /// SDK-43d: Truncated JSON line handling.
 ///
 /// Verifies truncated JSON lines are handled gracefully.
-pub fn sdk_43d_truncated_json_test() {
+pub fn sdk_43d_truncated_json_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_43d_truncated_json")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 

@@ -51,7 +51,8 @@ fn from_dynamic(d: dynamic.Dynamic) -> a
 /// Note: This tests delayed exit handling, not timeout enforcement.
 /// True timeout testing would require a mock that hangs indefinitely
 /// and SDK-level timeout configuration.
-pub fn sdk_62_delayed_exit_test() {
+pub fn sdk_62_delayed_exit_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_62_delayed_exit")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -134,7 +135,8 @@ pub fn sdk_62_delayed_exit_test() {
 ///
 /// This complements sdk_62_delayed_exit_test which tests delayed exit handling.
 /// This test exercises the Timeout variant added to runner.ReadResult.
-pub fn sdk_62_timeout_test() {
+pub fn sdk_62_timeout_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_62_timeout")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -209,7 +211,8 @@ const call_count_key = "call_count"
 ///
 /// The mock runner emits one valid message then abruptly closes with
 /// a non-zero exit status, simulating a network interruption.
-pub fn sdk_63_stream_interruption_test() {
+pub fn sdk_63_stream_interruption_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_63_stream_interruption")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -365,7 +368,8 @@ pub fn sdk_63_stream_interruption_test() {
 /// - Process valid lines normally
 /// - Log/skip malformed lines (non-terminal error)
 /// - Continue processing subsequent valid lines (graceful degradation)
-pub fn sdk_64_invalid_json_handling_test() {
+pub fn sdk_64_invalid_json_handling_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_64_invalid_json")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -518,7 +522,8 @@ fn collect_stream_loop(
 
 /// SDK-64b: Explicitly verify that valid messages are processed even
 /// when surrounded by malformed JSON.
-pub fn sdk_64b_valid_messages_preserved_test() {
+pub fn sdk_64b_valid_messages_preserved_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_64b_valid_preserved")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 

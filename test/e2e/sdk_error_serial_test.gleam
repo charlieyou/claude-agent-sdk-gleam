@@ -74,7 +74,8 @@ fn restore_env(name: String, saved: Option(String)) -> Nil {
 ///
 /// This test modifies PATH to point to a non-existent directory,
 /// which should cause query() to return CliNotFoundError.
-pub fn sdk_60_cli_not_found_test() {
+pub fn sdk_60_cli_not_found_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -158,7 +159,8 @@ pub fn sdk_60_cli_not_found_test() {
 /// authentication when run without valid credentials in a non-TTY environment.
 ///
 /// The SDK should surface the error cleanly with helpful diagnostics.
-pub fn sdk_61_auth_failure_test() {
+pub fn sdk_61_auth_failure_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

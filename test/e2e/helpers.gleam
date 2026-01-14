@@ -5,6 +5,7 @@
 /// - Stream consumption utilities
 /// - Protocol invariant assertions
 /// - Structured logging and artifact generation
+/// - Test timeout configuration (EUnit test generators)
 import claude_agent_sdk
 import claude_agent_sdk/error.{EndOfStream, Message, WarningEvent}
 import claude_agent_sdk/message.{
@@ -727,3 +728,57 @@ fn validate_types(
 /// Read file lines (for golden file parsing).
 @external(erlang, "e2e_helpers_ffi", "read_file_lines")
 fn read_file_lines(path: String) -> Result(List(String), String)
+
+// ============================================================================
+// Test Timeout Helpers (EUnit Test Generators)
+// ============================================================================
+
+/// EUnit timeout tuple representation.
+/// When Gleam compiles to Erlang, `Timeout(60, fn() { ... })` becomes
+/// `{timeout, 60, fun() -> ... end}` which EUnit interprets as a test
+/// with a custom timeout.
+///
+/// Usage: Create a test function ending in `_test_` (note trailing underscore)
+/// that returns this type. The test body goes in the function parameter.
+///
+/// Example:
+/// ```gleam
+/// pub fn my_slow_test_() {
+///   use <- with_timeout(120)  // 120 second timeout
+///   // ... test body ...
+/// }
+/// ```
+pub type Timeout {
+  Timeout(timeout: Int, test_fn: fn() -> Nil)
+}
+
+/// Default E2E test timeout in seconds.
+/// E2E tests interact with real Claude CLI which can take 30+ seconds.
+/// Default EUnit timeout is only 5 seconds which is too short.
+pub const default_e2e_timeout_seconds = 120
+
+/// Wrap a test with a custom timeout (in seconds).
+/// Use with `use` syntax for clean test definitions:
+///
+/// ```gleam
+/// pub fn my_e2e_test_() {
+///   use <- with_timeout(60)
+///   // test body here
+/// }
+/// ```
+pub fn with_timeout(timeout_seconds: Int, test_fn: fn() -> Nil) -> Timeout {
+  Timeout(timeout_seconds, test_fn)
+}
+
+/// Wrap a test with the default E2E timeout (120 seconds).
+/// Convenience wrapper for common case.
+///
+/// ```gleam
+/// pub fn my_e2e_test_() {
+///   use <- with_e2e_timeout()
+///   // test body here
+/// }
+/// ```
+pub fn with_e2e_timeout(test_fn: fn() -> Nil) -> Timeout {
+  Timeout(default_e2e_timeout_seconds, test_fn)
+}

@@ -31,7 +31,8 @@ import gleeunit/should
 
 /// SDK-01: Basic query -> stream -> close lifecycle.
 /// This is the integration path test that validates the complete flow.
-pub fn sdk_01_basic_query_test() {
+pub fn sdk_01_basic_query_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -102,7 +103,8 @@ pub fn sdk_01_basic_query_test() {
 
 /// SDK-02: Verify next() iteration pattern works correctly.
 /// Tests that we can manually iterate through stream items.
-pub fn sdk_02_stream_iteration_test() {
+pub fn sdk_02_stream_iteration_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -151,7 +153,8 @@ pub fn sdk_02_stream_iteration_test() {
 
 /// SDK-03: Multi-turn conversation with max_turns(3).
 /// Tests that multi-turn works and produces expected message flow.
-pub fn sdk_03_multi_turn_test() {
+pub fn sdk_03_multi_turn_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -227,7 +230,8 @@ pub fn sdk_03_multi_turn_test() {
 
 /// SDK-04: Session resume via with_resume().
 /// Tests that we can resume a previous session.
-pub fn sdk_04_session_resume_test() {
+pub fn sdk_04_session_resume_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

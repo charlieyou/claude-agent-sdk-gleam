@@ -28,7 +28,8 @@ import gleeunit/should
 
 /// SDK-50: Query with valid MCP config executes without error.
 /// Tests that with_mcp_config() correctly passes path to CLI.
-pub fn sdk_50_mcp_config_test() {
+pub fn sdk_50_mcp_config_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -77,7 +78,8 @@ pub fn sdk_50_mcp_config_test() {
 
 /// SDK-51: MCP configuration allows a query to start.
 /// Note: Stream is closed early to avoid hanging on MCP startup.
-pub fn sdk_51_mcp_tools_test() {
+pub fn sdk_51_mcp_tools_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -128,7 +130,8 @@ pub fn sdk_51_mcp_tools_test() {
 
 /// SDK-52: Non-existent MCP config doesn't crash query.
 /// Tests graceful handling of MCP configuration errors.
-pub fn sdk_52_mcp_failure_test() {
+pub fn sdk_52_mcp_failure_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

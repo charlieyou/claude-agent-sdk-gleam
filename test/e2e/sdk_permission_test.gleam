@@ -45,7 +45,8 @@ fn to_dynamic(a: a) -> Dynamic
 /// 3. Sends prompt "Run `echo testmarker`" to trigger Bash tool
 /// 4. Waits for permission handler to be invoked (fails if not invoked)
 /// 5. Verifies tool did NOT execute (PostToolUse hook should not fire)
-pub fn permission_denied_flow_test() {
+pub fn permission_denied_flow_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

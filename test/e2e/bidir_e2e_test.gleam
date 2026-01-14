@@ -212,7 +212,8 @@ fn collect_messages_loop(
 /// - Hook registration works with real CLI
 /// - Hook fires with tool_name when CLI uses a tool
 /// - Session completes successfully
-pub fn real_session_with_hook_test() {
+pub fn real_session_with_hook_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_cli_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -315,7 +316,8 @@ pub fn real_session_with_hook_test() {
 /// Validates:
 /// - Control request is sent to CLI
 /// - CLI responds with success or expected error
-pub fn real_control_operations_test() {
+pub fn real_control_operations_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_cli_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -432,7 +434,8 @@ pub fn real_control_operations_test() {
 /// - Permission handler is invoked for tool use
 /// - Deny response prevents tool execution
 /// - Session handles denial gracefully
-pub fn real_permission_callback_test() {
+pub fn real_permission_callback_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_cli_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -606,7 +609,8 @@ pub fn real_permission_callback_test() {
 /// - Interrupt control request is sent
 /// - Session stops without crash
 /// - Cleanup completes normally
-pub fn real_interrupt_test() {
+pub fn real_interrupt_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_cli_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -709,7 +713,8 @@ pub fn real_interrupt_test() {
 ///
 /// When --e2e, should return True if claude is in PATH.
 /// When --e2e is not set, should return False.
-pub fn is_cli_available_helper_test() {
+pub fn is_cli_available_helper_test_() {
+  use <- helpers.with_e2e_timeout()
   // This test runs unconditionally to validate the helper
   let result = is_cli_available()
 

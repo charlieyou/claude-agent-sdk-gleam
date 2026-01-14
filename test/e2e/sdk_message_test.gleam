@@ -30,7 +30,8 @@ import gleeunit/should
 
 /// SDK-10: Verify SystemMessage fields decode correctly.
 /// Tests session_id, tools, and mcp_servers fields.
-pub fn sdk_10_system_message_test() {
+pub fn sdk_10_system_message_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -149,7 +150,8 @@ pub fn sdk_10_system_message_test() {
 
 /// SDK-11: Verify AssistantMessage content blocks decode correctly.
 /// Tests that TextBlock content is accessible via pattern match.
-pub fn sdk_11_content_blocks_test() {
+pub fn sdk_11_content_blocks_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -230,7 +232,8 @@ pub fn sdk_11_content_blocks_test() {
 
 /// SDK-12: Verify tool flow (ToolUseBlock -> ToolResultBlock).
 /// Tests that tool use and result can be parsed without crashes.
-pub fn sdk_12_tool_result_test() {
+pub fn sdk_12_tool_result_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -365,7 +368,8 @@ pub fn sdk_12_tool_result_test() {
 
 /// SDK-13: Verify usage statistics parse correctly.
 /// Tests that token counts are valid integers >= 0.
-pub fn sdk_13_usage_data_test() {
+pub fn sdk_13_usage_data_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)
@@ -487,7 +491,8 @@ fn find_result_usage(messages: List(MessageEnvelope)) -> option.Option(Usage) {
 
 /// SDK-14: Verify error messages surface cleanly without panic.
 /// Tests error handling for invalid/error responses.
-pub fn sdk_14_error_message_test() {
+pub fn sdk_14_error_message_test_() {
+  use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

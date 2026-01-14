@@ -219,7 +219,8 @@ fn collect_messages_loop(
 /// - Configurable via StartConfig.default_hook_timeout_ms
 /// - On timeout: sends continue response with reason:"timeout"
 /// - Implementation: handle_hook_timeout() at bidir.gleam:1265
-pub fn sdk_37_hook_timeout_test() {
+pub fn sdk_37_hook_timeout_test_() {
+  use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
     Error(msg) -> {
       io.println(msg)

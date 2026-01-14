@@ -45,7 +45,8 @@ import gleeunit/should
 ///
 /// What's tested: SDK error mapping logic
 /// What's NOT tested: Actual CLI behavior with invalid credentials
-pub fn sdk_auth_01_invalid_api_key_test() {
+pub fn sdk_auth_01_invalid_api_key_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_auth_01_invalid_api_key")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
@@ -126,7 +127,8 @@ pub fn sdk_auth_01_invalid_api_key_test() {
 ///
 /// Tests that ProcessError includes actionable diagnostic fields.
 /// Uses mock runner - does NOT verify actual CLI produces these patterns.
-pub fn sdk_auth_02_error_type_mapping_test() {
+pub fn sdk_auth_02_error_type_mapping_test_() {
+  use <- helpers.with_e2e_timeout()
   let ctx = helpers.new_test_context("sdk_auth_02_error_type_mapping")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
