@@ -44,9 +44,9 @@ import gleam/otp/actor
 import gleam/string
 
 import claude_agent_sdk/control.{
-  type IncomingControlRequest, type IncomingControlResponse,
-  type IncomingMessage, type OutgoingControlRequest,
-  type OutgoingControlResponse, type PermissionMode, type HookRegistration,
+  type HookRegistration, type IncomingControlRequest,
+  type IncomingControlResponse, type IncomingMessage,
+  type OutgoingControlRequest, type OutgoingControlResponse, type PermissionMode,
   type PermissionResult, Allow, AllowAll, AllowOnce, CanUseTool, ControlRequest,
   ControlResponse, Deny, Edit, Error as ControlError, HookCallback, HookResponse,
   HookSuccess, Interrupt, McpMessage, PermissionResponse, RegularMessage,
@@ -67,6 +67,25 @@ fn to_dynamic(a: a) -> Dynamic
 // FFI: Compare two Dynamic values for exact equality (uses Erlang =:=)
 @external(erlang, "bidir_ffi", "dynamic_equals")
 fn dynamic_equals(a: Dynamic, b: Dynamic) -> Bool
+
+/// Check if a dynamic value is a port message tuple {Port, _}.
+///
+/// Used to filter select_other messages: only actual port messages should be
+/// routed to handle_port_message. Other messages are treated as unexpected.
+fn is_port_tuple(msg: Dynamic, port: port_ffi.Port) -> Bool {
+  // Decode first element of tuple and check if it equals our port
+  let outer_decoder = {
+    use first_elem <- decode.field(0, decode.dynamic)
+    decode.success(first_elem)
+  }
+  case decode.run(msg, outer_decoder) {
+    Ok(first_elem) -> {
+      let port_dyn = port_ffi.port_to_dynamic(port)
+      dynamic_equals(first_elem, port_dyn)
+    }
+    Error(_) -> False
+  }
+}
 
 // =============================================================================
 // Session Lifecycle
@@ -551,8 +570,11 @@ pub type ActorMessage {
   StartInitHandshake
   /// Init timeout fired.
   InitTimeoutFired
-  /// Raw port message from the CLI.
+  /// Raw port message from the CLI (validated as {Port, _} tuple).
   PortMessageRaw(msg: Dynamic)
+  /// Unexpected message that doesn't match port or internal message patterns.
+  /// Logged and discarded to prevent silent mis-routing.
+  UnexpectedMessage(msg: Dynamic)
   /// Send a control request to CLI.
   SendControlRequest(
     request: OutgoingControlRequest,
@@ -704,19 +726,13 @@ fn build_hook_registrations(
     )
 
   let registrations = list.reverse(registrations_rev)
-  let registrations =
-    case dict.size(permissions) > 0 {
-      True ->
-        [
-          control.HookRegistration(
-            permission_hook_callback_id,
-            "PreToolUse",
-            None,
-          ),
-          ..registrations
-        ]
-      False -> registrations
-    }
+  let registrations = case dict.size(permissions) > 0 {
+    True -> [
+      control.HookRegistration(permission_hook_callback_id, "PreToolUse", None),
+      ..registrations
+    ]
+    False -> registrations
+  }
   let updated_hooks =
     HookConfig(handlers: new_handlers, permission_handlers: permissions)
   #(registrations, updated_hooks, next_id)
@@ -866,7 +882,12 @@ fn start_internal(
           },
         )
         |> process.select_other(fn(msg_dyn: Dynamic) -> ActorMessage {
-          PortMessageRaw(msg_dyn)
+          // Filter: only wrap as PortMessageRaw if this is a 2-tuple with
+          // our port as the first element. Other messages are unexpected.
+          case is_port_tuple(msg_dyn, runner.port) {
+            True -> PortMessageRaw(msg_dyn)
+            False -> UnexpectedMessage(msg_dyn)
+          }
         })
 
       // Return the actor's subject to the caller with custom selector
@@ -1092,6 +1113,14 @@ fn handle_message(
     CancelPendingRequest(request_id) -> {
       handle_cancel_pending_request(state, request_id)
     }
+    UnexpectedMessage(msg) -> {
+      // Log and discard unexpected messages that reached our mailbox
+      // but don't match any known message pattern
+      io.println_error(
+        "bidir: unexpected message discarded: " <> string.inspect(msg),
+      )
+      actor.continue(state)
+    }
   }
 }
 
@@ -1133,7 +1162,9 @@ fn handle_hook_done(
 }
 
 fn permission_result_from_dynamic(result: Dynamic) -> PermissionResult {
-  let behavior = case decode.run(result, decode.at(["behavior"], decode.string)) {
+  let behavior = case
+    decode.run(result, decode.at(["behavior"], decode.string))
+  {
     Ok(value) -> value
     Error(_) -> "deny"
   }
@@ -1559,22 +1590,20 @@ fn handle_control_request(
           blocked_path,
         ) -> {
           // Convert to Dynamic input for handler
-          let base =
-            [
-              #("tool_name", to_dynamic(tool_name)),
-              #("tool_input", tool_input),
-              #("permission_suggestions", to_dynamic(permission_suggestions)),
-            ]
-          let input =
-            case blocked_path {
-              Some(path) ->
-                to_dynamic(
-                  dict.from_list(
-                    list.append(base, [#("blocked_path", to_dynamic(path))]),
-                  ),
-                )
-              None -> to_dynamic(dict.from_list(base))
-            }
+          let base = [
+            #("tool_name", to_dynamic(tool_name)),
+            #("tool_input", tool_input),
+            #("permission_suggestions", to_dynamic(permission_suggestions)),
+          ]
+          let input = case blocked_path {
+            Some(path) ->
+              to_dynamic(
+                dict.from_list(
+                  list.append(base, [#("blocked_path", to_dynamic(path))]),
+                ),
+              )
+            None -> to_dynamic(dict.from_list(base))
+          }
           dispatch_permission_callback(state, request_id, tool_name, input)
         }
         McpMessage(..) -> {
@@ -1608,7 +1637,8 @@ fn dispatch_hook_callback(
       case dict.size(state.pending_hooks) >= max_pending_hooks {
         True -> {
           // At capacity - send fail-open response without spawning
-          let fail_open_result = to_dynamic(dict.from_list([#("continue", True)]))
+          let fail_open_result =
+            to_dynamic(dict.from_list([#("continue", True)]))
           let response = HookResponse(request_id, HookSuccess(fail_open_result))
           send_control_response(state, response)
           actor.continue(state)
@@ -1631,37 +1661,37 @@ fn dispatch_hook_callback(
                 schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
 
               // Record the pending hook with timer and verify references
-          let pending =
-            PendingHook(
-              task_pid: task_pid,
-              monitor_ref: monitor_ref,
-              timer_ref: timer_ref,
-              verify_ref: verify_ref,
-              callback_id: callback_id,
-              request_id: request_id,
-              received_at: started_at,
-              callback_type: HookType,
-            )
-          let new_pending =
-            dict.insert(state.pending_hooks, request_id, pending)
-          let async_response =
-            HookResponse(
-              request_id,
-              HookSuccess(
-                to_dynamic(
-                  dict.from_list([
-                    #("async", to_dynamic(True)),
-                    #(
-                      "asyncTimeout",
-                      to_dynamic(state.default_hook_timeout_ms),
+              let pending =
+                PendingHook(
+                  task_pid: task_pid,
+                  monitor_ref: monitor_ref,
+                  timer_ref: timer_ref,
+                  verify_ref: verify_ref,
+                  callback_id: callback_id,
+                  request_id: request_id,
+                  received_at: started_at,
+                  callback_type: HookType,
+                )
+              let new_pending =
+                dict.insert(state.pending_hooks, request_id, pending)
+              let async_response =
+                HookResponse(
+                  request_id,
+                  HookSuccess(
+                    to_dynamic(
+                      dict.from_list([
+                        #("async", to_dynamic(True)),
+                        #(
+                          "asyncTimeout",
+                          to_dynamic(state.default_hook_timeout_ms),
+                        ),
+                      ]),
                     ),
-                  ]),
-                ),
-              ),
-            )
-          send_control_response(state, async_response)
-          actor.continue(SessionState(..state, pending_hooks: new_pending))
-        }
+                  ),
+                )
+              send_control_response(state, async_response)
+              actor.continue(SessionState(..state, pending_hooks: new_pending))
+            }
             Error(Nil) -> {
               // Unknown callback_id - send fail-open success response
               // This allows the CLI to proceed rather than hang waiting for a response
@@ -1691,54 +1721,52 @@ fn dispatch_permission_hook_callback(
     decode.success(#(tool_name, tool_input))
   }
 
-  let response_output =
-    case decode.run(input, decoder) {
-      Ok(#(tool_name, tool_input)) -> {
-        case dict.get(state.hooks.permission_handlers, tool_name) {
-          Ok(handler) -> {
-            let permission_input =
+  let response_output = case decode.run(input, decoder) {
+    Ok(#(tool_name, tool_input)) -> {
+      case dict.get(state.hooks.permission_handlers, tool_name) {
+        Ok(handler) -> {
+          let permission_input =
+            to_dynamic(
+              dict.from_list([
+                #("tool_name", to_dynamic(tool_name)),
+                #("tool_input", tool_input),
+              ]),
+            )
+          let result = handler(permission_input)
+          let behavior = case
+            decode.run(result, decode.at(["behavior"], decode.string))
+          {
+            Ok(value) -> value
+            Error(_) -> "allow"
+          }
+          let message = case
+            decode.run(result, decode.at(["message"], decode.string))
+          {
+            Ok(value) -> Some(value)
+            Error(_) -> None
+          }
+          case behavior {
+            "deny" -> {
+              let reason = case message {
+                Some(msg) -> msg
+                None -> "Permission denied"
+              }
               to_dynamic(
                 dict.from_list([
-                  #("tool_name", to_dynamic(tool_name)),
-                  #("tool_input", tool_input),
+                  #("continue", to_dynamic(False)),
+                  #("stopReason", to_dynamic(reason)),
                 ]),
               )
-            let result = handler(permission_input)
-            let behavior = case
-              decode.run(result, decode.at(["behavior"], decode.string))
-            {
-              Ok(value) -> value
-              Error(_) -> "allow"
             }
-            let message = case
-              decode.run(result, decode.at(["message"], decode.string))
-            {
-              Ok(value) -> Some(value)
-              Error(_) -> None
-            }
-            case behavior {
-              "deny" -> {
-                let reason = case message {
-                  Some(msg) -> msg
-                  None -> "Permission denied"
-                }
-                to_dynamic(
-                  dict.from_list([
-                    #("continue", to_dynamic(False)),
-                    #("stopReason", to_dynamic(reason)),
-                  ]),
-                )
-              }
-              _ ->
-                to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
-            }
+            _ -> to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
           }
-          Error(Nil) ->
-            to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
         }
+        Error(Nil) ->
+          to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
       }
-      Error(_) -> to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
     }
+    Error(_) -> to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
+  }
 
   let response = HookResponse(request_id, HookSuccess(response_output))
   send_control_response(state, response)
