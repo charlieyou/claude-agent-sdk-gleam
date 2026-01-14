@@ -15,6 +15,7 @@ import gleam/int
 import gleam/io
 import gleam/json
 import gleam/list
+import gleam/string
 import gleeunit/should
 
 // ============================================================================
@@ -161,16 +162,12 @@ fn run_iterations(
           Error(#(ctx, current, "Query failed: " <> error_to_string(err)))
         }
         helpers.QueryTimedOut -> {
-          // Timeout is acceptable - log and continue
-          helpers.log_info_with(ctx, "iteration_timeout", [
-            #("iteration", json.int(current)),
-          ])
-          |> fn(_) { Nil }
-
-          // Get resources after timeout
-          let counts = get_resource_counts()
-          log_resources(ctx, "iteration_timeout", current, counts)
-          run_iterations(ctx, current + 1, total, baseline, [counts, ..history])
+          // Timeout is a failure - queries must complete successfully per AC
+          Error(#(
+            ctx,
+            current,
+            "Query timed out - all queries must complete successfully",
+          ))
         }
         helpers.QuerySuccess(_result) -> {
           // Get resource counts after query completes
@@ -250,16 +247,7 @@ fn build_failure_reason(
 
   case parts {
     [] -> "Unknown resource issue"
-    _ -> "Resource leaks detected: " <> string_join(parts, ", ")
-  }
-}
-
-/// Join strings with separator.
-fn string_join(parts: List(String), sep: String) -> String {
-  case parts {
-    [] -> ""
-    [only] -> only
-    [first, ..rest] -> first <> sep <> string_join(rest, sep)
+    _ -> "Resource leaks detected: " <> string.join(parts, ", ")
   }
 }
 
