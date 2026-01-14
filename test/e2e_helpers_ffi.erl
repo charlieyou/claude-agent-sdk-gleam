@@ -126,9 +126,10 @@ port_close_safe(Port) ->
     end.
 
 %% Check if --soak flag is present in plain arguments.
+%% Uses get_plain_args/0 for consistency with has_e2e_flag() semantics.
 has_soak_flag() ->
-    Args = init:get_plain_arguments(),
-    lists:any(fun(Arg) -> Arg =:= "--soak" end, Args).
+    Args = get_plain_args(),
+    lists:any(fun(Arg) -> Arg =:= <<"--soak">> end, Args).
 
 %% Read file lines (for golden file parsing).
 %% Returns {ok, [Binary]} on success, {error, Reason} on failure.
