@@ -20,8 +20,10 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{AcceptEdits, Interrupt}
 import claude_agent_sdk/internal/bidir.{
-  type RequestResult, type SubscriberMessage, HookConfig, RequestSuccess,
-  Running, StartConfig,
+  type RequestResult, type SubscriberMessage,
+}
+import claude_agent_sdk/internal/bidir/actor.{
+  HookConfig, RequestSuccess, StartConfig,
 }
 import e2e/helpers
 import support/mock_bidir_runner
@@ -70,7 +72,7 @@ pub fn sdk_40_set_permission_mode_test_() {
   complete_init(mock, session)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send set_permission_mode request using async API
   let ctx = helpers.test_step(ctx, "send_set_permission_mode")
@@ -133,7 +135,7 @@ pub fn sdk_40b_set_permission_mode_error_test_() {
   let assert Ok(session) = bidir.start(mock.runner, config)
   let ctx = helpers.test_step(ctx, "complete_init_handshake")
   complete_init(mock, session)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send request
   let ctx = helpers.test_step(ctx, "send_permission_mode_request")
@@ -193,7 +195,7 @@ pub fn sdk_41_interrupt_test_() {
   let assert Ok(session) = bidir.start(mock.runner, config)
   let ctx = helpers.test_step(ctx, "complete_init_handshake")
   complete_init(mock, session)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send interrupt request using async API
   let ctx = helpers.test_step(ctx, "send_interrupt_request")
@@ -246,7 +248,7 @@ pub fn sdk_41b_interrupt_no_operation_test_() {
   let assert Ok(session) = bidir.start(mock.runner, config)
   let ctx = helpers.test_step(ctx, "complete_init_handshake")
   complete_init(mock, session)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send interrupt request
   let ctx = helpers.test_step(ctx, "send_interrupt_request")
@@ -327,7 +329,7 @@ pub fn sdk_42_hook_timeout_test_() {
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
   let ctx = helpers.test_step(ctx, "complete_init_handshake")
   complete_init(mock, session)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send hook_callback that will trigger the slow handler
   let ctx = helpers.test_step(ctx, "trigger_slow_hook")
@@ -389,7 +391,7 @@ pub fn sdk_43_malformed_response_test_() {
   let assert Ok(session) = bidir.start(mock.runner, config)
   let ctx = helpers.test_step(ctx, "complete_init_handshake")
   complete_init(mock, session)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Inject malformed JSON - should be logged but not crash
   let ctx = helpers.test_step(ctx, "inject_malformed_json")
@@ -397,14 +399,14 @@ pub fn sdk_43_malformed_response_test_() {
   process.sleep(50)
 
   // Session should still be running
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Inject another malformed message
   bidir.inject_message(session, "not json at all")
   process.sleep(50)
 
   // Session should still be running (graceful degradation)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   helpers.log_info(ctx, "malformed_json_handled")
 
@@ -447,7 +449,7 @@ pub fn sdk_43b_malformed_mixed_with_valid_test_() {
   let assert Ok(session) = bidir.start(mock.runner, config)
   let ctx = helpers.test_step(ctx, "complete_init_handshake")
   complete_init(mock, session)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send a valid control request
   let ctx = helpers.test_step(ctx, "send_valid_request")
@@ -474,7 +476,7 @@ pub fn sdk_43b_malformed_mixed_with_valid_test_() {
   // Should receive success despite malformed JSON in between
   let assert Ok(result) = process.receive(result_subject, 500)
   case result {
-    bidir.RequestSuccess(_) -> {
+    RequestSuccess(_) -> {
       helpers.log_info(ctx, "valid_response_received_despite_malformed")
       helpers.log_test_complete(
         ctx,
@@ -516,7 +518,7 @@ pub fn sdk_43c_shutdown_after_malformed_test_() {
   process.sleep(50)
 
   // Session should still be running
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Shutdown should work cleanly
   let ctx = helpers.test_step(ctx, "shutdown_session")
@@ -554,7 +556,7 @@ pub fn sdk_43d_truncated_json_test_() {
   process.sleep(50)
 
   // Session should still be running
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   helpers.log_info(ctx, "truncated_json_handled")
   helpers.log_test_complete(ctx, True, "Truncated JSON handled gracefully")

@@ -21,7 +21,7 @@ import claude_agent_sdk/control.{
   CanUseTool, ControlRequest, ControlResponse, Error as ControlError,
   HookCallback, McpMessage, RegularMessage, Success,
 }
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir/actor.{
   PendingRequest, RequestError, RequestSuccess, RouteHookCallback, RouteMcp,
   RoutePermission, RouteResponse, RouteSubscriber,
 }

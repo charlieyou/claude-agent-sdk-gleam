@@ -12,8 +12,10 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{RewindFiles}
 import claude_agent_sdk/internal/bidir.{
-  type RequestResult, type SubscriberMessage, CheckpointingNotEnabled,
-  RequestError, RequestSuccess, Running,
+  type RequestResult, type SubscriberMessage,
+}
+import claude_agent_sdk/internal/bidir/actor.{
+  CheckpointingNotEnabled, RequestError, RequestSuccess,
 }
 import support/mock_bidir_runner
 
@@ -52,7 +54,7 @@ pub fn rewind_files_sends_correct_wire_format_test() {
   process.sleep(50)
 
   // Verify we're in Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: call rewind_files(session, "msg_123")
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -101,7 +103,7 @@ pub fn rewind_files_fails_without_checkpointing_test() {
   process.sleep(50)
 
   // Verify we're in Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: try to rewind files
   let result = bidir.rewind_files(session, "msg_123", 1000)
@@ -156,7 +158,7 @@ pub fn rewind_files_receives_success_response_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: send rewind request and simulate CLI success response
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -213,7 +215,7 @@ pub fn rewind_files_receives_error_response_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: send rewind request
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -265,7 +267,7 @@ pub fn rewind_files_public_api_checkpointing_disabled_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: call the public rewind_files function
   let result = bidir.rewind_files(session, "msg_123", 1000)

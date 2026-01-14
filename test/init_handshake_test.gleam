@@ -15,9 +15,8 @@ import gleeunit/should
 import claude_agent_sdk/error.{
   CliExitedDuringInit, InitializationError, InitializationTimeout,
 }
-import claude_agent_sdk/internal/bidir.{
-  type SubscriberMessage, InitFailed, InitSent, Running, SessionEnded,
-}
+import claude_agent_sdk/internal/bidir.{type SubscriberMessage}
+import claude_agent_sdk/internal/bidir/actor.{InitFailed, SessionEnded}
 import support/mock_bidir_runner
 
 // =============================================================================
@@ -37,7 +36,7 @@ pub fn init_request_sent_on_start_test() {
 
   // Verify we transition to InitSent
   let lifecycle = bidir.get_lifecycle(session, 1000)
-  should.equal(lifecycle, InitSent)
+  should.equal(lifecycle, bidir.init_sent())
 
   // Verify init request was sent
   let assert Ok(written) = process.receive(mock.writes, 500)
@@ -67,7 +66,7 @@ pub fn success_response_transitions_to_running_test() {
   let assert Ok(_written) = process.receive(mock.writes, 500)
 
   // Should be in InitSent
-  should.equal(bidir.get_lifecycle(session, 1000), InitSent)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.init_sent())
 
   // Send success response directly to actor
   let success_json =
@@ -78,7 +77,7 @@ pub fn success_response_transitions_to_running_test() {
   process.sleep(50)
 
   // Should transition to Running
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Cleanup
   bidir.shutdown(session)
@@ -131,7 +130,7 @@ pub fn error_response_transitions_to_failed_test() {
   let assert Ok(_written) = process.receive(mock.writes, 500)
 
   // Should be in InitSent
-  should.equal(bidir.get_lifecycle(session, 1000), InitSent)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.init_sent())
 
   // Send error response
   let error_json =
@@ -213,7 +212,7 @@ pub fn wrong_request_id_ignored_test() {
   process.sleep(50)
 
   // Should still be in InitSent (wrong ID ignored)
-  should.equal(bidir.get_lifecycle(session, 1000), InitSent)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.init_sent())
 
   // Cleanup
   bidir.shutdown(session)
@@ -237,7 +236,7 @@ pub fn port_closed_during_init_transitions_to_failed_test() {
   let assert Ok(_written) = process.receive(mock.writes, 500)
 
   // Should be in InitSent
-  should.equal(bidir.get_lifecycle(session, 1000), InitSent)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.init_sent())
 
   // Simulate port closed
   bidir.inject_port_closed(session)

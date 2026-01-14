@@ -23,8 +23,10 @@
 import claude_agent_sdk/control.{Default, Interrupt, SetModel, SetPermissionMode}
 import claude_agent_sdk/error.{type StartError, SpawnFailed}
 import claude_agent_sdk/internal/bidir.{
-  type HookConfig, type RequestResult, type SubscriberMessage, CliMessage,
-  HookConfig, RequestSuccess, Running, SessionEnded,
+  type HookConfig, type RequestResult, type SubscriberMessage,
+}
+import claude_agent_sdk/internal/bidir/actor.{
+  CliMessage, HookConfig, RequestSuccess, Running, SessionEnded,
 }
 import claude_agent_sdk/internal/bidir_runner
 import gleam/dict

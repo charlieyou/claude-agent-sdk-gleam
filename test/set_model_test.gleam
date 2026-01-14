@@ -13,8 +13,10 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{SetModel}
 import claude_agent_sdk/internal/bidir.{
-  type RequestResult, type SubscriberMessage, RequestError, RequestSuccess,
-  Running, SetModelSessionStopped,
+  type RequestResult, type SubscriberMessage,
+}
+import claude_agent_sdk/internal/bidir/actor.{
+  RequestError, RequestSuccess, SetModelSessionStopped,
 }
 import support/mock_bidir_runner
 
@@ -41,7 +43,7 @@ pub fn set_model_sends_correct_wire_format_test() {
   process.sleep(50)
 
   // Verify we're in Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: send set_model request
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -275,7 +277,7 @@ pub fn set_model_sync_returns_session_stopped_test() {
   process.sleep(50)
 
   // Verify we're in Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Shutdown the session
   bidir.shutdown(session)

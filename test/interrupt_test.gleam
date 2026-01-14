@@ -16,8 +16,10 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{Interrupt}
 import claude_agent_sdk/internal/bidir.{
-  type RequestResult, type SubscriberMessage, InterruptTimeout, RequestError,
-  RequestSuccess, RequestTimeout, Running,
+  type RequestResult, type SubscriberMessage,
+}
+import claude_agent_sdk/internal/bidir/actor.{
+  InterruptTimeout, RequestError, RequestSuccess, RequestTimeout,
 }
 import support/mock_bidir_runner
 
@@ -47,7 +49,7 @@ pub fn interrupt_sends_correct_wire_format_test() {
   process.sleep(50)
 
   // Verify we're in Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send interrupt request using async API
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -94,7 +96,7 @@ pub fn interrupt_receives_success_response_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send interrupt request
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -138,7 +140,7 @@ pub fn interrupt_receives_error_response_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send interrupt request
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -192,7 +194,7 @@ pub fn interrupt_timeout_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send interrupt request but don't respond
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -247,7 +249,7 @@ pub fn interrupt_api_timeout_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Call interrupt without CLI response - actor's timeout fires at ~100ms
   let result = bidir.interrupt(session)
@@ -281,7 +283,7 @@ pub fn interrupt_api_session_stopped_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Shutdown the session
   bidir.shutdown(session)

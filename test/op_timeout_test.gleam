@@ -13,8 +13,10 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{Interrupt}
 import claude_agent_sdk/internal/bidir.{
-  type RequestResult, type SubscriberMessage, RequestSessionStopped,
-  RequestSuccess, Running,
+  type RequestResult, type SubscriberMessage,
+}
+import claude_agent_sdk/internal/bidir/actor.{
+  RequestSessionStopped, RequestSuccess,
 }
 import support/mock_bidir_runner
 
@@ -45,7 +47,7 @@ pub fn session_stop_cancels_pending_requests_test() {
   process.sleep(50)
 
   // Verify we're in Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send a control request that we won't respond to
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -106,7 +108,7 @@ pub fn response_before_timeout_cancels_timer_test() {
   process.sleep(50)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Send control request
   let result_subject: process.Subject(RequestResult) = process.new_subject()
@@ -131,7 +133,7 @@ pub fn response_before_timeout_cancels_timer_test() {
   process.sleep(150)
 
   // Actor should still be alive and responsive (stale timeout was handled gracefully)
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Cleanup
   bidir.shutdown(session)

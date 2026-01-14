@@ -10,7 +10,7 @@ import claude_agent_sdk/error.{
   CliExitedDuringInit, CliExitedDuringStartup, InitializationError,
   InitializationTimeout, RuntimeError,
 }
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir/actor.{
   CliSpawned, ErrorOccurred, Failed, InitSent, InitSuccess, InitTimeout,
   InvalidTransition, PortClosed, Running, Starting, StopRequested, Stopped,
   transition,

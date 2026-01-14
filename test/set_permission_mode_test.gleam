@@ -10,7 +10,7 @@ import gleam/string
 import gleeunit/should
 
 import claude_agent_sdk/control.{AcceptEdits, BypassPermissions, Default, Plan}
-import claude_agent_sdk/internal/bidir.{type SubscriberMessage, Running}
+import claude_agent_sdk/internal/bidir.{type SubscriberMessage}
 import support/mock_bidir_runner
 
 // =============================================================================
@@ -151,7 +151,7 @@ pub fn set_permission_mode_receives_success_test() {
   complete_init(mock, session)
 
   // Verify Running state
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Act: send set_permission_mode request
   let result_subject: process.Subject(bidir.RequestResult) =
@@ -357,7 +357,7 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
   should.be_error(receive_result)
 
   // Actor should still be alive and responsive
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
 
   // Cleanup
   bidir.shutdown(session)

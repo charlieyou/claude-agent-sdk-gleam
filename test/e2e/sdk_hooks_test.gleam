@@ -19,9 +19,9 @@
 /// gleam test -- --only sdk_hooks
 /// ```
 import claude_agent_sdk/error.{type StartError, SpawnFailed}
-import claude_agent_sdk/internal/bidir.{
-  type HookConfig, type SubscriberMessage, CliMessage, HookConfig, Running,
-  SessionEnded,
+import claude_agent_sdk/internal/bidir.{type HookConfig, type SubscriberMessage}
+import claude_agent_sdk/internal/bidir/actor.{
+  CliMessage, HookConfig, Running, SessionEnded,
 }
 import claude_agent_sdk/internal/bidir_runner
 import e2e/helpers.{get_monotonic_ms, skip_if_no_e2e}
