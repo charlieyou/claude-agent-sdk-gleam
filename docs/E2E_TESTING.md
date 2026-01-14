@@ -15,7 +15,7 @@ This document explains how to run E2E tests that validate the SDK against the re
 gleam test -- --e2e
 
 # Run specific test
-gleam test -- --only sdk_bidir_test -- --e2e
+gleam test -- --only bidir_e2e_test -- --e2e
 ```
 
 ## Cost Controls
@@ -89,14 +89,17 @@ During test runs, human-readable output is printed to stdout:
 [INFO] sdk_01_basic_query:3 test_complete
 ```
 
-## Test Suites
+## E2E Test Suites (Real CLI)
 
-### SDK Bidir Tests (`test/e2e/sdk_bidir_test.gleam`)
+These tests use the real Claude CLI and require the `--e2e` flag:
 
-Validates bidirectional protocol operations:
-- Session creation and state transitions
-- Control message round-trips
-- Error handling for invalid operations
+### Bidir E2E Tests (`test/e2e/bidir_e2e_test.gleam`)
+
+Validates bidirectional protocol with real CLI:
+- Real session with hook registration and firing
+- Control operations (set_model, interrupt)
+- Permission callback handling
+- Graceful interrupt during operation
 
 ### SDK Hooks Tests (`test/e2e/sdk_hooks_test.gleam`)
 
@@ -119,11 +122,10 @@ Validates query options:
 - System prompt configuration
 - Max tokens and other limits
 
-### SDK Error Tests (`test/e2e/sdk_error_serial_test.gleam`, `sdk_error_offline_test.gleam`)
+### SDK Error Serial Tests (`test/e2e/sdk_error_serial_test.gleam`)
 
-Validates error conditions:
+Validates error conditions with real CLI:
 - Authentication failures
-- Network errors
 - Invalid request handling
 
 ### SDK Stream Tests (`test/e2e/sdk_stream_test.gleam`)
@@ -138,6 +140,23 @@ Validates stream lifecycle:
 Validates MCP server configuration:
 - Server registration
 - Tool discovery via MCP
+
+## Offline Protocol Tests (Mock-Based)
+
+These tests use mock runners for deterministic testing and run without `--e2e`:
+
+### SDK Bidir Tests (`test/e2e/sdk_bidir_test.gleam`)
+
+Tests bidirectional protocol logic with `mock_bidir_runner`:
+- Session creation and state transitions
+- Control message round-trips
+- Error handling for invalid operations
+
+### SDK Error Offline Tests (`test/e2e/sdk_error_offline_test.gleam`)
+
+Tests error handling with `test_runner`:
+- Network error simulation
+- Malformed response handling
 
 ## How Skipping Works
 
@@ -270,6 +289,15 @@ query_and_consume_with_timeout(
 ## Example Test Pattern
 
 ```gleam
+import claude_agent_sdk/error
+import e2e/helpers.{
+  QueryFailure, QuerySuccess, QueryTimedOut,
+  is_cli_available, log_error, log_test_complete,
+  new_test_context, query_and_consume_with_timeout,
+  skip_if_no_e2e, test_step,
+}
+import gleam/io
+
 pub fn my_e2e_test() {
   case skip_if_no_e2e() {
     Error(msg) -> {
@@ -293,7 +321,7 @@ pub fn my_e2e_test() {
               log_test_complete(ctx, True, "Success")
             }
             QueryFailure(err) -> {
-              log_error(ctx, "query_failed", error.to_string(err))
+              log_error(ctx, "query_failed", error.error_to_string(err))
               log_test_complete(ctx, False, "Query failed")
             }
             QueryTimedOut -> {

@@ -5,9 +5,13 @@ coverage thresholds, and how to run and interpret each test category.
 
 ## No-Mock Policy
 
-This SDK uses a **strict no-mock policy** for all tests.
+This SDK uses a **strict no-mock policy** for production code paths tested via
+E2E tests with the real Claude CLI. However, some test files in `test/e2e/` use
+mock runners (`test_runner`, `mock_bidir_runner`) to test protocol logic in
+isolation without requiring CLI access. These mock-based tests are categorized
+as "offline tests" rather than true E2E tests.
 
-### Disallowed
+### Disallowed in E2E Tests
 
 - Test runners that simulate CLI output
 - ETS-backed fake stream state
@@ -18,8 +22,9 @@ This SDK uses a **strict no-mock policy** for all tests.
 
 - Pure-function unit tests (parsers, builders, option resolution)
 - Real port_ffi against deterministic helpers (`/bin/echo`)
-- Real CLI integration tests (env-gated)
+- Real CLI E2E tests (gated by `--e2e` flag)
 - Fixtures representing real or spec-defined JSON payloads
+- Offline protocol tests using mock runners (for deterministic testing)
 
 See [plans/testing-policy.md](../plans/testing-policy.md) for full policy details.
 
@@ -46,20 +51,27 @@ Tests that use real port_ffi against deterministic OS commands:
 
 These run by default with `gleam test`.
 
+### Offline Protocol Tests
+
+Tests in `test/e2e/` that use mock runners for deterministic protocol testing:
+
+- `sdk_bidir_test.gleam` - Bidirectional protocol with mock runner
+- `sdk_error_offline_test.gleam` - Error handling with mock runner
+
+These run by default with `gleam test` (no `--e2e` flag required).
+
 ### Integration Tests
 
-Require `CLAUDE_INTEGRATION_TEST=1`:
+Located in `test/query_integration_test.gleam`:
 
 - PATH lookup and CLI discovery
 - CLI version detection
 - Auth availability checks
-- Real query and stream behavior
+- Preflight validation
 
-```bash
-CLAUDE_INTEGRATION_TEST=1 gleam test
-```
+These run by default with `gleam test`.
 
-### E2E Tests
+### E2E Tests (Real CLI)
 
 Full scripted workflows with real Claude CLI. Require `--e2e` flag:
 
@@ -118,7 +130,7 @@ is excluded as a whole for simplicity.
 These modules are covered by:
 
 - Phase 0 runtime tests (port_ffi behavior)
-- Integration tests (`CLAUDE_INTEGRATION_TEST=1`)
+- Integration tests (CLI discovery/version checks)
 - E2E tests (`gleam test -- --e2e`)
 
 ## Running Tests
@@ -126,13 +138,10 @@ These modules are covered by:
 ### Quick Reference
 
 ```bash
-# Unit tests only (default)
+# Unit + offline + integration tests (default)
 gleam test
 
-# Include integration tests (requires CLI + auth)
-CLAUDE_INTEGRATION_TEST=1 gleam test
-
-# E2E tests (requires CLI + auth, incurs API costs)
+# E2E tests with real CLI (requires CLI + auth, incurs API costs)
 gleam test -- --e2e
 
 # Coverage with threshold enforcement
@@ -148,10 +157,11 @@ gleam test -- --e2e
 |----------|-----------|--------------|
 | Unit | `gleam test` | None |
 | Phase 0 | `gleam test` | None |
-| Integration | `CLAUDE_INTEGRATION_TEST=1 gleam test` | Claude CLI installed + authenticated |
-| E2E | `gleam test -- --e2e` | Claude CLI installed + authenticated |
+| Offline Protocol | `gleam test` | None |
+| Integration | `gleam test` | None (uses fixtures/mocks for discovery tests) |
+| E2E (Real CLI) | `gleam test -- --e2e` | Claude CLI installed + authenticated |
 
-### Prerequisites for CLI Tests
+### Prerequisites for E2E Tests
 
 1. Claude CLI installed (`claude --version` works)
 2. Authentication via `claude auth login` (interactive)
