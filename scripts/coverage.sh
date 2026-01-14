@@ -16,6 +16,9 @@
 # Note: This script instruments modules with cover BEFORE running tests,
 # ensuring accurate coverage measurement. Tests are executed via the
 # Erlang runtime with cover active, not via `gleam test`.
+#
+# Environment variables are inherited, so CLAUDE_INTEGRATION_TEST=1
+# will gate integration tests the same as with `gleam test`.
 
 set -euo pipefail
 
@@ -102,10 +105,13 @@ if [[ ! -d "$EBIN_DIR" ]]; then
     exit 2
 fi
 
-# Get all dep paths for code loading
+# Discover all dependency ebin paths dynamically
 DEP_PATHS=""
-for dep in gleeunit gleam_stdlib gleam_erlang gleam_json gleam_otp simplifile gleam_yielder filepath; do
-    DEP_PATHS="$DEP_PATHS -pa build/dev/erlang/$dep/ebin"
+for dep_dir in build/dev/erlang/*/ebin; do
+    # Skip the main project - it's added separately
+    if [[ "$dep_dir" != "$EBIN_DIR" ]]; then
+        DEP_PATHS="$DEP_PATHS -pa $dep_dir"
+    fi
 done
 
 # Run coverage analysis with tests executed under cover instrumentation
@@ -114,10 +120,11 @@ echo "Running tests under coverage..." >&2
 coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
     %% Ensure all dependency modules are loaded first
     %% This is required because cover:compile_beam can interfere with module loading
-    DepDirs = ["gleeunit", "gleam_stdlib", "gleam_erlang", "gleam_json",
-               "gleam_otp", "simplifile", "gleam_yielder", "filepath"],
-    lists:foreach(fun(Dep) ->
-        Dir = "build/dev/erlang/" ++ Dep ++ "/ebin",
+    %% Discover all dep dirs dynamically (except the main project)
+    AllDepDirs = filelib:wildcard("build/dev/erlang/*/ebin"),
+    ProjectEbin = "'"$EBIN_DIR"'",
+    DepDirs = [D || D <- AllDepDirs, D =/= ProjectEbin],
+    lists:foreach(fun(Dir) ->
         DepBeams = filelib:wildcard(Dir ++ "/*.beam"),
         lists:foreach(fun(B) ->
             Mod = list_to_atom(filename:basename(B, ".beam")),
@@ -158,8 +165,16 @@ coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
                               IsTestFun(atom_to_list(Fun))],
             Results = lists:map(fun(Fun) ->
                 try
-                    Mod:Fun(),
-                    {Fun, pass}
+                    case Mod:Fun() of
+                        %% Gleam error tuple indicates test failure
+                        {error, Err} ->
+                            io:format(standard_error, "FAIL ~p:~p - error:~p~n",
+                                      [Mod, Fun, Err]),
+                            {Fun, fail};
+                        %% Any other return (ok, nil, {ok,_}) is success
+                        _ ->
+                            {Fun, pass}
+                    end
                 catch
                     throw:skip -> {Fun, skip};
                     Class:Reason ->
@@ -169,7 +184,8 @@ coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
                 end
             end, TestFuns),
             {Mod, Results}
-        catch _:_ ->
+        catch C:R ->
+            io:format(standard_error, "ERROR loading ~p: ~p:~p~n", [Mod, C, R]),
             {Mod, []}
         end
     end, TestMods),
