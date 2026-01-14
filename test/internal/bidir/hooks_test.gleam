@@ -7,7 +7,7 @@
 /// - dispatch_permission finds handlers by tool_name
 /// - fail-open (HookType) vs fail-deny (PermissionType) semantics
 import gleam/dict
-import gleam/dynamic.{type Dynamic}
+import gleam/dynamic
 import gleeunit/should
 
 import claude_agent_sdk/internal/bidir/hooks.{
@@ -17,7 +17,7 @@ import claude_agent_sdk/internal/bidir/hooks.{
 
 // FFI for creating Dynamic values
 @external(erlang, "gleam_stdlib", "identity")
-fn to_dynamic(a: a) -> Dynamic
+fn to_dynamic(a: a) -> dynamic.Dynamic
 
 // =============================================================================
 // empty_hook_config Tests
@@ -38,7 +38,9 @@ pub fn empty_hook_config_has_no_permission_handlers_test() {
 // =============================================================================
 
 pub fn dispatch_hook_finds_registered_handler_test() {
-  let handler = fn(_input: Dynamic) -> Dynamic { to_dynamic("result") }
+  let handler = fn(_input: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("result")
+  }
   let config =
     HookConfig(
       handlers: dict.from_list([#("hook_0", handler)]),
@@ -55,7 +57,9 @@ pub fn dispatch_hook_finds_registered_handler_test() {
 }
 
 pub fn dispatch_hook_returns_hook_type_test() {
-  let handler = fn(_input: Dynamic) -> Dynamic { to_dynamic(True) }
+  let handler = fn(_input: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic(True)
+  }
   let config =
     HookConfig(
       handlers: dict.from_list([#("test_hook", handler)]),
@@ -86,7 +90,9 @@ pub fn dispatch_hook_returns_no_handler_preserves_id_test() {
 // =============================================================================
 
 pub fn dispatch_permission_finds_registered_handler_test() {
-  let handler = fn(_input: Dynamic) -> Dynamic { to_dynamic("allow") }
+  let handler = fn(_input: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("allow")
+  }
   let config =
     HookConfig(
       handlers: dict.new(),
@@ -103,7 +109,9 @@ pub fn dispatch_permission_finds_registered_handler_test() {
 }
 
 pub fn dispatch_permission_returns_permission_type_test() {
-  let handler = fn(_input: Dynamic) -> Dynamic { to_dynamic("deny") }
+  let handler = fn(_input: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("deny")
+  }
   let config =
     HookConfig(
       handlers: dict.new(),
@@ -128,7 +136,7 @@ pub fn dispatch_permission_returns_no_handler_for_unknown_tool_test() {
 // =============================================================================
 
 pub fn dispatch_hook_handler_can_be_invoked_test() {
-  let handler = fn(input: Dynamic) -> Dynamic {
+  let handler = fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
     // Return the input wrapped in a tuple to verify it was called
     to_dynamic(#("received", input))
   }
@@ -150,7 +158,9 @@ pub fn dispatch_hook_handler_can_be_invoked_test() {
 }
 
 pub fn dispatch_permission_handler_can_be_invoked_test() {
-  let handler = fn(_input: Dynamic) -> Dynamic { to_dynamic("allowed") }
+  let handler = fn(_input: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("allowed")
+  }
   let config =
     HookConfig(
       handlers: dict.new(),
@@ -172,8 +182,12 @@ pub fn dispatch_permission_handler_can_be_invoked_test() {
 // =============================================================================
 
 pub fn multiple_hooks_dispatched_correctly_test() {
-  let handler1 = fn(_: Dynamic) -> Dynamic { to_dynamic("handler1") }
-  let handler2 = fn(_: Dynamic) -> Dynamic { to_dynamic("handler2") }
+  let handler1 = fn(_: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("handler1")
+  }
+  let handler2 = fn(_: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("handler2")
+  }
   let config =
     HookConfig(
       handlers: dict.from_list([#("hook_a", handler1), #("hook_b", handler2)]),
@@ -192,8 +206,12 @@ pub fn multiple_hooks_dispatched_correctly_test() {
 }
 
 pub fn hooks_and_permissions_dont_interfere_test() {
-  let hook_handler = fn(_: Dynamic) -> Dynamic { to_dynamic("hook") }
-  let perm_handler = fn(_: Dynamic) -> Dynamic { to_dynamic("perm") }
+  let hook_handler = fn(_: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("hook")
+  }
+  let perm_handler = fn(_: dynamic.Dynamic) -> dynamic.Dynamic {
+    to_dynamic("perm")
+  }
   let config =
     HookConfig(
       handlers: dict.from_list([#("test_id", hook_handler)]),
@@ -217,7 +235,7 @@ pub fn hooks_and_permissions_dont_interfere_test() {
 
 pub fn hook_dispatch_indicates_fail_open_semantics_test() {
   // HookType indicates fail-open: if handler crashes/times out, operation continues
-  let handler = fn(_: Dynamic) -> Dynamic { to_dynamic(Nil) }
+  let handler = fn(_: dynamic.Dynamic) -> dynamic.Dynamic { to_dynamic(Nil) }
   let config =
     HookConfig(
       handlers: dict.from_list([#("hook", handler)]),
@@ -235,7 +253,7 @@ pub fn hook_dispatch_indicates_fail_open_semantics_test() {
 
 pub fn permission_dispatch_indicates_fail_deny_semantics_test() {
   // PermissionType indicates fail-deny: if handler crashes/times out, operation denied
-  let handler = fn(_: Dynamic) -> Dynamic { to_dynamic(Nil) }
+  let handler = fn(_: dynamic.Dynamic) -> dynamic.Dynamic { to_dynamic(Nil) }
   let config =
     HookConfig(
       handlers: dict.new(),
