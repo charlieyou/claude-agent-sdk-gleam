@@ -4,6 +4,12 @@
 /// with clear error types. They use mock runners for isolation - no real CLI
 /// calls and no global env mutation.
 ///
+/// ## Why Mock Instead of Real CLI?
+/// The real Claude CLI hangs waiting for interactive authentication when run
+/// without valid credentials in a non-TTY environment. Using mocks allows us to
+/// test the SDK's error handling of the auth failure pattern (exit code 1,
+/// empty stdout) without the test timing out.
+///
 /// ## Test Cases
 /// - SDK-AUTH-01: Invalid API key produces clear authentication error
 /// - SDK-AUTH-02: Error maps to SDK error type (ProcessError with diagnostic)
@@ -20,10 +26,6 @@ import gleam/dynamic
 import gleam/json
 import gleam/string
 import gleeunit/should
-
-// Helper to convert any value to Dynamic (identity function in Erlang)
-@external(erlang, "gleam_stdlib", "identity")
-fn to_dynamic(a: a) -> dynamic.Dynamic
 
 // ============================================================================
 // SDK-AUTH-01: Authentication Error Handling
@@ -47,7 +49,7 @@ pub fn sdk_auth_01_invalid_api_key_test() {
   // - No data emitted (empty stdout, error only on stderr which we don't capture)
   let mock_runner =
     runner.test_runner(
-      on_spawn: fn(_cmd, _args, _cwd) { Ok(to_dynamic(Nil)) },
+      on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.nil()) },
       on_read: fn(_handle) {
         // Simulate auth failure: immediate exit with code 1, no stdout
         // This matches the real CLI behavior when ANTHROPIC_API_KEY is invalid
@@ -133,7 +135,7 @@ pub fn sdk_auth_02_error_type_mapping_test() {
   // Exit 1 with empty stdout = authentication required
   let mock_runner =
     runner.test_runner(
-      on_spawn: fn(_cmd, _args, _cwd) { Ok(to_dynamic(Nil)) },
+      on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.nil()) },
       on_read: fn(_handle) { runner.ExitStatus(1) },
       on_close: fn(_handle) { Nil },
     )
