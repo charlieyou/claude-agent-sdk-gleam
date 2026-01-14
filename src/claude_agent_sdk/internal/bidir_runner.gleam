@@ -4,6 +4,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/atom
 
+import claude_agent_sdk/error.{type StartError, SpawnFailed}
 import claude_agent_sdk/internal/port_ffi.{
   type Port, type WriteError, ffi_close_port, find_cli_path, port_write,
   wrap_port,
@@ -21,14 +22,6 @@ pub type BidirRunner {
     write: fn(String) -> Result(Nil, WriteError),
     close: fn() -> Nil,
   )
-}
-
-/// Error type for BidirRunner operations.
-pub type StartError {
-  /// Placeholder error - start() not yet implemented.
-  NotImplemented
-  /// Failed to spawn the CLI process.
-  SpawnFailed(String)
 }
 
 /// FFI binding for open_port_bidir - spawns executable with bidir options.

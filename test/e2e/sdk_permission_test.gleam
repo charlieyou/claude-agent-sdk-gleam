@@ -14,6 +14,7 @@
 /// # Ensure the Claude CLI is authenticated (e.g., `claude auth login`)
 /// gleam test -- --only sdk_permission
 /// ```
+import claude_agent_sdk/error.{type StartError, SpawnFailed}
 import claude_agent_sdk/internal/bidir.{
   type HookConfig, type SubscriberMessage, HookConfig, Running, SessionEnded,
 }
@@ -277,11 +278,11 @@ fn start_session_with_hooks(
   }
 }
 
-/// Convert bidir_runner.StartError to string
-fn bidir_runner_error_to_string(err: bidir_runner.StartError) -> String {
+/// Convert StartError to string
+fn bidir_runner_error_to_string(err: StartError) -> String {
   case err {
-    bidir_runner.NotImplemented -> "NotImplemented"
-    bidir_runner.SpawnFailed(reason) -> "SpawnFailed: " <> reason
+    SpawnFailed(reason) -> "SpawnFailed: " <> reason
+    _ -> "Other StartError"
   }
 }
 

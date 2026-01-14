@@ -1,3 +1,4 @@
+import claude_agent_sdk/error.{SpawnFailed}
 import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/port_ffi
 import gleam/bit_array
@@ -11,18 +12,18 @@ import support/mock_bidir_runner
 pub fn bidir_runner_start_cli_test() {
   let result = bidir_runner.start([])
   case result {
-    Error(bidir_runner.SpawnFailed(_)) -> {
+    Error(SpawnFailed(_)) -> {
       // Expected: claude not in PATH
       should.be_true(True)
-    }
-    Error(bidir_runner.NotImplemented) -> {
-      // Should never happen - start() is implemented
-      should.fail()
     }
     Ok(runner) -> {
       // Claude is in PATH - verify we can close cleanly
       runner.close()
       should.be_true(True)
+    }
+    Error(_) -> {
+      // Other errors (e.g., Timeout, ActorStartFailed) - unexpected
+      should.fail()
     }
   }
 }
@@ -31,7 +32,7 @@ pub fn bidir_runner_start_cli_test() {
 pub fn bidir_runner_start_with_invalid_path_test() {
   let result = bidir_runner.start_with_path("/nonexistent/path/to/claude", [])
   case result {
-    Error(bidir_runner.SpawnFailed(_)) -> should.be_true(True)
+    Error(SpawnFailed(_)) -> should.be_true(True)
     _ -> should.fail()
   }
 }

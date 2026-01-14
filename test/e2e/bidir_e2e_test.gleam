@@ -21,6 +21,7 @@
 /// - Permission callback handling
 /// - Graceful interrupt during operation
 import claude_agent_sdk/control.{Default, Interrupt, SetModel, SetPermissionMode}
+import claude_agent_sdk/error.{type StartError, SpawnFailed}
 import claude_agent_sdk/internal/bidir.{
   type HookConfig, type RequestResult, type SubscriberMessage, CliMessage,
   HookConfig, RequestSuccess, Running, SessionEnded,
@@ -110,10 +111,10 @@ fn start_session_with_hooks(
   }
 }
 
-fn runner_error_to_string(err: bidir_runner.StartError) -> String {
+fn runner_error_to_string(err: StartError) -> String {
   case err {
-    bidir_runner.NotImplemented -> "NotImplemented"
-    bidir_runner.SpawnFailed(reason) -> "SpawnFailed: " <> reason
+    SpawnFailed(reason) -> "SpawnFailed: " <> reason
+    _ -> "Other StartError"
   }
 }
 

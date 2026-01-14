@@ -629,7 +629,8 @@ pub fn start_session(
   _prompt: String,
   _options: QueryOptions,
 ) -> Result(Session, StartError) {
-  Error(error.NotImplemented)
+  // TODO: Implement actual session start - T003 will extract actor logic
+  Error(error.SpawnFailed(reason: "start_session not yet implemented"))
 }
 
 // =============================================================================

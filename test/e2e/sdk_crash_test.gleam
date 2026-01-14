@@ -78,55 +78,56 @@ pub fn sdk_crash_handling_test_() {
       ])
 
       // Receive kill subject from the spawned process
-      let #(kill_subject, first_msg_opt) =
-        case process.receive(result_subject, 5000) {
-          Ok(KillChannelReady(subject)) -> #(subject, None)
-          Ok(FirstMessageReceived(first_msg)) -> {
-            case process.receive(result_subject, 5000) {
-              Ok(KillChannelReady(subject)) -> #(subject, Some(first_msg))
-              Ok(_) -> {
-                helpers.log_error(
-                  ctx,
-                  "unexpected_result",
-                  "Unexpected message while waiting for kill channel",
-                )
-                helpers.log_test_complete(ctx, False, "unexpected result")
-                should.fail()
-                #(process.new_subject(), Some(first_msg))
-              }
-              Error(Nil) -> {
-                helpers.log_error(
-                  ctx,
-                  "kill_channel_timeout",
-                  "Kill channel not ready within 5s",
-                )
-                helpers.log_test_complete(ctx, False, "kill channel timeout")
-                should.fail()
-                #(process.new_subject(), Some(first_msg))
-              }
+      let #(kill_subject, first_msg_opt) = case
+        process.receive(result_subject, 5000)
+      {
+        Ok(KillChannelReady(subject)) -> #(subject, None)
+        Ok(FirstMessageReceived(first_msg)) -> {
+          case process.receive(result_subject, 5000) {
+            Ok(KillChannelReady(subject)) -> #(subject, Some(first_msg))
+            Ok(_) -> {
+              helpers.log_error(
+                ctx,
+                "unexpected_result",
+                "Unexpected message while waiting for kill channel",
+              )
+              helpers.log_test_complete(ctx, False, "unexpected result")
+              should.fail()
+              #(process.new_subject(), Some(first_msg))
+            }
+            Error(Nil) -> {
+              helpers.log_error(
+                ctx,
+                "kill_channel_timeout",
+                "Kill channel not ready within 5s",
+              )
+              helpers.log_test_complete(ctx, False, "kill channel timeout")
+              should.fail()
+              #(process.new_subject(), Some(first_msg))
             }
           }
-          Ok(_) -> {
-            helpers.log_error(
-              ctx,
-              "unexpected_result",
-              "Unexpected message while waiting for kill channel",
-            )
-            helpers.log_test_complete(ctx, False, "unexpected result")
-            should.fail()
-            #(process.new_subject(), None)
-          }
-          Error(Nil) -> {
-            helpers.log_error(
-              ctx,
-              "kill_channel_timeout",
-              "Kill channel not ready within 5s",
-            )
-            helpers.log_test_complete(ctx, False, "kill channel timeout")
-            should.fail()
-            #(process.new_subject(), None)
-          }
         }
+        Ok(_) -> {
+          helpers.log_error(
+            ctx,
+            "unexpected_result",
+            "Unexpected message while waiting for kill channel",
+          )
+          helpers.log_test_complete(ctx, False, "unexpected result")
+          should.fail()
+          #(process.new_subject(), None)
+        }
+        Error(Nil) -> {
+          helpers.log_error(
+            ctx,
+            "kill_channel_timeout",
+            "Kill channel not ready within 5s",
+          )
+          helpers.log_test_complete(ctx, False, "kill channel timeout")
+          should.fail()
+          #(process.new_subject(), None)
+        }
+      }
 
       // Wait for stream to become active (first message received)
       let ctx = helpers.test_step(ctx, "wait_for_first_message")
@@ -190,7 +191,11 @@ pub fn sdk_crash_handling_test_() {
                 "TerminationTimeout",
                 "Stream owner hang detected - 5s timeout exceeded",
               )
-              helpers.log_test_complete(ctx, False, "stream owner hang detected")
+              helpers.log_test_complete(
+                ctx,
+                False,
+                "stream owner hang detected",
+              )
               should.fail()
             }
           }
@@ -235,7 +240,11 @@ pub fn sdk_crash_handling_test_() {
                       )
                     }
                     False -> {
-                      helpers.log_test_complete(ctx, False, "recovery query failed")
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "recovery query failed",
+                      )
                       should.fail()
                     }
                   }
@@ -264,7 +273,11 @@ pub fn sdk_crash_handling_test_() {
 
             Ok(QueryFailed(err)) -> {
               helpers.log_error(ctx, "query_failed", error_to_string(err))
-              helpers.log_error_summary(ctx, "QueryFailed", error_to_string(err))
+              helpers.log_error_summary(
+                ctx,
+                "QueryFailed",
+                error_to_string(err),
+              )
               helpers.log_test_complete(ctx, False, "query() failed")
               should.fail()
             }

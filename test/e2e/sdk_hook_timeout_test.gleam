@@ -20,6 +20,7 @@
 /// ```bash
 /// gleam test -- --e2e
 /// ```
+import claude_agent_sdk/error.{type StartError, SpawnFailed}
 import claude_agent_sdk/internal/bidir.{
   type HookConfig, type SubscriberMessage, CliMessage, HookConfig, Running,
   SessionEnded,
@@ -116,10 +117,10 @@ fn start_session_with_timeout_config(
   }
 }
 
-fn bidir_runner_error_to_string(err: bidir_runner.StartError) -> String {
+fn bidir_runner_error_to_string(err: StartError) -> String {
   case err {
-    bidir_runner.NotImplemented -> "NotImplemented"
-    bidir_runner.SpawnFailed(reason) -> "SpawnFailed: " <> reason
+    SpawnFailed(reason) -> "SpawnFailed: " <> reason
+    _ -> "Other StartError"
   }
 }
 
