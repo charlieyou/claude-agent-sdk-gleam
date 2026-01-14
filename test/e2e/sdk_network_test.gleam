@@ -18,12 +18,10 @@ import claude_agent_sdk/runner
 import e2e/helpers
 import gleam/dynamic
 import gleam/json
+import gleam/string
 import gleeunit/should
 
-// ============================================================================
-// Helper: Type Coercion FFI
-// ============================================================================
-
+// Helper to convert any value to Dynamic (identity function in Erlang)
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> dynamic.Dynamic
 
@@ -65,67 +63,54 @@ pub fn sdk_auth_01_invalid_api_key_test() {
     |> claude_agent_sdk.with_skip_version_check
 
   let ctx = helpers.test_step(ctx, "execute_query")
-  case claude_agent_sdk.query("test prompt", opts) {
-    Error(_err) -> {
-      // Query itself failed at spawn - acceptable
-      helpers.log_info(ctx, "query_spawn_failed_acceptable")
-      helpers.log_test_complete(ctx, True, "Query spawn failed as acceptable")
+  // Query must succeed - spawn failure would indicate test setup issue
+  let assert Ok(stream) = claude_agent_sdk.query("test prompt", opts)
+
+  // Query succeeded, read from stream - should get auth error
+  let ctx = helpers.test_step(ctx, "read_stream")
+  let #(result, updated_stream) = claude_agent_sdk.next(stream)
+
+  case result {
+    Error(ProcessError(exit_code, diagnostic)) -> {
+      let ctx = helpers.test_step(ctx, "verify_error_type")
+
+      // Exit code should be 1 (authentication/general error)
+      exit_code |> should.equal(1)
+
+      // Diagnostic should indicate stdout was empty (auth failure pattern)
+      diagnostic.stdout_was_empty |> should.be_true
+
+      // Exit code hint should mention authentication
+      // "Authentication required" for exit 1 + empty stdout
+      { diagnostic.exit_code_hint == "Authentication required" }
+      |> should.be_true
+
+      helpers.log_info_with(ctx, "auth_error_received", [
+        #("exit_code", json.int(exit_code)),
+        #("stdout_was_empty", json.bool(diagnostic.stdout_was_empty)),
+        #("exit_code_hint", json.string(diagnostic.exit_code_hint)),
+      ])
+      helpers.log_test_complete(
+        ctx,
+        True,
+        "Authentication error surfaced with clear type",
+      )
     }
-    Ok(stream) -> {
-      // Query succeeded, read from stream - should get auth error
-      let ctx = helpers.test_step(ctx, "read_stream")
-      let #(result, updated_stream) = claude_agent_sdk.next(stream)
-
-      case result {
-        Error(ProcessError(exit_code, diagnostic)) -> {
-          let ctx = helpers.test_step(ctx, "verify_error_type")
-
-          // Exit code should be 1 (authentication/general error)
-          exit_code |> should.equal(1)
-
-          // Diagnostic should indicate stdout was empty (auth failure pattern)
-          diagnostic.stdout_was_empty |> should.be_true
-
-          // Exit code hint should mention authentication
-          // "Authentication required" for exit 1 + empty stdout
-          { diagnostic.exit_code_hint == "Authentication required" }
-          |> should.be_true
-
-          helpers.log_info_with(ctx, "auth_error_received", [
-            #("exit_code", json.int(exit_code)),
-            #("stdout_was_empty", json.bool(diagnostic.stdout_was_empty)),
-            #("exit_code_hint", json.string(diagnostic.exit_code_hint)),
-          ])
-          helpers.log_test_complete(
-            ctx,
-            True,
-            "Authentication error surfaced with clear type",
-          )
-        }
-        Error(other_error) -> {
-          // Any terminal error is acceptable as long as it's recognizable
-          claude_agent_sdk.is_terminal(other_error) |> should.be_true
-          helpers.log_info(ctx, "terminal_error_received")
-          helpers.log_test_complete(ctx, True, "Terminal error handled")
-        }
-        Ok(error.EndOfStream) -> {
-          // EndOfStream is acceptable if runner returned exit
-          helpers.log_info(ctx, "end_of_stream_received")
-          helpers.log_test_complete(ctx, True, "EndOfStream handled")
-        }
-        Ok(_) -> {
-          // Unexpected success - should not happen with auth-failing runner
-          helpers.log_error(ctx, "unexpected_success", "Should not succeed")
-          helpers.log_test_complete(ctx, False, "Unexpected success")
-          should.fail()
-        }
-      }
-
-      // Cleanup
-      let _ = claude_agent_sdk.close(updated_stream)
-      Nil
+    _ -> {
+      // Any other result is unexpected - auth failure should produce ProcessError
+      helpers.log_error(ctx, "unexpected_result", "Expected ProcessError")
+      helpers.log_test_complete(
+        ctx,
+        False,
+        "Expected ProcessError with auth diagnostic",
+      )
+      should.fail()
     }
   }
+
+  // Cleanup
+  let _ = claude_agent_sdk.close(updated_stream)
+  Nil
 }
 
 // ============================================================================
@@ -160,69 +145,56 @@ pub fn sdk_auth_02_error_type_mapping_test() {
     |> claude_agent_sdk.with_skip_version_check
 
   let ctx = helpers.test_step(ctx, "execute_query")
-  case claude_agent_sdk.query("test prompt", opts) {
-    Error(_err) -> {
-      helpers.log_info(ctx, "query_spawn_failed_acceptable")
-      helpers.log_test_complete(ctx, True, "Query spawn failed as acceptable")
+  // Query must succeed - spawn failure would indicate test setup issue
+  let assert Ok(stream) = claude_agent_sdk.query("test prompt", opts)
+
+  let ctx = helpers.test_step(ctx, "read_stream")
+  let #(result, updated_stream) = claude_agent_sdk.next(stream)
+
+  case result {
+    Error(ProcessError(exit_code, diagnostic)) -> {
+      let ctx = helpers.test_step(ctx, "verify_diagnostic_fields")
+
+      // Verify all diagnostic fields are populated
+      // exit_code_hint should be non-empty
+      { diagnostic.exit_code_hint != "" } |> should.be_true
+
+      // troubleshooting should be non-empty
+      { diagnostic.troubleshooting != "" } |> should.be_true
+
+      // For auth failures, troubleshooting should mention authentication or CLI
+      let has_actionable_guidance =
+        diagnostic.troubleshooting != ""
+        && { exit_code == 1 || diagnostic.stdout_was_empty }
+
+      has_actionable_guidance |> should.be_true
+
+      helpers.log_info_with(ctx, "diagnostic_fields_verified", [
+        #("exit_code", json.int(exit_code)),
+        #("exit_code_hint", json.string(diagnostic.exit_code_hint)),
+        #(
+          "troubleshooting_length",
+          json.int(string.length(diagnostic.troubleshooting)),
+        ),
+      ])
+      helpers.log_test_complete(
+        ctx,
+        True,
+        "Error type mapping provides actionable diagnostics",
+      )
     }
-    Ok(stream) -> {
-      let ctx = helpers.test_step(ctx, "read_stream")
-      let #(result, updated_stream) = claude_agent_sdk.next(stream)
-
-      case result {
-        Error(ProcessError(exit_code, diagnostic)) -> {
-          let ctx = helpers.test_step(ctx, "verify_diagnostic_fields")
-
-          // Verify all diagnostic fields are populated
-          // exit_code_hint should be non-empty
-          { diagnostic.exit_code_hint != "" } |> should.be_true
-
-          // troubleshooting should be non-empty
-          { diagnostic.troubleshooting != "" } |> should.be_true
-
-          // For auth failures, troubleshooting should mention authentication or CLI
-          let has_actionable_guidance =
-            diagnostic.troubleshooting != ""
-            && { exit_code == 1 || diagnostic.stdout_was_empty }
-
-          has_actionable_guidance |> should.be_true
-
-          helpers.log_info_with(ctx, "diagnostic_fields_verified", [
-            #("exit_code", json.int(exit_code)),
-            #("exit_code_hint", json.string(diagnostic.exit_code_hint)),
-            #(
-              "troubleshooting_length",
-              json.int(string_length(diagnostic.troubleshooting)),
-            ),
-          ])
-          helpers.log_test_complete(
-            ctx,
-            True,
-            "Error type mapping provides actionable diagnostics",
-          )
-        }
-        Error(_other_error) -> {
-          // Other terminal errors are acceptable
-          helpers.log_info(ctx, "other_error_received")
-          helpers.log_test_complete(ctx, True, "Other error handled")
-        }
-        Ok(_) -> {
-          // Any success is acceptable for this test
-          helpers.log_info(ctx, "success_received")
-          helpers.log_test_complete(ctx, True, "Success handled")
-        }
-      }
-
-      let _ = claude_agent_sdk.close(updated_stream)
-      Nil
+    _ -> {
+      // Any other result is unexpected - auth failure should produce ProcessError
+      helpers.log_error(ctx, "unexpected_result", "Expected ProcessError")
+      helpers.log_test_complete(
+        ctx,
+        False,
+        "Expected ProcessError with diagnostic fields",
+      )
+      should.fail()
     }
   }
-}
 
-/// Helper to get string length (avoiding import)
-fn string_length(s: String) -> Int {
-  do_string_length(s)
+  let _ = claude_agent_sdk.close(updated_stream)
+  Nil
 }
-
-@external(erlang, "string", "length")
-fn do_string_length(s: String) -> Int
