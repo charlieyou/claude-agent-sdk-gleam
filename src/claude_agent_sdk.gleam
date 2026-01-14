@@ -47,6 +47,17 @@ import claude_agent_sdk/session
 import claude_agent_sdk/options
 import claude_agent_sdk/runner
 
+/// New split option types (recommended)
+pub type CliOptions =
+  options.CliOptions
+
+pub type SdkOptions =
+  options.SdkOptions
+
+pub type BidirOptions =
+  options.BidirOptions
+
+/// Legacy combined option type (deprecated, for backwards compatibility)
 pub type QueryOptions =
   options.QueryOptions
 
@@ -83,89 +94,106 @@ pub type SessionEvent =
 /// Create a test runner with user-provided callbacks.
 pub const test_runner = runner.test_runner
 
+// =============================================================================
+// New Option Builders (recommended API)
+// =============================================================================
+
+/// Create default CLI options.
+pub const cli_options = options.cli_options
+
+/// Create default SDK options.
+pub const sdk_options = options.sdk_options
+
+/// Create default bidirectional options.
+pub const bidir_options = options.bidir_options
+
+// =============================================================================
+// Legacy Option Builders (deprecated, for backwards compatibility)
+// =============================================================================
+
 /// Create default query options with all fields unset.
 pub const default_options = options.default_options
 
 /// Set the model to use.
-pub const with_model = options.with_model
+pub const with_model = options.with_model_query
 
 /// Set maximum number of agent turns.
-pub const with_max_turns = options.with_max_turns
+pub const with_max_turns = options.with_max_turns_query
 
 /// Set maximum budget in USD.
-pub const with_max_budget = options.with_max_budget
+pub const with_max_budget = options.with_max_budget_query
 
 /// Set the system prompt (replaces default).
-pub const with_system_prompt = options.with_system_prompt
+pub const with_system_prompt = options.with_system_prompt_query
 
 /// Append to the default system prompt.
-pub const with_append_system_prompt = options.with_append_system_prompt
+pub const with_append_system_prompt = options.with_append_system_prompt_query
 
 /// Set allowed tools (whitelist).
-pub const with_allowed_tools = options.with_allowed_tools
+pub const with_allowed_tools = options.with_allowed_tools_query
 
 /// Set disallowed tools (blacklist).
-pub const with_disallowed_tools = options.with_disallowed_tools
+pub const with_disallowed_tools = options.with_disallowed_tools_query
 
 /// Set path to MCP configuration file.
-pub const with_mcp_config = options.with_mcp_config
+pub const with_mcp_config = options.with_mcp_config_query
 
 /// Set permission mode for tool execution.
-pub const with_permission_mode = options.with_permission_mode
+pub const with_permission_mode = options.with_permission_mode_query
 
 /// Resume a specific session by ID.
-pub const with_resume = options.with_resume
+pub const with_resume = options.with_resume_query
 
 /// Continue the most recent session.
-pub const with_continue = options.with_continue
+pub const with_continue = options.with_continue_query
 
 /// Set working directory for the CLI process.
-pub const with_cwd = options.with_cwd
+pub const with_cwd = options.with_cwd_query
 
 /// Enable test mode with a mock runner.
-pub const with_test_mode = options.with_test_mode
+pub const with_test_mode = options.with_test_mode_query
 
 /// Skip CLI version check entirely.
-pub const with_skip_version_check = options.with_skip_version_check
+pub const with_skip_version_check = options.with_skip_version_check_query
 
 /// Allow unknown CLI versions with a warning.
-pub const with_permissive_version_check = options.with_permissive_version_check
+pub const with_permissive_version_check = options.with_permissive_version_check_query
 
 /// Set the global timeout in milliseconds.
-pub const with_timeout = options.with_timeout
+pub const with_timeout = options.with_timeout_query
 
 /// Set a per-hook timeout override.
-pub const with_hook_timeout = options.with_hook_timeout
+pub const with_hook_timeout = options.with_hook_timeout_query
 
 /// Set a factory function for creating BidirRunner instances (testing seam).
-pub const with_bidir_runner_factory = options.with_bidir_runner_factory
+pub const with_bidir_runner_factory = options.with_bidir_runner_factory_query
 
 /// Set a pre-tool-use hook callback.
-pub const with_pre_tool_use = options.with_pre_tool_use
+pub const with_pre_tool_use = options.with_pre_tool_use_query
 
 /// Set a post-tool-use hook callback.
-pub const with_post_tool_use = options.with_post_tool_use
+pub const with_post_tool_use = options.with_post_tool_use_query
 
 /// Set a user-prompt-submit hook callback.
-pub const with_user_prompt_submit = options.with_user_prompt_submit
+pub const with_user_prompt_submit = options.with_user_prompt_submit_query
 
 /// Set a stop hook callback.
-pub const with_stop = options.with_stop
+pub const with_stop = options.with_stop_query
 
 /// Set a subagent-stop hook callback.
-pub const with_subagent_stop = options.with_subagent_stop
+pub const with_subagent_stop = options.with_subagent_stop_query
 
 /// Set a pre-compact hook callback.
-pub const with_pre_compact = options.with_pre_compact
+pub const with_pre_compact = options.with_pre_compact_query
 
 /// Set the permission callback for tool execution control.
-pub const with_can_use_tool = options.with_can_use_tool
+pub const with_can_use_tool = options.with_can_use_tool_query
 
 /// Add an MCP server handler.
-pub const with_mcp_server = options.with_mcp_server
+pub const with_mcp_server = options.with_mcp_server_query
 
 /// Enable file checkpointing for rewind_files support.
-pub const with_file_checkpointing = options.with_file_checkpointing
+pub const with_file_checkpointing = options.with_file_checkpointing_query
 
 // =============================================================================
 // Message Types (from message.gleam)

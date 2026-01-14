@@ -7,7 +7,8 @@ import claude_agent_sdk/internal/port_ffi.{
   type Port, Data, Eof, ExitStatus, Timeout,
 }
 import claude_agent_sdk/options.{
-  type PermissionMode, type QueryOptions, AcceptEdits, BypassPermissions, Plan,
+  type CliOptions, type PermissionMode, type QueryOptions, AcceptEdits,
+  BypassPermissions, Plan,
 }
 import gleam/bit_array
 import gleam/float
@@ -381,4 +382,104 @@ pub fn build_bidir_cli_args(
     "--verbose",
   ]
   build_args_with_base(base_args, options, None)
+}
+
+// ============================================================================
+// CliOptions Support (new API)
+// ============================================================================
+
+/// Build CLI arguments from CliOptions and prompt.
+/// Fixed arguments are always included: --print --output-format stream-json --verbose
+/// Prompt is added at the end after -- separator.
+pub fn build_cli_args_new(options: CliOptions, prompt: String) -> List(String) {
+  let base_args = ["--print", "--output-format", "stream-json", "--verbose"]
+  build_args_with_base_cli(base_args, options, Some(prompt))
+}
+
+/// Build CLI arguments for bidirectional mode from CliOptions.
+/// Includes --input-format stream-json in addition to all standard args.
+pub fn build_bidir_cli_args_new(options: CliOptions) -> List(String) {
+  let base_args = [
+    "--output-format",
+    "stream-json",
+    "--input-format",
+    "stream-json",
+    "--verbose",
+  ]
+  build_args_with_base_cli(base_args, options, None)
+}
+
+/// Internal helper to build CLI arguments from CliOptions.
+fn build_args_with_base_cli(
+  base_args: List(String),
+  options: CliOptions,
+  prompt: Option(String),
+) -> List(String) {
+  // Add optional model
+  let args = case options.model {
+    Some(m) -> list.append(base_args, ["--model", m])
+    None -> base_args
+  }
+
+  // Add optional max_turns
+  let args = case options.max_turns {
+    Some(n) -> list.append(args, ["--max-turns", int.to_string(n)])
+    None -> args
+  }
+
+  // Add optional max_budget_usd
+  let args = case options.max_budget_usd {
+    Some(usd) -> list.append(args, ["--max-budget-usd", float.to_string(usd)])
+    None -> args
+  }
+
+  // Precedence: system_prompt > append_system_prompt
+  let args = case options.system_prompt {
+    Some(p) -> list.append(args, ["--system-prompt", p])
+    None ->
+      case options.append_system_prompt {
+        Some(p) -> list.append(args, ["--append-system-prompt", p])
+        None -> args
+      }
+  }
+
+  // Precedence: allowed_tools > disallowed_tools
+  let args = case options.allowed_tools {
+    Some(tools) ->
+      list.append(args, ["--allowed-tools", string.join(tools, ",")])
+    None ->
+      case options.disallowed_tools {
+        Some(tools) ->
+          list.append(args, ["--disallowed-tools", string.join(tools, ",")])
+        None -> args
+      }
+  }
+
+  // Add optional mcp_config_path
+  let args = case options.mcp_config_path {
+    Some(path) -> list.append(args, ["--mcp-config", path])
+    None -> args
+  }
+
+  // Add optional permission_mode
+  let args = case options.permission_mode {
+    Some(mode) -> add_permission_mode(args, mode)
+    None -> args
+  }
+
+  // Precedence: resume_session_id > continue_session
+  let args = case options.resume_session_id {
+    Some(id) -> list.append(args, ["--resume", id])
+    None ->
+      case options.continue_session {
+        True -> list.append(args, ["--continue"])
+        False -> args
+      }
+  }
+
+  // Add prompt separator and prompt at the end (if provided)
+  case prompt {
+    Some(p) -> list.append(args, ["--", p])
+    None -> args
+  }
 }
