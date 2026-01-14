@@ -6,11 +6,14 @@
 /// - Terminal states (STOPPED/FAILED) reject all transitions
 import gleeunit/should
 
+import claude_agent_sdk/error.{
+  CliExitedDuringInit, CliExitedDuringStartup, InitializationError,
+  InitializationTimeout, RuntimeError,
+}
 import claude_agent_sdk/internal/bidir.{
-  CliExitedDuringInit, CliExitedDuringStartup, CliSpawned, ErrorOccurred, Failed,
-  InitSent, InitSuccess, InitTimeout, InitializationError, InitializationTimeout,
-  InvalidTransition, PortClosed, Running, RuntimeError, Starting, StopRequested,
-  Stopped, transition,
+  CliSpawned, ErrorOccurred, Failed, InitSent, InitSuccess, InitTimeout,
+  InvalidTransition, PortClosed, Running, Starting, StopRequested, Stopped,
+  transition,
 }
 
 // =============================================================================

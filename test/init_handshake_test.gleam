@@ -12,9 +12,11 @@ import gleam/erlang/process
 import gleam/string
 import gleeunit/should
 
+import claude_agent_sdk/error.{
+  CliExitedDuringInit, InitializationError, InitializationTimeout,
+}
 import claude_agent_sdk/internal/bidir.{
-  type SubscriberMessage, CliExitedDuringInit, InitFailed, InitSent,
-  InitializationError, InitializationTimeout, Running, SessionEnded,
+  type SubscriberMessage, InitFailed, InitSent, Running, SessionEnded,
 }
 import support/mock_bidir_runner
 

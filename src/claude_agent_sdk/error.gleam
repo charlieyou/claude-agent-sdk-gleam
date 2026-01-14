@@ -298,6 +298,45 @@ pub fn error_to_string(error: QueryError) -> String {
 }
 
 // ============================================================================
+// SessionError Type (Runtime Session Errors)
+// ============================================================================
+
+/// Specific error variants for session failures.
+///
+/// SessionError represents runtime errors that can occur during a bidirectional
+/// session's lifecycle. Used by SessionLifecycle.Failed state. This is the
+/// authoritative definition - bidir.gleam and state.gleam import from here.
+pub type SessionError {
+  /// Initialization handshake timed out.
+  InitializationTimeout
+  /// CLI returned error during initialization.
+  InitializationError(message: String)
+  /// CLI exited before initialization completed.
+  CliExitedDuringInit
+  /// CLI exited during startup (before spawn completed).
+  CliExitedDuringStartup
+  /// A runtime error occurred with the given reason.
+  RuntimeError(reason: String)
+  /// Too many operations queued during initialization (max 16).
+  InitQueueOverflow(message: String)
+  /// Too many pending control requests (max 64).
+  TooManyPendingRequests(message: String)
+}
+
+/// Convert a SessionError to a human-readable string.
+pub fn session_error_to_string(error: SessionError) -> String {
+  case error {
+    InitializationTimeout -> "Initialization handshake timed out"
+    InitializationError(msg) -> "Initialization error: " <> msg
+    CliExitedDuringInit -> "CLI exited before initialization completed"
+    CliExitedDuringStartup -> "CLI exited during startup"
+    RuntimeError(reason) -> "Runtime error: " <> reason
+    InitQueueOverflow(msg) -> "Init queue overflow: " <> msg
+    TooManyPendingRequests(msg) -> "Too many pending requests: " <> msg
+  }
+}
+
+// ============================================================================
 // StartError Type (Session Startup Errors)
 // ============================================================================
 
@@ -305,6 +344,7 @@ pub fn error_to_string(error: QueryError) -> String {
 ///
 /// StartError is returned by `start_session()` when the SDK cannot establish
 /// a bidirectional CLI session. These errors occur during session initialization.
+/// This is the authoritative definition - bidir.gleam imports from here.
 pub type StartError {
   /// Initialization timed out waiting for CLI response.
   /// The CLI process may be slow to start or unresponsive.

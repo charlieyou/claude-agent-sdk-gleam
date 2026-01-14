@@ -13,11 +13,11 @@ import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 
+import claude_agent_sdk/error.{InitQueueOverflow, TooManyPendingRequests}
 import claude_agent_sdk/internal/bidir.{
   type ActorMessage, type PendingHook, type PendingRequest, type SessionState,
-  type SubscriberMessage, HookType, InitQueueOverflow, PendingHook,
-  PendingRequest, QueuedRequest, RequestError, SessionState, Starting,
-  TooManyPendingRequests, add_pending_hook, add_pending_request,
+  type SubscriberMessage, HookType, PendingHook, PendingRequest, QueuedRequest,
+  RequestError, SessionState, Starting, add_pending_hook, add_pending_request,
   empty_hook_config, flush_queued_ops, queue_operation,
 }
 import claude_agent_sdk/internal/stream

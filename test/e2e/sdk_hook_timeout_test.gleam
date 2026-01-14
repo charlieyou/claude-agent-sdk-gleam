@@ -93,7 +93,7 @@ fn start_session_with_timeout_config(
 
   case bidir_runner.start(args) {
     Error(err) -> {
-      Error("Failed to start runner: " <> bidir_runner_error_to_string(err))
+      Error("Failed to start runner: " <> start_error_to_string(err))
     }
     Ok(runner) -> {
       let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
@@ -106,7 +106,7 @@ fn start_session_with_timeout_config(
 
       case bidir.start_with_hooks(runner, config, hooks) {
         Error(err) -> {
-          Error("Failed to start session: " <> bidir_start_error_to_string(err))
+          Error("Failed to start session: " <> start_error_to_string(err))
         }
         Ok(session) -> {
           bidir.send_user_message(session, prompt)
@@ -117,17 +117,10 @@ fn start_session_with_timeout_config(
   }
 }
 
-fn bidir_runner_error_to_string(err: StartError) -> String {
+fn start_error_to_string(err: StartError) -> String {
   case err {
     SpawnFailed(reason) -> "SpawnFailed: " <> reason
     _ -> "Other StartError"
-  }
-}
-
-fn bidir_start_error_to_string(err: bidir.StartError) -> String {
-  case err {
-    bidir.ActorStartFailed(_) -> "ActorStartFailed"
-    bidir.RunnerStartFailed(reason) -> "RunnerStartFailed: " <> reason
   }
 }
 

@@ -52,6 +52,11 @@ import claude_agent_sdk/control.{
   HookSuccess, Interrupt, McpMessage, PermissionResponse, RegularMessage,
   SetModel, SetPermissionMode, Success,
 }
+import claude_agent_sdk/error.{
+  type SessionError, type StartError, ActorStartFailed, CliExitedDuringInit,
+  CliExitedDuringStartup, InitQueueOverflow, InitializationError,
+  InitializationTimeout, RuntimeError, TooManyPendingRequests,
+}
 import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/control_decoder
@@ -87,30 +92,6 @@ fn is_port_tuple(msg: Dynamic, port: port_ffi.Port) -> Bool {
 // =============================================================================
 // Session Lifecycle
 // =============================================================================
-
-/// Session lifecycle states.
-///
-/// The session progresses through these states:
-/// - Starting: Actor started, port not yet spawned
-/// Specific error variants for session failures.
-///
-/// These variants enable programmatic error handling rather than string parsing.
-pub type SessionError {
-  /// Initialization handshake timed out.
-  InitializationTimeout
-  /// CLI returned error during initialization.
-  InitializationError(message: String)
-  /// CLI exited before initialization completed.
-  CliExitedDuringInit
-  /// CLI exited during startup (before spawn completed).
-  CliExitedDuringStartup
-  /// A runtime error occurred with the given reason.
-  RuntimeError(reason: String)
-  /// Too many operations queued during initialization (max 16).
-  InitQueueOverflow(message: String)
-  /// Too many pending control requests (max 64).
-  TooManyPendingRequests(message: String)
-}
 
 /// Reason why a session was stopped.
 ///
@@ -602,12 +583,13 @@ pub type Response {
 // Actor Implementation
 // =============================================================================
 
-/// Error type for session start failures.
-pub type StartError {
-  /// Actor failed to start.
-  ActorStartFailed(actor.StartError)
-  /// Runner failed to start.
-  RunnerStartFailed(String)
+/// Convert actor.StartError to a string representation.
+fn actor_error_to_string(err: actor.StartError) -> String {
+  case err {
+    actor.InitTimeout -> "Actor init timeout"
+    actor.InitFailed(reason) -> "Actor init failed: " <> reason
+    actor.InitExited(reason) -> "Actor init exited: " <> string.inspect(reason)
+  }
 }
 
 /// Start configuration for a session.
@@ -905,7 +887,7 @@ fn start_internal(
       let _ = actor.call(session, 1000, GetLifecycle)
       Ok(session)
     }
-    Error(err) -> Error(ActorStartFailed(err))
+    Error(err) -> Error(ActorStartFailed(actor_error_to_string(err)))
   }
 }
 

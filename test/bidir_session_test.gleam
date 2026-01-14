@@ -7,10 +7,11 @@
 import gleam/erlang/process
 import gleeunit/should
 
+import claude_agent_sdk/error.{RuntimeError}
 import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SessionLifecycle, type SubscriberMessage, Failed,
-  InitSent, Pong, QueuedRequest, RequestSessionStopped, Running, RuntimeError,
-  SessionEnded, Starting, Stopped, UserRequested,
+  InitSent, Pong, QueuedRequest, RequestSessionStopped, Running, SessionEnded,
+  Starting, Stopped, UserRequested,
 }
 import support/mock_bidir_runner
 

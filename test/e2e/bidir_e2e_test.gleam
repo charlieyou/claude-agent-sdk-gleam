@@ -94,7 +94,7 @@ fn start_session_with_hooks(
 
   case bidir_runner.start(args) {
     Error(err) ->
-      Error("Failed to start runner: " <> runner_error_to_string(err))
+      Error("Failed to start runner: " <> start_error_to_string(err))
     Ok(runner) -> {
       let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
       let config = bidir.default_config(subscriber)
@@ -111,17 +111,10 @@ fn start_session_with_hooks(
   }
 }
 
-fn runner_error_to_string(err: StartError) -> String {
+fn start_error_to_string(err: StartError) -> String {
   case err {
     SpawnFailed(reason) -> "SpawnFailed: " <> reason
     _ -> "Other StartError"
-  }
-}
-
-fn start_error_to_string(err: bidir.StartError) -> String {
-  case err {
-    bidir.ActorStartFailed(_) -> "ActorStartFailed"
-    bidir.RunnerStartFailed(reason) -> "RunnerStartFailed: " <> reason
   }
 }
 
@@ -483,7 +476,7 @@ pub fn real_permission_callback_test_() {
           case bidir_runner.start(args) {
             Error(err) -> {
               helpers.log_info_with(ctx, "runner_skip", [
-                #("reason", json.string(runner_error_to_string(err))),
+                #("reason", json.string(start_error_to_string(err))),
               ])
               helpers.log_test_complete(
                 ctx,

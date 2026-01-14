@@ -7,15 +7,15 @@
 /// ## Module Boundaries
 ///
 /// - **state.gleam** (this file): Pure types (SessionLifecycle) and the
-///   transition function. Re-exports SessionError from bidir.gleam.
+///   transition function. Imports SessionError from error.gleam.
 /// - **bidir.gleam**: OTP actor that uses these types with Process/Subject deps
 ///
 /// ## Note on SessionError
 ///
-/// SessionError is defined in bidir.gleam (the authoritative module) and
-/// re-exported here. This avoids duplication while keeping the pure state
-/// module usable without directly importing the OTP-dependent bidir module.
-import claude_agent_sdk/internal/bidir.{
+/// SessionError is defined in error.gleam (the authoritative pure module).
+/// Both this module and bidir.gleam import from error.gleam to avoid
+/// circular dependencies.
+import claude_agent_sdk/error.{
   type SessionError, CliExitedDuringInit, CliExitedDuringStartup,
   InitializationError, InitializationTimeout, RuntimeError,
 }
