@@ -1,38 +1,77 @@
 # Testing
 
-This document covers the SDK's testing strategy, including coverage thresholds
-and module exclusions.
+This document covers the SDK's testing strategy, including the no-mock policy,
+coverage thresholds, and how to run and interpret each test category.
+
+## No-Mock Policy
+
+This SDK uses a **strict no-mock policy** for all tests.
+
+### Disallowed
+
+- Test runners that simulate CLI output
+- ETS-backed fake stream state
+- Stubbed port read/close operations
+- Any test double that simulates external boundaries
+
+### Allowed
+
+- Pure-function unit tests (parsers, builders, option resolution)
+- Real port_ffi against deterministic helpers (`/bin/echo`)
+- Real CLI integration tests (env-gated)
+- Fixtures representing real or spec-defined JSON payloads
+
+See [plans/testing-policy.md](../plans/testing-policy.md) for full policy details.
 
 ## Test Categories
 
 ### Unit Tests (Pure Logic)
 
 Run with `gleam test`:
+
 - Pure parsing and validation logic
 - Option builders and precedence
 - Type-level construction/matching
 - Error formatting/diagnostics
 - Decoder functions with fixtures
 
+These tests have no external dependencies and run fast.
+
 ### Phase 0 Runtime Tests
 
 Tests that use real port_ffi against deterministic OS commands:
+
 - Spawn/read/exit/close behavior using `/bin/echo` or similar
 - Validates FFI wiring and runtime primitives
+
+These run by default with `gleam test`.
 
 ### Integration Tests
 
 Require `CLAUDE_INTEGRATION_TEST=1`:
+
 - PATH lookup and CLI discovery
 - CLI version detection
 - Auth availability checks
 - Real query and stream behavior
 
+```bash
+CLAUDE_INTEGRATION_TEST=1 gleam test
+```
+
 ### E2E Tests
 
-Full scripted workflows with real Claude CLI:
+Full scripted workflows with real Claude CLI. Require `--e2e` flag:
+
 - Multi-step scenarios with detailed logging
 - Artifact capture for debugging
+- Real API calls (incurs costs)
+
+```bash
+gleam test -- --e2e
+```
+
+See [E2E_TESTING.md](E2E_TESTING.md) for detailed E2E documentation.
 
 ## Coverage Reporting
 
@@ -52,7 +91,8 @@ Full scripted workflows with real Claude CLI:
 ### Coverage Thresholds
 
 For **eligible modules** (pure logic, no OS boundary code):
-- Line coverage: ≥95%
+
+- Line coverage: >= 95%
 
 Run `./scripts/coverage.sh --threshold 95.0` to enforce.
 
@@ -75,34 +115,25 @@ The `cli` module is excluded because `detect_cli_version/2` spawns a real CLI
 process via port_ffi. Other functions in the module are pure but the module
 is excluded as a whole for simplicity.
 
-These modules are covered by integration tests (`CLAUDE_INTEGRATION_TEST=1`),
-not unit coverage thresholds.
+These modules are covered by:
 
-## No-Mock Policy
-
-This SDK uses a **strict no-mock policy**:
-
-**Disallowed:**
-- Test runners that simulate CLI output
-- ETS-backed fake stream state
-- Stubbed port read/close operations
-
-**Allowed:**
-- Pure-function unit tests
-- Real port_ffi against deterministic helpers (`/bin/echo`)
-- Real CLI integration tests (env-gated)
-- Fixtures representing real JSON payloads
-
-See [plans/testing-policy.md](../plans/testing-policy.md) for full policy details.
+- Phase 0 runtime tests (port_ffi behavior)
+- Integration tests (`CLAUDE_INTEGRATION_TEST=1`)
+- E2E tests (`gleam test -- --e2e`)
 
 ## Running Tests
+
+### Quick Reference
 
 ```bash
 # Unit tests only (default)
 gleam test
 
-# Include integration tests
+# Include integration tests (requires CLI + auth)
 CLAUDE_INTEGRATION_TEST=1 gleam test
+
+# E2E tests (requires CLI + auth, incurs API costs)
+gleam test -- --e2e
 
 # Coverage with threshold enforcement
 ./scripts/coverage.sh --threshold 95.0
@@ -110,3 +141,46 @@ CLAUDE_INTEGRATION_TEST=1 gleam test
 # CI-friendly JSON output
 ./scripts/coverage.sh --json --threshold 95.0
 ```
+
+### Test Gating Summary
+
+| Category | How to Run | Requirements |
+|----------|-----------|--------------|
+| Unit | `gleam test` | None |
+| Phase 0 | `gleam test` | None |
+| Integration | `CLAUDE_INTEGRATION_TEST=1 gleam test` | Claude CLI installed + authenticated |
+| E2E | `gleam test -- --e2e` | Claude CLI installed + authenticated |
+
+### Prerequisites for CLI Tests
+
+1. Claude CLI installed (`claude --version` works)
+2. Authentication via `claude auth login` (interactive)
+
+## Interpreting Results
+
+### Unit Test Failures
+
+- Check the specific assertion that failed
+- Review the fixture or input data
+- Ensure decoders match current spec
+
+### Integration Test Failures
+
+- Verify CLI is in PATH: `which claude`
+- Verify authentication: `claude auth status`
+- Check CLI version compatibility: `claude --version`
+
+### E2E Test Failures
+
+- Check artifact logs in `artifacts/e2e/<test-id>.log`
+- Review structured event data for timeline
+- See [E2E_TESTING.md](E2E_TESTING.md) for troubleshooting guide
+
+### Coverage Failures
+
+If coverage drops below threshold:
+
+1. Run `./scripts/coverage.sh` to see current coverage
+2. Identify uncovered lines in the report
+3. Add tests for uncovered paths
+4. Re-run with threshold enforcement
