@@ -1,6 +1,6 @@
 -module(e2e_helpers_ffi).
 -export([get_env/1, set_env/2, unset_env/1, get_plain_args/0, kill_pid/1, acquire_lock/0, release_lock/0,
-         get_timestamp_iso8601/0, get_monotonic_ms/0, ensure_dir/1, append_line/2,
+         get_timestamp_iso8601/0, get_timestamp_file_safe/0, get_monotonic_ms/0, ensure_dir/1, append_line/2,
          is_concurrent_mode/0, port_close_safe/1, has_soak_flag/0, read_file_lines/1,
          with_cleanup/2, get_process_count/0, get_ets_count/0, get_port_count/0]).
 
@@ -91,6 +91,14 @@ get_timestamp_iso8601() ->
     {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
     Ms = erlang:system_time(millisecond) rem 1000,
     list_to_binary(io_lib:format("~4..0B-~2..0B-~2..0BT~2..0B:~2..0B:~2..0B.~3..0BZ",
+                                  [Y, Mo, D, H, Mi, S, Ms])).
+
+%% Get current timestamp in file-safe format (no colons or special chars).
+%% Format: YYYYMMDD-HHMMSS-mmm (e.g., 20260114-123456-789)
+get_timestamp_file_safe() ->
+    {{Y, Mo, D}, {H, Mi, S}} = calendar:universal_time(),
+    Ms = erlang:system_time(millisecond) rem 1000,
+    list_to_binary(io_lib:format("~4..0B~2..0B~2..0B-~2..0B~2..0B~2..0B-~3..0B",
                                   [Y, Mo, D, H, Mi, S, Ms])).
 
 %% Get monotonic time in milliseconds for elapsed calculations.

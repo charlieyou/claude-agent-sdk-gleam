@@ -18,6 +18,7 @@ import gleam/json
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/set
+import gleam/string
 import gleeunit/should
 
 // ============================================================================
@@ -44,7 +45,10 @@ pub fn sdk_concurrent_session_isolation_test() {
     }
     Ok(Nil) -> {
       helpers.with_concurrent_mode(fn() {
-        let ctx = helpers.new_test_context("sdk_concurrent_session_isolation")
+        let ctx =
+          helpers.new_test_context_timestamped(
+            "sdk_concurrent_session_isolation",
+          )
         let ctx = helpers.test_step(ctx, "spawn_concurrent_queries")
 
         // Create a subject to collect results from spawned processes
@@ -66,8 +70,27 @@ pub fn sdk_concurrent_session_isolation_test() {
 
         let ctx = helpers.test_step(ctx, "collect_results")
 
-        // Collect all results (wait for all sessions)
-        let results = collect_results(result_subject, session_count, timeout_ms)
+        // Collect all results (wait for all sessions) - fail if any timeout
+        let collect_outcome =
+          collect_results(result_subject, session_count, timeout_ms)
+
+        let results = case collect_outcome {
+          Ok(r) -> r
+          Error(#(collected, missing)) -> {
+            helpers.log_error(
+              ctx,
+              "collect_timeout",
+              "Timed out waiting for "
+                <> int.to_string(missing)
+                <> " session(s) to report; collected "
+                <> int.to_string(list.length(collected)),
+            )
+            helpers.log_test_complete(ctx, False, "result collection timeout")
+            should.fail()
+            // Unreachable but needed for type
+            collected
+          }
+        }
 
         helpers.log_info_with(ctx, "results_collected", [
           #("count", json.int(list.length(results))),
@@ -147,23 +170,33 @@ pub fn sdk_concurrent_session_isolation_test() {
                 should.fail()
               }
               True -> {
-                // Check that all streams terminated normally (or had rate limit errors)
-                let all_terminated =
+                // Check that ALL sessions succeeded (no errors/timeouts)
+                let all_succeeded =
                   list.all(results, fn(r) {
-                    r.terminated_normally || option.is_some(r.error)
+                    r.terminated_normally && option.is_none(r.error)
                   })
 
-                case all_terminated {
+                case all_succeeded {
                   False -> {
+                    // Find which sessions failed
+                    let failed =
+                      results
+                      |> list.filter(fn(r) {
+                        !r.terminated_normally || option.is_some(r.error)
+                      })
+                    let failed_nums =
+                      failed
+                      |> list.map(fn(r) { int.to_string(r.session_number) })
+                      |> string.join(", ")
                     helpers.log_error(
                       ctx,
-                      "incomplete_termination",
-                      "Some sessions did not terminate within timeout",
+                      "session_failure",
+                      "Sessions failed or timed out: " <> failed_nums,
                     )
                     helpers.log_test_complete(
                       ctx,
                       False,
-                      "incomplete termination",
+                      "session failure or timeout",
                     )
                     should.fail()
                   }
@@ -254,11 +287,13 @@ fn query_without_lock(
 }
 
 /// Collect results from the subject with a timeout.
+/// Returns Ok(results) if all expected results arrived,
+/// or Error(#(collected, remaining)) if timeout occurred.
 fn collect_results(
   subject: process.Subject(SessionResult),
   count: Int,
   timeout_ms: Int,
-) -> List(SessionResult) {
+) -> Result(List(SessionResult), #(List(SessionResult), Int)) {
   collect_results_loop(subject, count, timeout_ms, [])
 }
 
@@ -267,9 +302,9 @@ fn collect_results_loop(
   remaining: Int,
   timeout_ms: Int,
   acc: List(SessionResult),
-) -> List(SessionResult) {
+) -> Result(List(SessionResult), #(List(SessionResult), Int)) {
   case remaining <= 0 {
-    True -> acc
+    True -> Ok(acc)
     False -> {
       case process.receive(subject, timeout_ms) {
         Ok(result) ->
@@ -278,8 +313,8 @@ fn collect_results_loop(
             ..acc
           ])
         Error(Nil) ->
-          // Timeout waiting for result - return what we have
-          acc
+          // Timeout waiting for result - return error with partial results
+          Error(#(acc, remaining))
       }
     }
   }

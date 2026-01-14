@@ -90,6 +90,11 @@ pub fn release_query_lock() -> Nil
 @external(erlang, "e2e_helpers_ffi", "get_timestamp_iso8601")
 fn get_timestamp_iso8601() -> String
 
+/// Get current timestamp in file-safe format (no colons).
+/// Format: YYYYMMDD-HHMMSS-mmm
+@external(erlang, "e2e_helpers_ffi", "get_timestamp_file_safe")
+fn get_timestamp_file_safe() -> String
+
 /// Get monotonic time in milliseconds.
 @external(erlang, "e2e_helpers_ffi", "get_monotonic_ms")
 pub fn get_monotonic_ms() -> Int
@@ -171,6 +176,46 @@ pub fn new_test_context(test_id: String) -> TestContext {
     log_structured(ctx, LevelInfo, "test_start", [
       #("test_id", json.string(test_id)),
       #("timestamp", json.string(timestamp)),
+    ])
+
+  ctx
+}
+
+/// Create a new test context with timestamped artifact directory.
+/// Creates unique directory: artifacts/e2e/<test-id>-<timestamp>/
+/// Use this for tests that may run concurrently or repeatedly (e.g., soak tests).
+pub fn new_test_context_timestamped(test_id: String) -> TestContext {
+  let timestamp_iso = get_timestamp_iso8601()
+  let timestamp_safe = get_timestamp_file_safe()
+  let artifact_dir = artifacts_base <> "/" <> test_id <> "-" <> timestamp_safe
+  let log_path = artifact_dir <> "/" <> test_id <> ".log"
+
+  // Ensure directory exists and fail loudly if it cannot be created
+  case ensure_dir(artifact_dir) {
+    Ok(Nil) -> Nil
+    Error(reason) ->
+      io.println(
+        "[ERROR] Failed to create artifact directory "
+        <> artifact_dir
+        <> ": "
+        <> reason,
+      )
+  }
+
+  let ctx =
+    TestContext(
+      test_id: test_id,
+      log_path: log_path,
+      start_ms: get_monotonic_ms(),
+      step: 0,
+    )
+
+  // Log test start
+  let _ =
+    log_structured(ctx, LevelInfo, "test_start", [
+      #("test_id", json.string(test_id)),
+      #("timestamp", json.string(timestamp_iso)),
+      #("artifact_dir", json.string(artifact_dir)),
     ])
 
   ctx
