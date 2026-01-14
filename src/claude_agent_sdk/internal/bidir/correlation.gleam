@@ -71,3 +71,30 @@ pub fn remove_pending(
 ) -> Dict(String, PendingRequest) {
   dict.delete(pending, request_id)
 }
+
+/// Cancel a pending request (remove and return it for cleanup).
+///
+/// Returns the removed request if found, or None if not present.
+pub fn cancel_pending(
+  pending: Dict(String, PendingRequest),
+  request_id: String,
+) -> #(Dict(String, PendingRequest), Option(PendingRequest)) {
+  case dict.get(pending, request_id) {
+    Ok(req) -> #(dict.delete(pending, request_id), option.Some(req))
+    Error(_) -> #(pending, option.None)
+  }
+}
+
+/// Mark a pending request as timed out (remove and return for notification).
+///
+/// Returns the removed request if found, or None if not present.
+/// The caller should send RequestTimeout to the reply_subject.
+pub fn timeout_pending(
+  pending: Dict(String, PendingRequest),
+  request_id: String,
+) -> #(Dict(String, PendingRequest), Option(PendingRequest)) {
+  case dict.get(pending, request_id) {
+    Ok(req) -> #(dict.delete(pending, request_id), option.Some(req))
+    Error(_) -> #(pending, option.None)
+  }
+}

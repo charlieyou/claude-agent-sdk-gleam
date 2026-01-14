@@ -113,3 +113,20 @@ pub fn transition(
     Running, _ -> Error(InvalidTransition(from, event))
   }
 }
+
+/// Return the initial lifecycle state for a new session.
+pub fn initial_state() -> SessionLifecycle {
+  Starting
+}
+
+/// Check if a lifecycle state is terminal (no further transitions allowed).
+///
+/// Terminal states are Stopped and Failed - once a session reaches these
+/// states, it cannot transition to any other state.
+pub fn is_terminal(state: SessionLifecycle) -> Bool {
+  case state {
+    Stopped -> True
+    Failed(_) -> True
+    Starting | InitSent | Running -> False
+  }
+}
