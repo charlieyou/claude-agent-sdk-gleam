@@ -807,4 +807,5 @@ pub fn has_bidir_features_bidir(options: BidirOptions) -> Bool {
   || option.is_some(options.on_can_use_tool)
   || !list.is_empty(options.mcp_servers)
   || option.is_some(options.timeout_ms)
+  || options.file_checkpointing_enabled
 }
