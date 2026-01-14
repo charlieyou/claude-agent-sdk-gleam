@@ -407,10 +407,11 @@ const cli_name = "claude"
 /// ## Example (new API)
 /// ```gleam
 /// import claude_agent_sdk
+/// import claude_agent_sdk/options
 ///
-/// let cli_opts = claude_agent_sdk.cli_options()
-///   |> claude_agent_sdk.with_model("sonnet")
-/// let sdk_opts = claude_agent_sdk.sdk_options()
+/// let cli_opts = options.cli_options()
+///   |> options.with_model("sonnet")
+/// let sdk_opts = options.sdk_options()
 ///
 /// case claude_agent_sdk.query_new("Hello, Claude!", cli_opts, sdk_opts) {
 ///   Ok(stream) -> {
@@ -684,13 +685,17 @@ fn check_version_and_spawn_internal(
             "Run 'claude --version' to check CLI output format",
           ))
       }
-    cli.CliVersion(major, minor, patch, raw) -> {
-      let required = cli.minimum_cli_version
-      case cli.version_at_least(version, required) {
+    cli.CliVersion(_, _, _, _) as known_version -> {
+      case cli.version_meets_minimum(known_version, cli.minimum_cli_version) {
         True -> spawn_query_no_bidir_check(prompt, options, cli_path)
         False -> {
-          let error_msg = cli.version_below_minimum_message(version, required)
-          Error(error.VersionBelowMinimumError(raw, error_msg))
+          let detected_str = format_version(known_version)
+          let required_str = format_version(cli.minimum_cli_version)
+          Error(error.UnsupportedCliVersionError(
+            detected_version: detected_str,
+            minimum_required: required_str,
+            suggestion: "Run: npm update -g @anthropic-ai/claude-code",
+          ))
         }
       }
     }
@@ -821,48 +826,63 @@ fn spawn_query_with_warnings(
 // Bidirectional Session Entry Point
 // =============================================================================
 
-/// Start a bidirectional session with Claude CLI.
+/// Start a bidirectional session with Claude CLI (new API).
 ///
-/// This creates an interactive session where you can send prompts and receive
-/// responses, with support for hooks, control operations, and message streaming.
+/// Takes separate CliOptions, SdkOptions, and BidirOptions for clear separation
+/// of concerns. Use this for hooks, MCP servers, and control operations.
 ///
 /// ## Current Status: Skeleton (TDD Phase 1)
 ///
-/// This function currently returns `Error(NotImplemented)` as a placeholder.
-/// The actual implementation will be added in Epic 8.
+/// This function currently returns `Error(SpawnFailed)` as a placeholder.
+/// The actual implementation will be added in future work.
 ///
 /// ## Parameters
 ///
-/// - `prompt`: Initial prompt to send to the CLI
-/// - `options`: Query options (same as `query()`)
-///
-/// ## Returns
-///
-/// - `Ok(Session)`: A session handle for interacting with the CLI
-/// - `Error(StartError)`: If session initialization fails
+/// - `cli_opts`: CLI-specific options (model, tools, etc.)
+/// - `sdk_opts`: SDK behavior options (test mode, version checks)
+/// - `bidir_opts`: Bidirectional features (hooks, MCP, timeouts)
 ///
 /// ## Example
 ///
 /// ```gleam
 /// import claude_agent_sdk
+/// import claude_agent_sdk/options
 ///
-/// let options = claude_agent_sdk.default_options()
+/// let cli_opts = options.cli_options()
+///   |> options.with_model("sonnet")
+/// let sdk_opts = options.sdk_options()
+/// let bidir_opts = options.bidir_options()
+///   |> options.with_pre_tool_use(my_hook)
 ///
-/// case claude_agent_sdk.start_session("Hello, Claude!", options) {
+/// case claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts) {
 ///   Ok(session) -> {
 ///     // Use session for bidirectional communication
-///     // session.send_prompt(session, "Follow-up question")
 ///   }
 ///   Error(err) -> {
 ///     // Handle StartError
 ///   }
 /// }
 /// ```
+pub fn start_session_new(
+  _cli_opts: CliOptions,
+  _sdk_opts: SdkOptions,
+  _bidir_opts: BidirOptions,
+) -> Result(Session, StartError) {
+  // TODO: Implement actual session start
+  Error(error.SpawnFailed(reason: "start_session_new not yet implemented"))
+}
+
+/// Start a bidirectional session with Claude CLI (legacy API).
+///
+/// **DEPRECATED**: Use `start_session_new(cli_opts, sdk_opts, bidir_opts)`.
+///
+/// ## Current Status: Skeleton (TDD Phase 1)
+///
+/// This function currently returns `Error(SpawnFailed)` as a placeholder.
 pub fn start_session(
   _prompt: String,
   _options: QueryOptions,
 ) -> Result(Session, StartError) {
-  // TODO: Implement actual session start - T003 will extract actor logic
   Error(error.SpawnFailed(reason: "start_session not yet implemented"))
 }
 
