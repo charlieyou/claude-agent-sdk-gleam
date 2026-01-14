@@ -93,10 +93,16 @@ is_test_or_support() {
     [[ "$module" == *"@@main" ]]
 }
 
-# Build the project first
-echo "Building project..." >&2
+# Build project AND test modules (gleam build only compiles src, not test)
+# We run gleam test briefly to compile test modules, then run our own coverage
+echo "Building project and tests..." >&2
 gleam build --target=erlang >/dev/null 2>&1 || {
     echo "Build failed" >&2
+    exit 2
+}
+# Run gleam test to compile test modules to beam files
+gleam test --target=erlang >/dev/null 2>&1 || {
+    echo "Test compilation failed" >&2
     exit 2
 }
 
@@ -149,6 +155,15 @@ coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
     TestMods = [list_to_atom(filename:basename(F, ".beam"))
                 || F <- Beams,
                    string:find(filename:basename(F), "_test.beam") =/= nomatch],
+
+    %% Fail immediately if no test modules found
+    case TestMods of
+        [] ->
+            io:format(standard_error, "ERROR: No test modules found in ~s~n", [EbinDir]),
+            cover:stop(),
+            halt(2);
+        _ -> ok
+    end,
 
     %% Helper to check if a function name is a test function
     %% Matches both "test_foo" prefix and "foo_test" suffix patterns
@@ -204,6 +219,16 @@ coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
             io:format(standard_error, "~nERROR: ~p test module(s) failed to load~n", [N]),
             cover:stop(),
             halt(2)
+    end,
+
+    %% Fail if no tests were executed (prevents false positive coverage)
+    TotalTests = Passed + Failed + Skipped,
+    case TotalTests of
+        0 ->
+            io:format(standard_error, "~nERROR: No tests were executed~n", []),
+            cover:stop(),
+            halt(2);
+        _ -> ok
     end,
 
     case Failed of
