@@ -338,6 +338,45 @@ pub fn bidir_options_from_query(opts: QueryOptions) -> BidirOptions {
   )
 }
 
+/// Build QueryOptions from CliOptions and SdkOptions (for query()).
+/// Used by the new API to create legacy QueryOptions for internal functions.
+pub fn query_options_from_cli_sdk(
+  cli: CliOptions,
+  sdk: SdkOptions,
+) -> QueryOptions {
+  QueryOptions(
+    model: cli.model,
+    max_turns: cli.max_turns,
+    max_budget_usd: cli.max_budget_usd,
+    system_prompt: cli.system_prompt,
+    append_system_prompt: cli.append_system_prompt,
+    allowed_tools: cli.allowed_tools,
+    disallowed_tools: cli.disallowed_tools,
+    mcp_config_path: cli.mcp_config_path,
+    permission_mode: cli.permission_mode,
+    resume_session_id: cli.resume_session_id,
+    continue_session: cli.continue_session,
+    cwd: cli.cwd,
+    test_mode: sdk.test_mode,
+    test_runner: sdk.test_runner,
+    skip_version_check: sdk.skip_version_check,
+    permissive_version_check: sdk.permissive_version_check,
+    // Bidir options are empty for query()
+    on_pre_tool_use: None,
+    on_post_tool_use: None,
+    on_user_prompt_submit: None,
+    on_stop: None,
+    on_subagent_stop: None,
+    on_pre_compact: None,
+    on_can_use_tool: None,
+    mcp_servers: [],
+    file_checkpointing_enabled: False,
+    timeout_ms: None,
+    hook_timeouts: dict.new(),
+    bidir_runner_factory: None,
+  )
+}
+
 // =============================================================================
 // CLI Option Builders
 // =============================================================================
