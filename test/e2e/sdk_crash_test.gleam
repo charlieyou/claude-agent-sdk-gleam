@@ -27,7 +27,7 @@ import gleam/erlang/process
 import gleam/io
 import gleam/json
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleeunit/should
 
 // ============================================================================
@@ -67,24 +67,72 @@ pub fn sdk_crash_handling_test_() {
       let result_subject: process.Subject(StreamTestResult) =
         process.new_subject()
 
-      // Subject to signal kill command
-      let kill_subject: process.Subject(KillSignal) = process.new_subject()
-
       // Spawn a process that will iterate the stream and report results
       let query_pid =
         process.spawn_unlinked(fn() {
-          run_stream_iteration(result_subject, kill_subject, opts)
+          run_stream_iteration(result_subject, opts)
         })
 
       helpers.log_info_with(ctx, "spawned_query_process", [
         #("pid", json.string(pid_to_string(query_pid))),
       ])
 
+      // Receive kill subject from the spawned process
+      let #(kill_subject, first_msg_opt) =
+        case process.receive(result_subject, 5000) {
+          Ok(KillChannelReady(subject)) -> #(subject, None)
+          Ok(FirstMessageReceived(first_msg)) -> {
+            case process.receive(result_subject, 5000) {
+              Ok(KillChannelReady(subject)) -> #(subject, Some(first_msg))
+              Ok(_) -> {
+                helpers.log_error(
+                  ctx,
+                  "unexpected_result",
+                  "Unexpected message while waiting for kill channel",
+                )
+                helpers.log_test_complete(ctx, False, "unexpected result")
+                should.fail()
+                #(process.new_subject(), Some(first_msg))
+              }
+              Error(Nil) -> {
+                helpers.log_error(
+                  ctx,
+                  "kill_channel_timeout",
+                  "Kill channel not ready within 5s",
+                )
+                helpers.log_test_complete(ctx, False, "kill channel timeout")
+                should.fail()
+                #(process.new_subject(), Some(first_msg))
+              }
+            }
+          }
+          Ok(_) -> {
+            helpers.log_error(
+              ctx,
+              "unexpected_result",
+              "Unexpected message while waiting for kill channel",
+            )
+            helpers.log_test_complete(ctx, False, "unexpected result")
+            should.fail()
+            #(process.new_subject(), None)
+          }
+          Error(Nil) -> {
+            helpers.log_error(
+              ctx,
+              "kill_channel_timeout",
+              "Kill channel not ready within 5s",
+            )
+            helpers.log_test_complete(ctx, False, "kill channel timeout")
+            should.fail()
+            #(process.new_subject(), None)
+          }
+        }
+
       // Wait for stream to become active (first message received)
       let ctx = helpers.test_step(ctx, "wait_for_first_message")
 
-      case process.receive(result_subject, 15_000) {
-        Ok(FirstMessageReceived(first_msg)) -> {
+      case first_msg_opt {
+        Some(first_msg) -> {
           helpers.log_info_with(ctx, "first_message_received", [
             #("message_type", json.string(message_type_string(first_msg))),
           ])
@@ -96,46 +144,23 @@ pub fn sdk_crash_handling_test_() {
           let kill_start_ms = helpers.get_monotonic_ms()
           process.send(kill_subject, Kill)
 
-          // Wait for spawned process to report termination (5s timeout per spec)
+          // Wait for kill acknowledgement (best-effort)
           let ctx = helpers.test_step(ctx, "wait_for_termination")
-
-          case process.receive(result_subject, 5000) {
-            Ok(StreamTerminated(term_result)) -> {
+          let _ = case process.receive(result_subject, 2000) {
+            Ok(KillAcknowledged) -> {
               let kill_elapsed_ms = helpers.get_monotonic_ms() - kill_start_ms
-              helpers.log_info_with(ctx, "stream_terminated", [
+              helpers.log_info_with(ctx, "kill_ack_received", [
                 #("elapsed_ms", json.int(kill_elapsed_ms)),
-                #("termination_type", json.string(term_result.termination_type)),
-                #("close_result", json.string(term_result.close_result)),
               ])
+            }
+            Ok(_) -> Nil
+            Error(Nil) -> Nil
+          }
 
-              // Assert: stream terminated with terminal error
-              case term_result.is_terminal_error {
-                True -> {
-                  helpers.log_info(ctx, "terminal_error_confirmed")
-                }
-                False -> {
-                  helpers.log_error(
-                    ctx,
-                    "not_terminal_error",
-                    "Stream did not terminate with terminal error",
-                  )
-                }
-              }
-
-              // Assert: close() returned cleanly
-              case term_result.close_result {
-                "ok" -> {
-                  helpers.log_info(ctx, "close_returned_cleanly")
-                }
-                other -> {
-                  helpers.log_error(
-                    ctx,
-                    "close_failed",
-                    "close() result: " <> other,
-                  )
-                }
-              }
-
+          // Wait for spawned process to exit within 5s
+          case wait_for_process_exit(query_pid, 5000) {
+            True -> {
+              helpers.log_info(ctx, "stream_owner_exited")
               // Phase 3: Verify recovery with follow-up query
               let ctx = helpers.test_step(ctx, "verify_recovery")
 
@@ -153,109 +178,143 @@ pub fn sdk_crash_handling_test_() {
                 }
               }
             }
+            False -> {
+              helpers.kill_pid(query_pid)
+              helpers.log_error(
+                ctx,
+                "termination_timeout",
+                "Stream owner did not exit within 5s after crash signal",
+              )
+              helpers.log_error_summary(
+                ctx,
+                "TerminationTimeout",
+                "Stream owner hang detected - 5s timeout exceeded",
+              )
+              helpers.log_test_complete(ctx, False, "stream owner hang detected")
+              should.fail()
+            }
+          }
+        }
 
-            Ok(StreamCompleted(msg_count)) -> {
-              // Stream completed normally before crash - this is valid behavior
-              helpers.log_info_with(ctx, "stream_completed_normally", [
-                #("message_count", json.int(msg_count)),
+        None -> {
+          case process.receive(result_subject, 15_000) {
+            Ok(FirstMessageReceived(first_msg)) -> {
+              helpers.log_info_with(ctx, "first_message_received", [
+                #("message_type", json.string(message_type_string(first_msg))),
               ])
-              // Still verify recovery works
-              let ctx = helpers.test_step(ctx, "verify_recovery")
-              case verify_recovery_query(ctx) {
+
+              let ctx = helpers.test_step(ctx, "simulate_crash")
+              helpers.log_info(ctx, "sending_kill_signal")
+
+              let kill_start_ms = helpers.get_monotonic_ms()
+              process.send(kill_subject, Kill)
+
+              let ctx = helpers.test_step(ctx, "wait_for_termination")
+              let _ = case process.receive(result_subject, 2000) {
+                Ok(KillAcknowledged) -> {
+                  let kill_elapsed_ms =
+                    helpers.get_monotonic_ms() - kill_start_ms
+                  helpers.log_info_with(ctx, "kill_ack_received", [
+                    #("elapsed_ms", json.int(kill_elapsed_ms)),
+                  ])
+                }
+                Ok(_) -> Nil
+                Error(Nil) -> Nil
+              }
+
+              case wait_for_process_exit(query_pid, 5000) {
                 True -> {
-                  helpers.log_test_complete(
-                    ctx,
-                    True,
-                    "stream completed normally, recovery verified",
-                  )
+                  helpers.log_info(ctx, "stream_owner_exited")
+                  let ctx = helpers.test_step(ctx, "verify_recovery")
+                  case verify_recovery_query(ctx) {
+                    True -> {
+                      helpers.log_test_complete(
+                        ctx,
+                        True,
+                        "crash handling verified - recovery successful",
+                      )
+                    }
+                    False -> {
+                      helpers.log_test_complete(ctx, False, "recovery query failed")
+                      should.fail()
+                    }
+                  }
                 }
                 False -> {
-                  helpers.log_test_complete(ctx, False, "recovery query failed")
+                  helpers.kill_pid(query_pid)
+                  helpers.log_error(
+                    ctx,
+                    "termination_timeout",
+                    "Stream owner did not exit within 5s after crash signal",
+                  )
+                  helpers.log_error_summary(
+                    ctx,
+                    "TerminationTimeout",
+                    "Stream owner hang detected - 5s timeout exceeded",
+                  )
+                  helpers.log_test_complete(
+                    ctx,
+                    False,
+                    "stream owner hang detected",
+                  )
                   should.fail()
                 }
               }
+            }
+
+            Ok(QueryFailed(err)) -> {
+              helpers.log_error(ctx, "query_failed", error_to_string(err))
+              helpers.log_error_summary(ctx, "QueryFailed", error_to_string(err))
+              helpers.log_test_complete(ctx, False, "query() failed")
+              should.fail()
+            }
+
+            Ok(StreamError(err)) -> {
+              helpers.log_error(
+                ctx,
+                "stream_error",
+                error.stream_error_to_string(err),
+              )
+              helpers.log_error_summary(
+                ctx,
+                "StreamError",
+                error.stream_error_to_string(err),
+              )
+              helpers.log_test_complete(
+                ctx,
+                False,
+                "stream error before first message",
+              )
+              should.fail()
             }
 
             Ok(_) -> {
               helpers.log_error(
                 ctx,
                 "unexpected_result",
-                "Unexpected message from spawned process",
+                "Unexpected initial message",
               )
               helpers.log_test_complete(ctx, False, "unexpected result")
               should.fail()
             }
 
             Error(Nil) -> {
-              // Timeout: stream did not terminate within 5s - THIS IS A FAILURE
+              // Timeout waiting for first message - THIS IS A FAILURE
               helpers.kill_pid(query_pid)
               helpers.log_error(
                 ctx,
-                "termination_timeout",
-                "Stream did not terminate within 5s after crash signal",
+                "first_message_timeout",
+                "No first message received within 15s - CLI may not be responding",
               )
               helpers.log_error_summary(
                 ctx,
-                "TerminationTimeout",
-                "Stream hang detected - 5s timeout exceeded",
+                "FirstMessageTimeout",
+                "Timeout waiting for first message",
               )
-              helpers.log_test_complete(ctx, False, "stream hang detected")
+              helpers.log_test_complete(ctx, False, "first message timeout")
               should.fail()
             }
           }
-        }
-
-        Ok(QueryFailed(err)) -> {
-          helpers.log_error(ctx, "query_failed", error_to_string(err))
-          helpers.log_error_summary(ctx, "QueryFailed", error_to_string(err))
-          helpers.log_test_complete(ctx, False, "query() failed")
-          should.fail()
-        }
-
-        Ok(StreamError(err)) -> {
-          helpers.log_error(
-            ctx,
-            "stream_error",
-            error.stream_error_to_string(err),
-          )
-          helpers.log_error_summary(
-            ctx,
-            "StreamError",
-            error.stream_error_to_string(err),
-          )
-          helpers.log_test_complete(
-            ctx,
-            False,
-            "stream error before first message",
-          )
-          should.fail()
-        }
-
-        Ok(_) -> {
-          helpers.log_error(
-            ctx,
-            "unexpected_result",
-            "Unexpected initial message",
-          )
-          helpers.log_test_complete(ctx, False, "unexpected result")
-          should.fail()
-        }
-
-        Error(Nil) -> {
-          // Timeout waiting for first message - THIS IS A FAILURE
-          helpers.kill_pid(query_pid)
-          helpers.log_error(
-            ctx,
-            "first_message_timeout",
-            "No first message received within 15s - CLI may not be responding",
-          )
-          helpers.log_error_summary(
-            ctx,
-            "FirstMessageTimeout",
-            "Timeout waiting for first message",
-          )
-          helpers.log_test_complete(ctx, False, "first message timeout")
-          should.fail()
         }
       }
     }
@@ -271,21 +330,13 @@ type KillSignal {
   Kill
 }
 
-/// Termination result from stream iteration.
-type TerminationResult {
-  TerminationResult(
-    termination_type: String,
-    is_terminal_error: Bool,
-    close_result: String,
-  )
-}
-
 /// Result from spawned stream iteration process.
 type StreamTestResult {
+  KillChannelReady(process.Subject(KillSignal))
   FirstMessageReceived(MessageEnvelope)
+  KillAcknowledged
   QueryFailed(claude_agent_sdk.QueryError)
   StreamError(StreamError)
-  StreamTerminated(TerminationResult)
   StreamCompleted(message_count: Int)
 }
 
@@ -298,9 +349,11 @@ type StreamTestResult {
 /// until stream terminates. Reports termination status and close() result.
 fn run_stream_iteration(
   result_subject: process.Subject(StreamTestResult),
-  kill_subject: process.Subject(KillSignal),
   opts: claude_agent_sdk.QueryOptions,
 ) -> Nil {
+  let kill_subject: process.Subject(KillSignal) = process.new_subject()
+  process.send(result_subject, KillChannelReady(kill_subject))
+
   case claude_agent_sdk.query("Count slowly from 1 to 10", opts) {
     Ok(stream) -> {
       // Wait for and report first message
@@ -311,8 +364,8 @@ fn run_stream_iteration(
           // Wait for kill signal (non-blocking check with short timeout)
           case process.receive(kill_subject, 100) {
             Ok(Kill) -> {
-              // Kill received, continue iterating to observe termination
-              iterate_until_termination(result_subject, updated_stream, 0)
+              process.send(result_subject, KillAcknowledged)
+              process.kill(process.self())
             }
             Error(Nil) -> {
               // No kill yet, continue waiting and iterating
@@ -349,8 +402,8 @@ fn iterate_with_kill_check(
   // Check for kill signal
   case process.receive(kill_subject, 0) {
     Ok(Kill) -> {
-      // Kill received, switch to termination observation mode
-      iterate_until_termination(result_subject, stream, msg_count)
+      process.send(result_subject, KillAcknowledged)
+      process.kill(process.self())
     }
     Error(Nil) -> {
       // No kill yet, continue normal iteration
@@ -383,20 +436,8 @@ fn iterate_with_kill_check(
             True -> {
               // Terminal error - report it
               let closed_stream = claude_agent_sdk.close(updated_stream)
-              let close_ok = claude_agent_sdk.is_closed(closed_stream)
-              process.send(
-                result_subject,
-                StreamTerminated(
-                  TerminationResult(
-                    termination_type: "terminal_error_during_iteration",
-                    is_terminal_error: True,
-                    close_result: case close_ok {
-                      True -> "ok"
-                      False -> "not_closed"
-                    },
-                  ),
-                ),
-              )
+              let _ = closed_stream
+              process.send(result_subject, StreamCompleted(msg_count))
             }
             False -> {
               // Non-terminal, continue
@@ -410,61 +451,6 @@ fn iterate_with_kill_check(
           }
         }
       }
-    }
-  }
-}
-
-/// Iterate until stream terminates after kill signal.
-fn iterate_until_termination(
-  result_subject: process.Subject(StreamTestResult),
-  stream: claude_agent_sdk.QueryStream,
-  msg_count: Int,
-) -> Nil {
-  let #(result, updated_stream) = claude_agent_sdk.next(stream)
-  case result {
-    Ok(Message(_)) -> {
-      // Continue iterating, more messages coming
-      iterate_until_termination(result_subject, updated_stream, msg_count + 1)
-    }
-    Ok(EndOfStream) -> {
-      // Stream ended normally (not an error)
-      let closed_stream = claude_agent_sdk.close(updated_stream)
-      let close_ok = claude_agent_sdk.is_closed(closed_stream)
-      process.send(
-        result_subject,
-        StreamTerminated(
-          TerminationResult(
-            termination_type: "end_of_stream",
-            is_terminal_error: False,
-            close_result: case close_ok {
-              True -> "ok"
-              False -> "not_closed"
-            },
-          ),
-        ),
-      )
-    }
-    Ok(WarningEvent(_)) -> {
-      iterate_until_termination(result_subject, updated_stream, msg_count)
-    }
-    Error(err) -> {
-      // Error - check if terminal
-      let is_term = error.is_terminal(err)
-      let closed_stream = claude_agent_sdk.close(updated_stream)
-      let close_ok = claude_agent_sdk.is_closed(closed_stream)
-      process.send(
-        result_subject,
-        StreamTerminated(
-          TerminationResult(
-            termination_type: error.stream_error_to_string(err),
-            is_terminal_error: is_term,
-            close_result: case close_ok {
-              True -> "ok"
-              False -> "not_closed"
-            },
-          ),
-        ),
-      )
     }
   }
 }
@@ -516,6 +502,31 @@ fn wait_for_first_message_loop(
               wait_for_first_message_loop(updated_stream, start_ms, timeout_ms)
           }
         }
+      }
+    }
+  }
+}
+
+fn wait_for_process_exit(pid: process.Pid, timeout_ms: Int) -> Bool {
+  let start_ms = helpers.get_monotonic_ms()
+  wait_for_process_exit_loop(pid, start_ms, timeout_ms)
+}
+
+fn wait_for_process_exit_loop(
+  pid: process.Pid,
+  start_ms: Int,
+  timeout_ms: Int,
+) -> Bool {
+  let elapsed = helpers.get_monotonic_ms() - start_ms
+  case elapsed > timeout_ms {
+    True -> False
+    False -> {
+      case process.is_alive(pid) {
+        True -> {
+          process.sleep(50)
+          wait_for_process_exit_loop(pid, start_ms, timeout_ms)
+        }
+        False -> True
       }
     }
   }

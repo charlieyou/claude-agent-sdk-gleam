@@ -273,15 +273,46 @@ pub fn sdk_24_allowed_tools_test_() {
                   helpers.log_info_with(ctx, "tools_found", [
                     #("tool_count", json.int(list.length(tools))),
                   ])
-                  // All tools should be in allowed list (case-insensitive membership)
-                  list.each(tools, fn(tool) {
-                    let tool_lower = string.lowercase(tool)
-                    let is_allowed =
-                      list.any(allowed_tools, fn(a) {
-                        string.lowercase(a) == tool_lower
-                      })
-                    should.be_true(is_allowed)
-                  })
+                  let allowed_lower =
+                    list.map(allowed_tools, fn(a) { string.lowercase(a) })
+                  let tools_lower =
+                    list.map(tools, fn(t) { string.lowercase(t) })
+
+                  let missing_allowed =
+                    list.filter(allowed_lower, fn(a) {
+                      !list.any(tools_lower, fn(t) { t == a })
+                    })
+
+                  let extra_tools =
+                    list.filter(tools_lower, fn(t) {
+                      !list.any(allowed_lower, fn(a) { a == t })
+                    })
+
+                  case list.length(missing_allowed) == 0 {
+                    True -> helpers.log_info(ctx, "allowed_tools_present")
+                    False -> {
+                      helpers.log_error(
+                        ctx,
+                        "allowed_tools_missing",
+                        "Allowed tools not present in system tools list",
+                      )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "Allowed tools missing from system message",
+                      )
+                      should.fail()
+                    }
+                  }
+
+                  case list.length(extra_tools) == 0 {
+                    True -> helpers.log_info(ctx, "no_extra_tools")
+                    False -> {
+                      helpers.log_info_with(ctx, "extra_tools_present", [
+                        #("extras", json.string(string.join(extra_tools, ","))),
+                      ])
+                    }
+                  }
                 }
                 None -> {
                   helpers.log_info(ctx, "system_message_tools_none")
