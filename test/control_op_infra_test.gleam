@@ -13,7 +13,8 @@ import gleam/string
 import gleeunit/should
 
 import claude_agent_sdk/control.{Interrupt}
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type RequestResult, type SubscriberMessage, InitSent, RequestSuccess,
   RequestTimeout, Running,
 }

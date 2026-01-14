@@ -8,7 +8,8 @@ import gleam/erlang/process
 import gleeunit/should
 
 import claude_agent_sdk/error.{RuntimeError}
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type RequestResult, type SessionLifecycle, type SubscriberMessage, Failed,
   InitSent, Pong, QueuedRequest, RequestSessionStopped, Running, SessionEnded,
   Starting, Stopped, UserRequested,

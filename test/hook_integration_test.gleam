@@ -12,7 +12,8 @@ import gleam/json
 import gleam/string
 import gleeunit/should
 
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type SubscriberMessage, HookConfig, Running, StartConfig,
 }
 import support/full_mock_runner

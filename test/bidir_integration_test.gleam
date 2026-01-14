@@ -9,7 +9,8 @@ import gleam/json
 import gleam/string
 import gleeunit/should
 
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type SubscriberMessage, CliMessage, HookConfig, Running, SessionEnded,
   StartConfig, UserRequested,
 }

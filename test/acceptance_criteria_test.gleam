@@ -29,7 +29,8 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{Interrupt, SetModel}
 import claude_agent_sdk/hook
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type RequestResult, type SubscriberMessage, HookConfig, RequestSuccess,
   Running, StartConfig,
 }
@@ -372,7 +373,7 @@ pub fn test_ac7_mcp_routing_test() {
   }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_mcp_server("ac7_server", handler)
 
   // Verify server was registered
@@ -474,7 +475,7 @@ pub fn test_ac9_hook_timeouts_test() {
 
   // Test 1: Global timeout can be set
   let opts1 =
-    options.default_options()
+    options.bidir_options()
     |> options.with_timeout(30_000)
   case opts1.timeout_ms {
     option.Some(30_000) -> Nil
@@ -483,7 +484,7 @@ pub fn test_ac9_hook_timeouts_test() {
 
   // Test 2: Per-hook timeouts can be configured
   let opts2 =
-    options.default_options()
+    options.bidir_options()
     |> options.with_hook_timeout(hook.PreToolUse, 5000)
     |> options.with_hook_timeout(hook.PostToolUse, 10_000)
 
@@ -492,7 +493,7 @@ pub fn test_ac9_hook_timeouts_test() {
 
   // Test 3: Per-hook overwrites
   let opts3 =
-    options.default_options()
+    options.bidir_options()
     |> options.with_hook_timeout(hook.PreToolUse, 5000)
     |> options.with_hook_timeout(hook.PreToolUse, 8000)
 

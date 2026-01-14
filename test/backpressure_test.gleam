@@ -14,7 +14,8 @@ import gleam/string
 import gleeunit/should
 
 import claude_agent_sdk/error.{InitQueueOverflow, TooManyPendingRequests}
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type ActorMessage, type PendingHook, type PendingRequest, type SessionState,
   type SubscriberMessage, HookType, PendingHook, PendingRequest, QueuedRequest,
   RequestError, SessionState, Starting, add_pending_hook, add_pending_request,

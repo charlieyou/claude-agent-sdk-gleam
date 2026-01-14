@@ -10,7 +10,8 @@
 import gleam/erlang/process
 import gleeunit/should
 
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type SubscriberMessage, InitSent, Running,
 }
 import support/mock_bidir_runner

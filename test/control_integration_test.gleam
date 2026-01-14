@@ -24,7 +24,8 @@ import claude_agent_sdk/control.{
   AcceptEdits, BypassPermissions, Default, Interrupt, Plan, RewindFiles,
   SetModel, SetPermissionMode,
 }
-import claude_agent_sdk/internal/bidir.{
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor.{
   type RequestResult, type SubscriberMessage, CheckpointingNotEnabled,
   RequestError, RequestSuccess, RewindFilesSessionStopped, Running,
 }
