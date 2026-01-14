@@ -289,6 +289,7 @@ query_and_consume_with_timeout(
 ## Example Test Pattern
 
 ```gleam
+import claude_agent_sdk.{default_options}
 import claude_agent_sdk/error
 import e2e/helpers.{
   QueryFailure, QuerySuccess, QueryTimedOut,

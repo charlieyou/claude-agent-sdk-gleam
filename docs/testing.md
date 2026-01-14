@@ -65,11 +65,13 @@ These run by default with `gleam test` (no `--e2e` flag required).
 Located in `test/query_integration_test.gleam`:
 
 - PATH lookup and CLI discovery
-- CLI version detection
-- Auth availability checks
+- CLI version detection via `claude --version`
+- Auth status checks via real CLI
 - Preflight validation
 
-These run by default with `gleam test`.
+**Note:** These tests interact with the real Claude CLI when available. Tests
+are guarded to skip gracefully if the CLI is not in PATH or auth is unavailable.
+In CI environments, these preflight checks may be skipped or mocked via fixtures.
 
 ### E2E Tests (Real CLI)
 
@@ -158,7 +160,7 @@ gleam test -- --e2e
 | Unit | `gleam test` | None |
 | Phase 0 | `gleam test` | None |
 | Offline Protocol | `gleam test` | None |
-| Integration | `gleam test` | None (uses fixtures/mocks for discovery tests) |
+| Integration | `gleam test` | CLI in PATH for full checks (gracefully skips if unavailable) |
 | E2E (Real CLI) | `gleam test -- --e2e` | Claude CLI installed + authenticated |
 
 ### Prerequisites for E2E Tests
