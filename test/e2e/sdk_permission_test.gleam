@@ -112,16 +112,8 @@ pub fn permission_denied_flow_test() {
                   let #(messages, _ended) =
                     collect_messages(subscriber, 10_000, [])
 
-                  // Check if denial is surfaced in message stream
-                  let ctx = helpers.test_step(ctx, "check_denial_in_stream")
-                  let denial_in_stream = check_for_denial_message(messages)
-                  case denial_in_stream {
-                    True -> helpers.log_info(ctx, "denial_surfaced_in_stream")
-                    False ->
-                      helpers.log_info(ctx, "denial_not_in_stream_warning")
-                  }
-
                   // Check that no tool output ("testmarker") appears in stream
+                  // This MUST be checked first - if tool output appears, test fails
                   let ctx = helpers.test_step(ctx, "check_no_tool_output")
                   let has_tool_output = check_for_testmarker(messages)
                   case has_tool_output {
@@ -131,8 +123,36 @@ pub fn permission_denied_flow_test() {
                         "testmarker_found",
                         "Tool output 'testmarker' found in stream - tool executed",
                       )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "Tool executed - testmarker found in output",
+                      )
+                      bidir.shutdown(session)
+                      should.fail()
                     }
                     False -> helpers.log_info(ctx, "no_testmarker_in_stream")
+                  }
+
+                  // Check if denial is surfaced in message stream
+                  let ctx = helpers.test_step(ctx, "check_denial_in_stream")
+                  let denial_in_stream = check_for_denial_message(messages)
+                  case denial_in_stream {
+                    True -> helpers.log_info(ctx, "denial_surfaced_in_stream")
+                    False -> {
+                      helpers.log_error(
+                        ctx,
+                        "denial_not_in_stream",
+                        "Denial not surfaced in message stream",
+                      )
+                      helpers.log_test_complete(
+                        ctx,
+                        False,
+                        "Denial not surfaced in stream (AC requirement)",
+                      )
+                      bidir.shutdown(session)
+                      should.fail()
+                    }
                   }
 
                   let ctx = helpers.test_step(ctx, "verify_no_execution")
@@ -154,7 +174,7 @@ pub fn permission_denied_flow_test() {
                       should.fail()
                     }
                     Error(Nil) -> {
-                      // SUCCESS: Tool did not execute
+                      // SUCCESS: All checks passed
                       helpers.log_info(ctx, "deny_prevented_execution")
                       helpers.log_test_complete(
                         ctx,
