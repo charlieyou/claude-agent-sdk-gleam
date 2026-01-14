@@ -17,7 +17,7 @@ import claude_agent_sdk/error.{
   BufferOverflow, EndOfStream, Message, ProcessError, TooManyDecodeErrors,
   WarningEvent, stream_error_to_string,
 }
-import claude_agent_sdk/message.{Result}
+import claude_agent_sdk/message.{type MessageEnvelope, Result}
 import e2e/helpers
 import gleam/erlang/process
 import gleam/int
@@ -159,6 +159,9 @@ fn outcome_to_string(outcome: BackpressureOutcome) -> String {
 
 /// Run query and consume slowly with a timeout.
 /// Adds sleep_ms delay between each next() call to simulate slow consumer.
+/// Uses global query lock to prevent inter-test interference.
+/// Note: query() and all next() calls happen in the same spawned process,
+/// which is required since port messages only go to the owning process.
 fn query_and_consume_slowly_with_timeout(
   prompt: String,
   options: claude_agent_sdk.QueryOptions,
@@ -166,6 +169,7 @@ fn query_and_consume_slowly_with_timeout(
   ctx: helpers.TestContext,
   sleep_ms: Int,
 ) -> BackpressureOutcome {
+  let _ = helpers.acquire_query_lock()
   let subject: process.Subject(BackpressureOutcome) = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
@@ -177,19 +181,21 @@ fn query_and_consume_slowly_with_timeout(
       process.send(subject, outcome)
     })
 
-  case process.receive(subject, timeout_ms) {
-    Ok(outcome) -> outcome
+  let outcome = case process.receive(subject, timeout_ms) {
+    Ok(result) -> result
     Error(Nil) -> {
       let _ = helpers.kill_pid(pid)
       TimeoutOutcome
     }
   }
+  let _ = helpers.release_query_lock()
+  outcome
 }
 
 /// Consume stream slowly, adding delay between each next() call.
 fn consume_slowly(
   stream: claude_agent_sdk.QueryStream,
-  acc: List(message.MessageEnvelope),
+  acc: List(MessageEnvelope),
   ctx: helpers.TestContext,
   sleep_ms: Int,
 ) -> BackpressureOutcome {
@@ -204,7 +210,7 @@ fn consume_slowly(
         message.System(_) -> "system"
         message.Assistant(_) -> "assistant"
         message.User(_) -> "user"
-        Result(_) -> "result"
+        message.Result(_) -> "result"
       }
       helpers.log_debug(ctx, "message_received", [
         #("type", json.string(msg_type)),
@@ -235,14 +241,23 @@ fn consume_slowly(
       // Skip warnings, continue iteration
       consume_slowly(updated_stream, acc, ctx, sleep_ms)
     Error(err) -> {
-      let _ = claude_agent_sdk.close(updated_stream)
-      categorize_error(err, list.length(acc))
+      // Check if error is terminal before categorizing
+      case claude_agent_sdk.is_terminal(err) {
+        True -> {
+          let _ = claude_agent_sdk.close(updated_stream)
+          categorize_error(err, list.length(acc))
+        }
+        False ->
+          // Non-terminal error (JsonDecodeError, UnexpectedMessageError)
+          // Continue iteration - stream may still yield more items
+          consume_slowly(updated_stream, acc, ctx, sleep_ms)
+      }
     }
   }
 }
 
 /// Check if message list contains a Result.
-fn has_result(messages: List(message.MessageEnvelope)) -> Bool {
+fn has_result(messages: List(MessageEnvelope)) -> Bool {
   list.any(messages, fn(env) {
     case env.message {
       Result(_) -> True

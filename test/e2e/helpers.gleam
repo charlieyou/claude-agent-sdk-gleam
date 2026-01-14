@@ -80,11 +80,11 @@ pub fn kill_pid(pid: process.Pid) -> Nil
 
 /// Acquire global lock for serialized CLI queries.
 @external(erlang, "e2e_helpers_ffi", "acquire_lock")
-fn acquire_query_lock() -> Nil
+pub fn acquire_query_lock() -> Nil
 
 /// Release global lock for serialized CLI queries.
 @external(erlang, "e2e_helpers_ffi", "release_lock")
-fn release_query_lock() -> Nil
+pub fn release_query_lock() -> Nil
 
 /// Get current timestamp as ISO8601 string.
 @external(erlang, "e2e_helpers_ffi", "get_timestamp_iso8601")
