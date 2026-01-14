@@ -450,10 +450,166 @@ pub fn query_new(
   cli_opts: CliOptions,
   sdk_opts: SdkOptions,
 ) -> Result(QueryStream, QueryError) {
-  // Convert to internal QueryOptions (with empty bidir options)
-  let internal_opts = options.query_options_from_cli_sdk(cli_opts, sdk_opts)
-  // Call spawn directly - no bidir warning needed since we don't accept bidir options
-  query_internal(prompt, internal_opts)
+  case sdk_opts.test_mode {
+    True -> {
+      case sdk_opts.test_runner {
+        Some(_) -> spawn_query_new_cli(prompt, cli_opts, sdk_opts, cli_name, [])
+        None ->
+          Error(error.TestModeError(
+            "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
+          ))
+      }
+    }
+    False -> {
+      case port_ffi.find_cli_path(cli_name) {
+        Error(_) ->
+          Error(error.CliNotFoundError(
+            "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
+          ))
+        Ok(cli_path) ->
+          query_new_with_cli_path(prompt, cli_opts, sdk_opts, cli_path)
+      }
+    }
+  }
+}
+
+/// Internal: Continue query_new flow with known CLI path (version check).
+fn query_new_with_cli_path(
+  prompt: String,
+  cli_opts: CliOptions,
+  sdk_opts: SdkOptions,
+  cli_path: String,
+) -> Result(QueryStream, QueryError) {
+  case sdk_opts.skip_version_check {
+    True -> spawn_query_new_cli(prompt, cli_opts, sdk_opts, cli_path, [])
+    False -> {
+      case cli.detect_cli_version(cli_path) {
+        Error(cli.VersionCheckTimeout) ->
+          Error(error.VersionDetectionError("Timeout waiting for CLI response"))
+        Error(cli.SpawnFailed(reason)) ->
+          Error(error.VersionDetectionError("Failed to spawn CLI: " <> reason))
+        Error(cli.ParseFailed(raw)) ->
+          case sdk_opts.permissive_version_check {
+            True -> {
+              let warning =
+                error.Warning(
+                  code: error.UnparseableCliVersion,
+                  message: "CLI version string could not be parsed; proceeding in permissive mode",
+                  context: Some(raw),
+                )
+              spawn_query_new_cli(prompt, cli_opts, sdk_opts, cli_path, [
+                warning,
+              ])
+            }
+            False ->
+              Error(error.UnknownVersionError(
+                raw,
+                "Run 'claude --version' to check CLI output format",
+              ))
+          }
+        Ok(version) ->
+          check_version_and_spawn_new(
+            prompt,
+            cli_opts,
+            sdk_opts,
+            cli_path,
+            version,
+          )
+      }
+    }
+  }
+}
+
+/// Internal: Check version and spawn for new API.
+fn check_version_and_spawn_new(
+  prompt: String,
+  cli_opts: CliOptions,
+  sdk_opts: SdkOptions,
+  cli_path: String,
+  version: cli.CliVersion,
+) -> Result(QueryStream, QueryError) {
+  case version {
+    cli.UnknownVersion(raw) ->
+      case sdk_opts.permissive_version_check {
+        True -> {
+          let warning =
+            error.Warning(
+              code: error.UnparseableCliVersion,
+              message: "CLI version string could not be parsed; proceeding in permissive mode",
+              context: Some(raw),
+            )
+          spawn_query_new_cli(prompt, cli_opts, sdk_opts, cli_path, [warning])
+        }
+        False ->
+          Error(error.UnknownVersionError(
+            raw,
+            "Run 'claude --version' to check CLI output format",
+          ))
+      }
+    cli.CliVersion(_, _, _, _) as known_version -> {
+      case cli.version_meets_minimum(known_version, cli.minimum_cli_version) {
+        True -> spawn_query_new_cli(prompt, cli_opts, sdk_opts, cli_path, [])
+        False -> {
+          let detected_str = format_version(known_version)
+          let required_str = format_version(cli.minimum_cli_version)
+          Error(error.UnsupportedCliVersionError(
+            detected_version: detected_str,
+            minimum_required: required_str,
+            suggestion: "Run: npm update -g @anthropic-ai/claude-code",
+          ))
+        }
+      }
+    }
+  }
+}
+
+/// Internal: Spawn query using CliOptions directly (new API path).
+fn spawn_query_new_cli(
+  prompt: String,
+  cli_opts: CliOptions,
+  sdk_opts: SdkOptions,
+  cli_path: String,
+  warnings: List(error.Warning),
+) -> Result(QueryStream, QueryError) {
+  // Build CLI arguments from CliOptions directly
+  let args = cli.build_cli_args_new(cli_opts, prompt)
+
+  // Determine cwd - empty string means inherit
+  let cwd = case cli_opts.cwd {
+    None -> ""
+    Some(path) ->
+      case string.is_empty(path) {
+        True -> ""
+        False -> path
+      }
+  }
+
+  case sdk_opts.test_mode {
+    True -> {
+      case sdk_opts.test_runner {
+        Some(test_runner) -> {
+          case runner.spawn(test_runner, cli_path, args, cwd) {
+            Error(reason) -> Error(error.SpawnError(reason))
+            Ok(handle) ->
+              Ok(internal_stream.new_from_runner_with_warnings(
+                test_runner,
+                handle,
+                warnings,
+              ))
+          }
+        }
+        None ->
+          Error(error.TestModeError(
+            "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
+          ))
+      }
+    }
+    False ->
+      case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
+        Error(reason) -> Error(error.SpawnError(reason))
+        Ok(port) -> Ok(internal_stream.new_with_warnings(port, warnings))
+      }
+  }
 }
 
 /// Query with legacy combined QueryOptions (deprecated).
@@ -586,177 +742,6 @@ fn spawn_query(
   cli_path: String,
 ) -> Result(QueryStream, QueryError) {
   spawn_query_with_warnings(prompt, options, cli_path, [])
-}
-
-/// Internal: Query implementation for new API (no bidir warning check).
-fn query_internal(
-  prompt: String,
-  options: QueryOptions,
-) -> Result(QueryStream, QueryError) {
-  case options.test_mode {
-    True -> {
-      case options.test_runner {
-        Some(_) -> spawn_query_no_bidir_check(prompt, options, cli_name)
-        None ->
-          Error(error.TestModeError(
-            "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
-          ))
-      }
-    }
-    False -> {
-      case port_ffi.find_cli_path(cli_name) {
-        Error(_) ->
-          Error(error.CliNotFoundError(
-            "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
-          ))
-        Ok(cli_path) -> query_internal_with_path(prompt, options, cli_path)
-      }
-    }
-  }
-}
-
-/// Internal: Continue query_internal flow with known CLI path.
-fn query_internal_with_path(
-  prompt: String,
-  options: QueryOptions,
-  cli_path: String,
-) -> Result(QueryStream, QueryError) {
-  case options.skip_version_check {
-    True -> spawn_query_no_bidir_check(prompt, options, cli_path)
-    False -> {
-      case cli.detect_cli_version(cli_path) {
-        Error(cli.VersionCheckTimeout) ->
-          Error(error.VersionDetectionError("Timeout waiting for CLI response"))
-        Error(cli.SpawnFailed(reason)) ->
-          Error(error.VersionDetectionError("Failed to spawn CLI: " <> reason))
-        Error(cli.ParseFailed(raw)) ->
-          case options.permissive_version_check {
-            True -> {
-              let warning =
-                error.Warning(
-                  code: error.UnparseableCliVersion,
-                  message: "CLI version string could not be parsed; proceeding in permissive mode",
-                  context: Some(raw),
-                )
-              spawn_query_no_bidir_check_with_warnings(
-                prompt,
-                options,
-                cli_path,
-                [warning],
-              )
-            }
-            False ->
-              Error(error.UnknownVersionError(
-                raw,
-                "Run 'claude --version' to check CLI output format",
-              ))
-          }
-        Ok(version) ->
-          check_version_and_spawn_internal(prompt, options, cli_path, version)
-      }
-    }
-  }
-}
-
-/// Internal: Check version and spawn for new API (no bidir warning).
-fn check_version_and_spawn_internal(
-  prompt: String,
-  options: QueryOptions,
-  cli_path: String,
-  version: cli.CliVersion,
-) -> Result(QueryStream, QueryError) {
-  case version {
-    cli.UnknownVersion(raw) ->
-      case options.permissive_version_check {
-        True -> {
-          let warning =
-            error.Warning(
-              code: error.UnparseableCliVersion,
-              message: "CLI version string could not be parsed; proceeding in permissive mode",
-              context: Some(raw),
-            )
-          spawn_query_no_bidir_check_with_warnings(prompt, options, cli_path, [
-            warning,
-          ])
-        }
-        False ->
-          Error(error.UnknownVersionError(
-            raw,
-            "Run 'claude --version' to check CLI output format",
-          ))
-      }
-    cli.CliVersion(_, _, _, _) as known_version -> {
-      case cli.version_meets_minimum(known_version, cli.minimum_cli_version) {
-        True -> spawn_query_no_bidir_check(prompt, options, cli_path)
-        False -> {
-          let detected_str = format_version(known_version)
-          let required_str = format_version(cli.minimum_cli_version)
-          Error(error.UnsupportedCliVersionError(
-            detected_version: detected_str,
-            minimum_required: required_str,
-            suggestion: "Run: npm update -g @anthropic-ai/claude-code",
-          ))
-        }
-      }
-    }
-  }
-}
-
-/// Internal: Spawn query without bidir warning check.
-fn spawn_query_no_bidir_check(
-  prompt: String,
-  options: QueryOptions,
-  cli_path: String,
-) -> Result(QueryStream, QueryError) {
-  spawn_query_no_bidir_check_with_warnings(prompt, options, cli_path, [])
-}
-
-/// Internal: Spawn query without bidir warning check, with warnings.
-fn spawn_query_no_bidir_check_with_warnings(
-  prompt: String,
-  options: QueryOptions,
-  cli_path: String,
-  warnings: List(error.Warning),
-) -> Result(QueryStream, QueryError) {
-  // Build CLI arguments
-  let args = cli.build_cli_args(options, prompt)
-
-  // Determine cwd - empty string means inherit
-  let cwd = case options.cwd {
-    None -> ""
-    Some(path) ->
-      case string.is_empty(path) {
-        True -> ""
-        False -> path
-      }
-  }
-
-  case options.test_mode {
-    True -> {
-      case options.test_runner {
-        Some(test_runner) -> {
-          case runner.spawn(test_runner, cli_path, args, cwd) {
-            Error(reason) -> Error(error.SpawnError(reason))
-            Ok(handle) ->
-              Ok(internal_stream.new_from_runner_with_warnings(
-                test_runner,
-                handle,
-                warnings,
-              ))
-          }
-        }
-        None ->
-          Error(error.TestModeError(
-            "test_mode enabled but no test_runner provided. Use with_test_mode(runner) to configure.",
-          ))
-      }
-    }
-    False ->
-      case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
-        Error(reason) -> Error(error.SpawnError(reason))
-        Ok(port) -> Ok(internal_stream.new_with_warnings(port, warnings))
-      }
-  }
 }
 
 /// Internal: Build args, spawn port, return QueryStream with initial warnings.
