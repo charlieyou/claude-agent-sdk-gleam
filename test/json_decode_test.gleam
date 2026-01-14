@@ -412,3 +412,51 @@ pub fn decode_usage_all_optional_succeeds_test() {
     Error(_) -> panic as "Expected empty usage object to decode successfully"
   }
 }
+
+// =============================================================================
+// Golden Transcript Tests (Contract Validation)
+// =============================================================================
+
+/// Load and parse a golden transcript (NDJSON) file
+fn load_golden_transcript(name: String) -> List(String) {
+  let path = "test/fixtures/golden/" <> name
+  case simplifile.read(path) {
+    Ok(content) -> {
+      content
+      |> string.split("\n")
+      |> list.filter(fn(line) { string.trim(line) != "" })
+    }
+    Error(_) -> panic as { "Failed to load golden transcript: " <> path }
+  }
+}
+
+pub fn decode_golden_basic_query_transcript_test() {
+  // Load the golden transcript and verify each line parses successfully
+  let lines = load_golden_transcript("basic_query.ndjson")
+
+  // Should have 3 messages: system, assistant, result
+  should.equal(list.length(lines), 3)
+
+  // Decode each line and verify type
+  let types =
+    list.map(lines, fn(line) {
+      case decoder.decode_message(line) {
+        Ok(msg) -> {
+          case msg {
+            message.System(_) -> "system"
+            message.Assistant(_) -> "assistant"
+            message.Result(_) -> "result"
+            message.User(_) -> "user"
+          }
+        }
+        Error(err) -> {
+          panic as {
+            "Failed to decode golden transcript line: " <> string.inspect(err)
+          }
+        }
+      }
+    })
+
+  // Verify expected message type sequence
+  should.equal(types, ["system", "assistant", "result"])
+}
