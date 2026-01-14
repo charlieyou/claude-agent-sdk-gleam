@@ -92,7 +92,7 @@ fn get_timestamp_iso8601() -> String
 
 /// Get monotonic time in milliseconds.
 @external(erlang, "e2e_helpers_ffi", "get_monotonic_ms")
-fn get_monotonic_ms() -> Int
+pub fn get_monotonic_ms() -> Int
 
 /// Ensure directory exists (recursive).
 @external(erlang, "e2e_helpers_ffi", "ensure_dir")

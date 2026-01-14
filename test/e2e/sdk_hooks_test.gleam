@@ -23,7 +23,7 @@ import claude_agent_sdk/internal/bidir.{
   SessionEnded,
 }
 import claude_agent_sdk/internal/bidir_runner
-import e2e/helpers.{skip_if_no_e2e}
+import e2e/helpers.{get_monotonic_ms, skip_if_no_e2e}
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
@@ -169,16 +169,31 @@ fn handle_wait_failure_with_ctx(
 }
 
 /// Wait for and collect subscriber messages until session ends or timeout.
+/// Uses deadline tracking to ensure total wait time doesn't exceed timeout_ms.
 fn collect_messages(
   subscriber: process.Subject(SubscriberMessage),
   timeout_ms: Int,
   acc: List(Dynamic),
 ) -> #(List(Dynamic), Bool) {
-  case process.receive(subscriber, timeout_ms) {
-    Ok(CliMessage(msg)) ->
-      collect_messages(subscriber, timeout_ms, [msg, ..acc])
-    Ok(SessionEnded(_)) -> #(acc, True)
-    Error(Nil) -> #(acc, False)
+  let deadline_ms = get_monotonic_ms() + timeout_ms
+  collect_messages_loop(subscriber, deadline_ms, acc)
+}
+
+fn collect_messages_loop(
+  subscriber: process.Subject(SubscriberMessage),
+  deadline_ms: Int,
+  acc: List(Dynamic),
+) -> #(List(Dynamic), Bool) {
+  let remaining_ms = deadline_ms - get_monotonic_ms()
+  case remaining_ms > 0 {
+    False -> #(acc, False)
+    True ->
+      case process.receive(subscriber, remaining_ms) {
+        Ok(CliMessage(msg)) ->
+          collect_messages_loop(subscriber, deadline_ms, [msg, ..acc])
+        Ok(SessionEnded(_)) -> #(acc, True)
+        Error(Nil) -> #(acc, False)
+      }
   }
 }
 
