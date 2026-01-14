@@ -6,9 +6,20 @@
 ///
 /// ## Module Boundaries
 ///
-/// - **state.gleam** (this file): Pure types (SessionLifecycle, SessionError)
-///   and the transition function
+/// - **state.gleam** (this file): Pure types (SessionLifecycle) and the
+///   transition function. Re-exports SessionError from bidir.gleam.
 /// - **bidir.gleam**: OTP actor that uses these types with Process/Subject deps
+///
+/// ## Note on SessionError
+///
+/// SessionError is defined in bidir.gleam (the authoritative module) and
+/// re-exported here. This avoids duplication while keeping the pure state
+/// module usable without directly importing the OTP-dependent bidir module.
+import claude_agent_sdk/internal/bidir.{
+  type SessionError, CliExitedDuringInit, CliExitedDuringStartup,
+  InitializationError, InitializationTimeout, RuntimeError,
+}
+
 /// Session lifecycle states.
 ///
 /// - Starting: Actor started, CLI port not yet spawned
@@ -29,22 +40,15 @@ pub type SessionLifecycle {
   Failed(SessionError)
 }
 
-/// Specific error variants for session failures.
-pub type SessionError {
-  /// Initialization handshake timed out.
-  InitializationTimeout
-  /// CLI returned error during initialization.
-  InitializationError(message: String)
-  /// CLI exited before initialization completed.
-  CliExitedDuringInit
-  /// CLI exited during startup (before spawn completed).
-  CliExitedDuringStartup
-  /// A runtime error occurred with the given reason.
-  RuntimeError(reason: String)
-  /// Too many operations queued during initialization (max 16).
-  InitQueueOverflow(message: String)
-  /// Too many pending control requests (max 64).
-  TooManyPendingRequests(message: String)
+/// Stub for SessionState type.
+///
+/// The full SessionState type is defined in bidir.gleam and contains
+/// OTP-dependent fields (Subject, Pid). This stub exists to satisfy the
+/// module structure requirement; the actual implementation remains in
+/// bidir.gleam until T003 (actor extraction).
+pub type SessionState {
+  /// Placeholder - actual state is in bidir.gleam.
+  SessionStateStub
 }
 
 /// Events that trigger lifecycle state transitions.
