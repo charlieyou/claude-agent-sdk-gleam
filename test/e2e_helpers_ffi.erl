@@ -1,7 +1,8 @@
 -module(e2e_helpers_ffi).
 -export([get_env/1, set_env/2, unset_env/1, get_plain_args/0, kill_pid/1, acquire_lock/0, release_lock/0,
          get_timestamp_iso8601/0, get_monotonic_ms/0, ensure_dir/1, append_line/2,
-         is_concurrent_mode/0, port_close_safe/1, has_soak_flag/0, read_file_lines/1]).
+         is_concurrent_mode/0, port_close_safe/1, has_soak_flag/0, read_file_lines/1,
+         with_cleanup/2]).
 
 -define(LOCK_TABLE, e2e_query_lock_table).
 
@@ -131,14 +132,25 @@ has_soak_flag() ->
 
 %% Read file lines (for golden file parsing).
 %% Returns {ok, [Binary]} on success, {error, Reason} on failure.
+%% Handles both LF and CRLF line endings.
 read_file_lines(Path) ->
     PathStr = binary_to_list(Path),
     case file:read_file(PathStr) of
         {ok, Content} ->
-            Lines = binary:split(Content, <<"\n">>, [global, trim]),
+            %% Handle both CRLF and LF line endings
+            Lines = binary:split(Content, [<<"\r\n">>, <<"\n">>], [global, trim]),
             %% Filter empty lines
             NonEmpty = [L || L <- Lines, L =/= <<>>],
             {ok, NonEmpty};
         {error, Reason} ->
             {error, list_to_binary(atom_to_list(Reason))}
+    end.
+
+%% Execute a function with guaranteed cleanup via try/after.
+%% Cleanup runs even if F panics/throws/exits.
+with_cleanup(F, Cleanup) ->
+    try
+        F()
+    after
+        Cleanup()
     end.

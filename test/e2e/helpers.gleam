@@ -76,7 +76,7 @@ fn get_plain_args() -> dynamic.Dynamic
 
 /// Kill a process immediately.
 @external(erlang, "e2e_helpers_ffi", "kill_pid")
-fn kill_pid(pid: process.Pid) -> Nil
+pub fn kill_pid(pid: process.Pid) -> Nil
 
 /// Acquire global lock for serialized CLI queries.
 @external(erlang, "e2e_helpers_ffi", "acquire_lock")
@@ -551,12 +551,17 @@ pub type ErlangPort
 /// Get the Erlang port from a QueryStream, if accessible.
 /// Note: QueryStream is opaque, so we cannot extract the port directly.
 /// Returns None (port access not supported on opaque streams).
+///
+/// For crash simulation, use the pattern from query_and_consume_with_timeout:
+/// 1. Spawn a process with process.spawn_unlinked to run the query
+/// 2. Track the spawned PID
+/// 3. Use kill_pid(pid) to simulate crash
 pub fn get_stream_port(
   _stream: claude_agent_sdk.QueryStream,
 ) -> Option(ErlangPort) {
   // QueryStream is opaque and does not expose its internal port.
   // This function is provided for API completeness; callers should
-  // use alternative approaches (e.g., kill_pid on the owning process).
+  // use kill_pid on a spawned wrapper process (see docstring).
   None
 }
 
@@ -578,14 +583,17 @@ fn port_close_safe_impl(port: ErlangPort) -> Result(Nil, String)
 
 /// Run a function with concurrent mode enabled.
 /// Sets E2E_ALLOW_CONCURRENT=1 for the duration of the function, then restores.
+/// Uses try/after pattern to ensure env var is unset even if f() panics.
 pub fn with_concurrent_mode(f: fn() -> a) -> a {
   // Set env var
   set_env_ffi("E2E_ALLOW_CONCURRENT", "1")
-  let result = f()
-  // Restore (unset)
-  unset_env_ffi("E2E_ALLOW_CONCURRENT")
-  result
+  // Use FFI try/after to ensure cleanup on panic
+  with_cleanup_ffi(f, fn() { unset_env_ffi("E2E_ALLOW_CONCURRENT") })
 }
+
+/// FFI for try/after pattern - ensures cleanup runs even on panic.
+@external(erlang, "e2e_helpers_ffi", "with_cleanup")
+fn with_cleanup_ffi(f: fn() -> a, cleanup: fn() -> Nil) -> a
 
 /// FFI for set_env (internal use).
 @external(erlang, "e2e_helpers_ffi", "set_env")
@@ -620,7 +628,11 @@ pub fn validate_contract(
 ) -> Result(Nil, ContractError) {
   // Read golden file
   case read_file_lines(golden_path) {
-    Error(_) -> Error(GoldenFileNotFound(golden_path))
+    Error(reason) ->
+      case reason {
+        "enoent" -> Error(GoldenFileNotFound(golden_path))
+        _ -> Error(GoldenFileParseError(golden_path, reason))
+      }
     Ok(expected_types) -> {
       let actual_types =
         list.map(messages, fn(env) {
@@ -647,6 +659,7 @@ pub fn validate_contract(
 }
 
 /// Validate message types match expected types.
+/// Precondition: lists have equal length (enforced by caller).
 fn validate_types(
   expected: List(String),
   actual: List(String),
@@ -660,7 +673,9 @@ fn validate_types(
         False -> Error(MessageTypeMismatch(index, e, a))
       }
     }
-    _, _ -> Ok(Nil)
+    // Unreachable: caller ensures lists have equal length
+    _, _ ->
+      panic as "validate_types: lists have different lengths (invariant violated)"
   }
 }
 
