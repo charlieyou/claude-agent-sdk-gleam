@@ -73,12 +73,9 @@ fn dynamic_equals(a: Dynamic, b: Dynamic) -> Bool
 /// Used to filter select_other messages: only actual port messages should be
 /// routed to handle_port_message. Other messages are treated as unexpected.
 fn is_port_tuple(msg: Dynamic, port: port_ffi.Port) -> Bool {
-  // Decode first element of tuple and check if it equals our port
-  let outer_decoder = {
-    use first_elem <- decode.field(0, decode.dynamic)
-    decode.success(first_elem)
-  }
-  case decode.run(msg, outer_decoder) {
+  // Extract first element of tuple using decode.at for consistency with
+  // other tuple decoding in this file (e.g., select_record handlers)
+  case decode.run(msg, decode.at([0], decode.dynamic)) {
     Ok(first_elem) -> {
       let port_dyn = port_ffi.port_to_dynamic(port)
       dynamic_equals(first_elem, port_dyn)
