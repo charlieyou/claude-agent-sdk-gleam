@@ -39,6 +39,10 @@ while [[ $# -gt 0 ]]; do
             shift
             ;;
         --threshold)
+            if [[ $# -lt 2 ]] || [[ ! "$2" =~ ^[0-9]+(\.[0-9]+)?$ ]]; then
+                echo "Error: --threshold requires a numeric value (e.g., --threshold 95.0)" >&2
+                exit 2
+            fi
             THRESHOLD="$2"
             ELIGIBLE_ONLY=true  # Threshold implies eligible-only
             shift 2
@@ -101,8 +105,10 @@ gleam build --target=erlang >/dev/null 2>&1 || {
     exit 2
 }
 # Run gleam test to compile test modules to beam files
-gleam test --target=erlang >/dev/null 2>&1 || {
-    echo "Test compilation failed" >&2
+# Capture output to show on failure, but suppress on success
+test_compile_output=$(gleam test --target=erlang 2>&1) || {
+    echo "Test compilation failed:" >&2
+    echo "$test_compile_output" >&2
     exit 2
 }
 
