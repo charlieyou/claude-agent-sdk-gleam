@@ -203,6 +203,8 @@ gleam test -- --e2e
 
 End-to-end tests validate the full SDK against a real Claude CLI. See [`docs/E2E_TESTING.md`](docs/E2E_TESTING.md) for detailed documentation.
 
+**Note on permission-deny behavior:** The SDK sends permission-deny responses over the control protocol, but the real Claude CLI may still execute tools in some environments. E2E tests therefore treat deny enforcement as best-effort and focus on verifying that permission callbacks are invoked and responses are sent, not that the CLI always blocks execution.
+
 #### Running Locally
 
 ```bash
