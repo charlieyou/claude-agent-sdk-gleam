@@ -1,18 +1,24 @@
-/// E2E Tests for Network/Credential Failure Handling.
+/// Unit Tests for SDK Error Handling of Authentication/Credential Failures.
 ///
-/// These tests verify the SDK handles authentication and credential failures
-/// with clear error types. They use mock runners for isolation - no real CLI
-/// calls and no global env mutation.
+/// SCOPE: These tests validate SDK logic ONLY - how the SDK interprets
+/// process exit codes and maps them to error types. They do NOT test
+/// actual Claude CLI behavior.
 ///
-/// ## Why Mock Instead of Real CLI?
-/// The real Claude CLI hangs waiting for interactive authentication when run
-/// without valid credentials in a non-TTY environment. Using mocks allows us to
-/// test the SDK's error handling of the auth failure pattern (exit code 1,
-/// empty stdout) without the test timing out.
+/// ## Mock-Based Design
+/// These tests use mock runners that simulate the exit code patterns we expect
+/// from the CLI. This means:
+/// - If the real CLI changes its exit codes/output, these tests won't detect it
+/// - They verify SDK error mapping, not CLI contract compliance
+/// - Real CLI E2E tests would need valid credentials and network access
+///
+/// ## What These Tests Actually Verify
+/// - SDK maps exit code 1 + empty stdout → ProcessError with auth hint
+/// - Diagnostic fields (exit_code_hint, troubleshooting) are populated
+/// - Error types are actionable for SDK consumers
 ///
 /// ## Test Cases
-/// - SDK-AUTH-01: Invalid API key produces clear authentication error
-/// - SDK-AUTH-02: Error maps to SDK error type (ProcessError with diagnostic)
+/// - SDK-AUTH-01: SDK correctly interprets simulated auth failure pattern
+/// - SDK-AUTH-02: Diagnostic fields populated for process errors
 ///
 /// ## Running Tests
 /// ```bash
@@ -31,28 +37,25 @@ import gleeunit/should
 // SDK-AUTH-01: Authentication Error Handling
 // ============================================================================
 
-/// SDK-AUTH-01: Verify invalid API key produces clear authentication error.
+/// SDK-AUTH-01: Verify SDK interprets auth failure pattern correctly.
 ///
-/// This test simulates an authentication failure by using a mock runner that
-/// returns exit code 1 with empty stdout - the pattern seen when Claude CLI
-/// encounters an invalid API key. The SDK should surface this as a ProcessError
-/// with authentication-related diagnostic hints.
+/// This test uses a mock runner returning exit code 1 with empty stdout.
+/// We ASSUME this pattern indicates auth failure based on observed CLI behavior,
+/// but this test does NOT verify the CLI actually produces this pattern.
 ///
-/// Isolation: Uses mock runner, NOT global env mutation. Other tests unaffected.
+/// What's tested: SDK error mapping logic
+/// What's NOT tested: Actual CLI behavior with invalid credentials
 pub fn sdk_auth_01_invalid_api_key_test() {
   let ctx = helpers.new_test_context("sdk_auth_01_invalid_api_key")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
-  // Mock runner simulates authentication failure:
-  // - CLI spawns successfully
-  // - First read returns exit status 1 (auth failure pattern)
-  // - No data emitted (empty stdout, error only on stderr which we don't capture)
+  // Mock runner returns pattern we ASSUME represents auth failure.
+  // CAVEAT: If real CLI changes exit code behavior, this test won't catch it.
   let mock_runner =
     runner.test_runner(
       on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.nil()) },
       on_read: fn(_handle) {
-        // Simulate auth failure: immediate exit with code 1, no stdout
-        // This matches the real CLI behavior when ANTHROPIC_API_KEY is invalid
+        // Assumed auth failure pattern: exit 1, empty stdout
         runner.ExitStatus(1)
       },
       on_close: fn(_handle) { Nil },
@@ -119,20 +122,15 @@ pub fn sdk_auth_01_invalid_api_key_test() {
 // SDK-AUTH-02: Error Type Mapping
 // ============================================================================
 
-/// SDK-AUTH-02: Verify auth error maps to recognizable SDK error type.
+/// SDK-AUTH-02: Verify diagnostic fields are populated for process errors.
 ///
-/// This test verifies that authentication failures are mapped to the SDK's
-/// error type system with actionable diagnostic information. The error should
-/// include:
-/// - Clear exit code interpretation
-/// - Troubleshooting guidance
-/// - Context about stdout state
+/// Tests that ProcessError includes actionable diagnostic fields.
+/// Uses mock runner - does NOT verify actual CLI produces these patterns.
 pub fn sdk_auth_02_error_type_mapping_test() {
   let ctx = helpers.new_test_context("sdk_auth_02_error_type_mapping")
   let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
-  // Mock runner simulates auth failure with different exit code patterns
-  // Exit 1 with empty stdout = authentication required
+  // Mock runner returning assumed auth failure pattern (exit 1, empty stdout)
   let mock_runner =
     runner.test_runner(
       on_spawn: fn(_cmd, _args, _cwd) { Ok(dynamic.nil()) },
