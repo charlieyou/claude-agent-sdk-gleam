@@ -25,6 +25,7 @@ import gleam/dynamic/decode
 import gleam/erlang/process
 import gleam/io
 import gleam/json
+import gleam/list
 import gleam/string
 import gleeunit/should
 
@@ -107,22 +108,50 @@ pub fn permission_denied_flow_test() {
                   ])
 
                   // Collect remaining messages to let session complete
-                  let _ = collect_messages(subscriber, 10_000, [])
+                  let ctx = helpers.test_step(ctx, "collect_stream_messages")
+                  let #(messages, _ended) =
+                    collect_messages(subscriber, 10_000, [])
+
+                  // Check if denial is surfaced in message stream
+                  let ctx = helpers.test_step(ctx, "check_denial_in_stream")
+                  let denial_in_stream = check_for_denial_message(messages)
+                  case denial_in_stream {
+                    True -> helpers.log_info(ctx, "denial_surfaced_in_stream")
+                    False ->
+                      helpers.log_info(ctx, "denial_not_in_stream_warning")
+                  }
+
+                  // Check that no tool output ("testmarker") appears in stream
+                  let ctx = helpers.test_step(ctx, "check_no_tool_output")
+                  let has_tool_output = check_for_testmarker(messages)
+                  case has_tool_output {
+                    True -> {
+                      helpers.log_error(
+                        ctx,
+                        "testmarker_found",
+                        "Tool output 'testmarker' found in stream - tool executed",
+                      )
+                    }
+                    False -> helpers.log_info(ctx, "no_testmarker_in_stream")
+                  }
 
                   let ctx = helpers.test_step(ctx, "verify_no_execution")
                   // Verify tool did NOT execute (PostToolUse should not have fired)
                   case process.receive(execution_subject, 500) {
                     Ok(_) -> {
-                      // WARNING: Tool executed despite denial
-                      // This is documented CLI behavior - permission deny may not
-                      // prevent execution in all cases. Test passes with warning.
-                      helpers.log_info(ctx, "tool_executed_despite_deny")
+                      // FAILURE: Tool executed despite denial
+                      helpers.log_error(
+                        ctx,
+                        "tool_executed_despite_deny",
+                        "PostToolUse hook fired - tool executed despite permission denial",
+                      )
                       helpers.log_test_complete(
                         ctx,
-                        True,
-                        "Tool executed despite permission deny (warning: CLI behavior)",
+                        False,
+                        "Tool executed despite permission deny",
                       )
                       bidir.shutdown(session)
+                      should.fail()
                     }
                     Error(Nil) -> {
                       // SUCCESS: Tool did not execute
@@ -277,6 +306,26 @@ fn wait_for_running_loop(
       }
     }
   }
+}
+
+/// Check if any message contains denial-related content.
+/// Looks for patterns like "denied", "permission", "blocked" in message strings.
+fn check_for_denial_message(messages: List(Dynamic)) -> Bool {
+  list.any(messages, fn(msg) {
+    let msg_str = string.lowercase(string.inspect(msg))
+    string.contains(msg_str, "denied")
+    || string.contains(msg_str, "permission")
+    || string.contains(msg_str, "blocked")
+    || string.contains(msg_str, "reject")
+  })
+}
+
+/// Check if any message contains "testmarker" (would indicate tool execution).
+fn check_for_testmarker(messages: List(Dynamic)) -> Bool {
+  list.any(messages, fn(msg) {
+    let msg_str = string.inspect(msg)
+    string.contains(msg_str, "testmarker")
+  })
 }
 
 /// Collect messages from subscriber until session ends or timeout.
