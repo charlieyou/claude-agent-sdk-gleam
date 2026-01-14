@@ -30,8 +30,8 @@ fn receive_until_match_contains(
     False -> {
       case process.receive(subject, 500) {
         Ok(msg) -> {
-          case string.contains(msg, target_id)
-            && string.contains(msg, required)
+          case
+            string.contains(msg, target_id) && string.contains(msg, required)
           {
             True -> Ok(msg)
             False ->

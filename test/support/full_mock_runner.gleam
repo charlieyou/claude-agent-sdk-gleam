@@ -299,10 +299,9 @@ pub fn trigger_hook_simulation(adapter: RunnerAdapter) -> RunnerAdapter {
   case adapter.pending_hooks, adapter.session_subject {
     [#(callback_id, input), ..rest], Some(session) -> {
       let req_id = "cli_hook_" <> int.to_string(adapter.next_request_id)
-      let resolved_callback_id = case dict.get(
-        adapter.hook_callback_map,
-        callback_id,
-      ) {
+      let resolved_callback_id = case
+        dict.get(adapter.hook_callback_map, callback_id)
+      {
         Ok(mapped) -> mapped
         Error(Nil) -> callback_id
       }
@@ -393,11 +392,11 @@ fn extract_hook_callback_map(init_json: String) -> dict.Dict(String, String) {
         Ok(hooks) ->
           dict.fold(hooks, dict.new(), fn(acc, event_name, entries) {
             case entries {
-              [ids, ..] -> case ids {
-                [callback_id, ..] ->
-                  dict.insert(acc, event_name, callback_id)
-                [] -> acc
-              }
+              [ids, ..] ->
+                case ids {
+                  [callback_id, ..] -> dict.insert(acc, event_name, callback_id)
+                  [] -> acc
+                }
               [] -> acc
             }
           })

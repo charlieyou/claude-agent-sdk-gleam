@@ -162,10 +162,11 @@ fn decode_can_use_tool(
       None -> []
     }
     let resolved_input = case classify(input) {
-      "Nil" -> case decode.run(request, decode.at(["tool_input"], decode.dynamic)) {
-        Ok(tool_input) -> tool_input
-        Error(_) -> input
-      }
+      "Nil" ->
+        case decode.run(request, decode.at(["tool_input"], decode.dynamic)) {
+          Ok(tool_input) -> tool_input
+          Error(_) -> input
+        }
       _ -> input
     }
     decode.success(CanUseTool(
