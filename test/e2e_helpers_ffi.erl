@@ -2,7 +2,7 @@
 -export([get_env/1, set_env/2, unset_env/1, get_plain_args/0, kill_pid/1, acquire_lock/0, release_lock/0,
          get_timestamp_iso8601/0, get_monotonic_ms/0, ensure_dir/1, append_line/2,
          is_concurrent_mode/0, port_close_safe/1, has_soak_flag/0, read_file_lines/1,
-         with_cleanup/2]).
+         with_cleanup/2, get_process_count/0, get_ets_count/0, get_port_count/0]).
 
 -define(LOCK_TABLE, e2e_query_lock_table).
 
@@ -155,3 +155,18 @@ with_cleanup(F, Cleanup) ->
     after
         Cleanup()
     end.
+
+%% Get current Erlang process count.
+%% Uses erlang:system_info/1 for accurate count.
+get_process_count() ->
+    erlang:system_info(process_count).
+
+%% Get current ETS table count.
+%% Returns length of ets:all() list.
+get_ets_count() ->
+    length(ets:all()).
+
+%% Get current Erlang port count.
+%% Uses erlang:system_info/1 for accurate count.
+get_port_count() ->
+    erlang:system_info(port_count).
