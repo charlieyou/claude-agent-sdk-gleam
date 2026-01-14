@@ -183,18 +183,28 @@ coverage_data=$(erl -noshell -pa "$EBIN_DIR" $DEP_PATHS -eval '
                         {Fun, fail}
                 end
             end, TestFuns),
-            {Mod, Results}
+            {Mod, ok, Results}
         catch C:R ->
             io:format(standard_error, "ERROR loading ~p: ~p:~p~n", [Mod, C, R]),
-            {Mod, []}
+            {Mod, load_error, []}
         end
     end, TestMods),
 
-    %% Count results
-    AllResults = lists:flatten([Rs || {_, Rs} <- TestResults]),
+    %% Count results and check for load errors
+    LoadErrors = length([M || {M, load_error, _} <- TestResults]),
+    AllResults = lists:flatten([Rs || {_, _, Rs} <- TestResults]),
     Passed = length([X || X = {_, pass} <- AllResults]),
     Failed = length([X || X = {_, fail} <- AllResults]),
     Skipped = length([X || X = {_, skip} <- AllResults]),
+
+    %% Fail if any test modules failed to load
+    case LoadErrors of
+        0 -> ok;
+        N ->
+            io:format(standard_error, "~nERROR: ~p test module(s) failed to load~n", [N]),
+            cover:stop(),
+            halt(2)
+    end,
 
     case Failed of
         0 -> ok;
