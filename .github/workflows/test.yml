@@ -65,7 +65,7 @@ jobs:
         run: gleam deps download
       - name: Run E2E tests
         if: steps.prereq.outputs.skip != 'true'
-        run: gleam test
+        run: gleam test -- --e2e
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           E2E_SDK_TEST: "1"
