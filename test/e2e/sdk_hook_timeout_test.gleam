@@ -165,7 +165,11 @@ fn handle_wait_failure_with_ctx(
   session: process.Subject(bidir.ActorMessage),
   _state: bidir.SessionLifecycle,
 ) -> Nil {
-  helpers.log_error(ctx, "session_failed", "Session failed to reach Running state")
+  helpers.log_error(
+    ctx,
+    "session_failed",
+    "Session failed to reach Running state",
+  )
   helpers.log_test_complete(ctx, False, "Session failed to reach Running state")
   bidir.shutdown(session)
   should.fail()
@@ -239,14 +243,11 @@ pub fn sdk_37_hook_timeout_test() {
               let start_time = get_monotonic_ms()
               process.send(hook_started, start_time)
 
-              helpers.log_info_with(
-                helpers.new_test_context("sdk_37_slow_hook"),
-                "hook_sleeping",
-                [
-                  #("sleep_ms", json.int(slow_hook_sleep_ms)),
-                  #("timeout_ms", json.int(test_hook_timeout_ms)),
-                ],
-              )
+              // Use captured ctx from outer scope for consistent logging
+              helpers.log_info_with(ctx, "hook_sleeping", [
+                #("sleep_ms", json.int(slow_hook_sleep_ms)),
+                #("timeout_ms", json.int(test_hook_timeout_ms)),
+              ])
 
               // Sleep longer than the configured timeout
               process.sleep(slow_hook_sleep_ms)
@@ -338,18 +339,23 @@ pub fn sdk_37_hook_timeout_test() {
                           )
                         }
                         False -> {
-                          helpers.log_info_with(ctx, "timing_unexpected", [
-                            #("elapsed_ms", json.int(elapsed)),
-                            #(
-                              "expected_timeout_ms",
-                              json.int(test_hook_timeout_ms),
-                            ),
-                          ])
+                          helpers.log_error(
+                            ctx,
+                            "timing_unexpected",
+                            "PostToolUse received but elapsed "
+                              <> int.to_string(elapsed)
+                              <> "ms >= hook sleep "
+                              <> int.to_string(slow_hook_sleep_ms)
+                              <> "ms - timeout should have fired earlier",
+                          )
                           helpers.log_test_complete(
                             ctx,
-                            True,
-                            "PostToolUse received but timing suggests hook may have completed normally",
+                            False,
+                            "Timeout did not fire before hook would have completed",
                           )
+                          let _ = collect_messages(subscriber, 5000, [])
+                          bidir.shutdown(session)
+                          should.fail()
                         }
                       }
 
@@ -361,29 +367,40 @@ pub fn sdk_37_hook_timeout_test() {
                       case process.receive(hook_completed, 100) {
                         Ok(complete_time) -> {
                           let elapsed = complete_time - start_time
-                          helpers.log_info_with(
+                          helpers.log_error(
                             ctx,
                             "hook_completed_no_timeout",
-                            [#("elapsed_ms", json.int(elapsed))],
+                            "Hook completed in "
+                              <> int.to_string(elapsed)
+                              <> "ms without timeout firing (timeout="
+                              <> int.to_string(test_hook_timeout_ms)
+                              <> "ms)",
                           )
                           helpers.log_test_complete(
                             ctx,
-                            True,
-                            "Hook completed without timeout - may indicate timeout not applied to this config",
+                            False,
+                            "Hook completed without timeout - timeout mechanism not applied",
                           )
+                          let _ = collect_messages(subscriber, 5000, [])
+                          bidir.shutdown(session)
+                          should.fail()
                         }
                         Error(Nil) -> {
-                          helpers.log_info(ctx, "no_post_tool_or_completion")
+                          helpers.log_error(
+                            ctx,
+                            "no_post_tool_or_completion",
+                            "Neither PostToolUse nor hook completion received within wait period",
+                          )
                           helpers.log_test_complete(
                             ctx,
-                            True,
-                            "Neither PostToolUse nor hook completion received - CLI may not have triggered tool use",
+                            False,
+                            "Neither PostToolUse nor hook completion received - test setup or CLI issue",
                           )
+                          let _ = collect_messages(subscriber, 5000, [])
+                          bidir.shutdown(session)
+                          should.fail()
                         }
                       }
-
-                      let _ = collect_messages(subscriber, 5000, [])
-                      bidir.shutdown(session)
                     }
                   }
                 }
@@ -395,11 +412,12 @@ pub fn sdk_37_hook_timeout_test() {
                   )
                   helpers.log_test_complete(
                     ctx,
-                    True,
-                    "Hook not invoked - CLI may not have executed tool",
+                    False,
+                    "Hook not invoked - CLI did not execute tool",
                   )
                   let _ = collect_messages(subscriber, 5000, [])
                   bidir.shutdown(session)
+                  should.fail()
                 }
               }
             }
