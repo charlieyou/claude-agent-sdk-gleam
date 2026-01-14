@@ -1,7 +1,7 @@
 preset: gleam
 
 commands:
-  e2e: "E2E_SDK_TEST=1 gleam test"
+  e2e: "gleam test -- --e2e"
 
 evidence_check:
   required:
@@ -16,7 +16,8 @@ per_issue_review:
   finding_threshold: P1
 
 validation_triggers:
-  run_end:
+  epic_completion:
+    epic_depth: top_level
     fire_on: both
     failure_mode: remediate 
     max_retries: 3
