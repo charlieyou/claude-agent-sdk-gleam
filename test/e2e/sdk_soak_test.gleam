@@ -26,7 +26,9 @@ import gleeunit/should
 const soak_iterations = 25
 
 /// Maximum allowed growth in process count from baseline.
-const max_process_growth = 50
+/// With 25 iterations, this allows ~0.4 leaked processes per query,
+/// ensuring linear leaks (1+ per request) are caught reliably.
+const max_process_growth = 10
 
 /// Maximum allowed growth in ETS table count from baseline.
 const max_ets_growth = 10
