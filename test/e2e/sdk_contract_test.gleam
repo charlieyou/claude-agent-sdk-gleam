@@ -248,13 +248,22 @@ fn validate_system_fields(_msg: SystemMessage, _idx: Int) -> Result(Nil, String)
 }
 
 /// Validate assistant message required fields.
-/// AssistantMessage.message must be Some for a valid response.
+/// AssistantMessage.message must be Some and its content field must also be Some.
 fn validate_assistant_fields(
   msg: AssistantMessage,
   idx: Int,
 ) -> Result(Nil, String) {
   case msg.message {
-    Some(_) -> Ok(Nil)
+    Some(inner) ->
+      case inner.content {
+        Some(_) -> Ok(Nil)
+        None ->
+          Error(
+            "Line "
+            <> int.to_string(idx)
+            <> ": assistant message missing required field 'content'",
+          )
+      }
     None ->
       Error(
         "Line "
