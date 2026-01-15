@@ -18,7 +18,7 @@ fn to_dynamic(a: a) -> Dynamic
 
 pub fn with_pre_tool_use_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_pre_tool_use(fn(_ctx) { hook.Continue })
 
   // Callback should be set
@@ -29,7 +29,7 @@ pub fn with_pre_tool_use_sets_callback_test() {
 
 pub fn with_post_tool_use_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_post_tool_use(fn(_ctx) { hook.Continue })
 
   opts.on_post_tool_use
@@ -39,7 +39,7 @@ pub fn with_post_tool_use_sets_callback_test() {
 
 pub fn with_user_prompt_submit_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_user_prompt_submit(fn(_ctx) { hook.Continue })
 
   opts.on_user_prompt_submit
@@ -49,7 +49,7 @@ pub fn with_user_prompt_submit_sets_callback_test() {
 
 pub fn with_stop_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_stop(fn(_ctx) { hook.Continue })
 
   opts.on_stop
@@ -59,7 +59,7 @@ pub fn with_stop_sets_callback_test() {
 
 pub fn with_subagent_stop_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_subagent_stop(fn(_ctx) { hook.Continue })
 
   opts.on_subagent_stop
@@ -69,7 +69,7 @@ pub fn with_subagent_stop_sets_callback_test() {
 
 pub fn with_pre_compact_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_pre_compact(fn(_ctx) { hook.Continue })
 
   opts.on_pre_compact
@@ -79,7 +79,7 @@ pub fn with_pre_compact_sets_callback_test() {
 
 pub fn with_can_use_tool_sets_callback_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_can_use_tool(fn(_ctx) { hook.Allow })
 
   opts.on_can_use_tool
@@ -94,7 +94,7 @@ pub fn with_can_use_tool_sets_callback_test() {
 pub fn builders_compose_in_pipeline_test() {
   // Verify all hook builders can be chained together
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_pre_tool_use(fn(_ctx) { hook.Continue })
     |> options.with_post_tool_use(fn(_ctx) { hook.Continue })
     |> options.with_user_prompt_submit(fn(_ctx) { hook.Continue })
@@ -114,27 +114,21 @@ pub fn builders_compose_in_pipeline_test() {
 }
 
 pub fn hook_builders_compose_with_other_builders_test() {
-  // Verify hook builders work with existing CLI option builders
+  // Verify multiple hook builders compose correctly
   let opts =
-    options.default_options()
-    |> options.with_model("sonnet")
-    |> options.with_max_turns(5)
+    options.bidir_options()
     |> options.with_pre_tool_use(fn(_ctx) { hook.Continue })
-    |> options.with_permission_mode(options.BypassPermissions)
+    |> options.with_post_tool_use(fn(_ctx) { hook.Continue })
     |> options.with_stop(fn(_ctx) { hook.Continue })
-
-  // CLI options should be set
-  opts.model |> should.equal(Some("sonnet"))
-  opts.max_turns |> should.equal(Some(5))
-  opts.permission_mode |> should.equal(Some(options.BypassPermissions))
 
   // Hook callbacks should be set
   opts.on_pre_tool_use |> option.is_some |> should.be_true
+  opts.on_post_tool_use |> option.is_some |> should.be_true
   opts.on_stop |> option.is_some |> should.be_true
 
   // Unset hooks should remain None
-  opts.on_post_tool_use |> should.equal(None)
   opts.on_user_prompt_submit |> should.equal(None)
+  opts.on_subagent_stop |> should.equal(None)
 }
 
 // =============================================================================
@@ -143,7 +137,7 @@ pub fn hook_builders_compose_with_other_builders_test() {
 
 pub fn pre_tool_use_callback_returns_block_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_pre_tool_use(fn(ctx) {
       case ctx.tool_name {
         "Bash" -> hook.Block("Bash disabled")
@@ -165,7 +159,7 @@ pub fn pre_tool_use_callback_returns_block_test() {
 
 pub fn pre_tool_use_callback_returns_continue_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_pre_tool_use(fn(ctx) {
       case ctx.tool_name {
         "Bash" -> hook.Block("Bash disabled")
@@ -186,7 +180,7 @@ pub fn pre_tool_use_callback_returns_continue_test() {
 
 pub fn can_use_tool_callback_returns_deny_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_can_use_tool(fn(ctx) {
       case ctx.tool_name {
         "Write" -> hook.Deny("Write access disabled")
@@ -209,7 +203,7 @@ pub fn can_use_tool_callback_returns_deny_test() {
 
 pub fn can_use_tool_callback_returns_allow_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_can_use_tool(fn(ctx) {
       case ctx.tool_name {
         "Write" -> hook.Deny("Write access disabled")
@@ -235,7 +229,7 @@ pub fn can_use_tool_callback_returns_allow_test() {
 // =============================================================================
 
 pub fn default_options_has_no_hooks_test() {
-  let opts = options.default_options()
+  let opts = options.bidir_options()
 
   opts.on_pre_tool_use |> should.equal(None)
   opts.on_post_tool_use |> should.equal(None)
@@ -253,7 +247,7 @@ pub fn callback_overwrites_previous_test() {
   }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_pre_tool_use(first_callback)
     |> options.with_pre_tool_use(second_callback)
 

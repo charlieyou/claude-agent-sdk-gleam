@@ -19,7 +19,7 @@ import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  InterruptTimeout, RequestError, RequestSuccess, RequestTimeout,
+  InterruptTimeout, RequestError, RequestSuccess, RequestTimeout, StartConfig,
 }
 import support/mock_bidir_runner
 
@@ -174,7 +174,7 @@ pub fn interrupt_timeout_test() {
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   // Use a short timeout so test doesn't take 5 seconds
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 100,
       hook_timeouts: dict.new(),
@@ -228,7 +228,7 @@ pub fn interrupt_api_timeout_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 100,
       // Actor's internal timeout - fires at ~100ms

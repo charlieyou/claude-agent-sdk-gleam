@@ -268,25 +268,25 @@ pub fn pending_request_fields_accessible_test() {
 
 pub fn request_success_type_test() {
   let result = correlation.RequestSuccess(to_dynamic("payload"))
-  let assert correlation.RequestSuccess(_) = result
+  let correlation.RequestSuccess(_) = result
   should.be_true(True)
 }
 
 pub fn request_error_type_test() {
   let result = correlation.RequestError("something went wrong")
-  let assert correlation.RequestError(msg) = result
+  let correlation.RequestError(msg) = result
   should.equal(msg, "something went wrong")
 }
 
 pub fn request_timeout_type_test() {
   let result = correlation.RequestTimeout
-  let assert correlation.RequestTimeout = result
+  let correlation.RequestTimeout = result
   should.be_true(True)
 }
 
 pub fn request_session_stopped_type_test() {
   let result = correlation.RequestSessionStopped
-  let assert correlation.RequestSessionStopped = result
+  let correlation.RequestSessionStopped = result
   should.be_true(True)
 }
 
@@ -297,7 +297,7 @@ pub fn request_session_stopped_type_test() {
 pub fn correlation_found_contains_request_test() {
   let req = make_pending("test")
   let result = Found(req)
-  let assert Found(r) = result
+  let Found(r) = result
   should.equal(r.request_id, "test")
 }
 

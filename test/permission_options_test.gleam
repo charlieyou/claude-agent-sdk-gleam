@@ -20,7 +20,7 @@ pub fn with_mcp_server_adds_to_list_test() {
   let handler = fn(_request: Dynamic) -> Dynamic { to_dynamic(Nil) }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_mcp_server("my-server", handler)
 
   // Should have one server
@@ -37,7 +37,7 @@ pub fn with_mcp_server_accumulates_test() {
   let handler2 = fn(_request: Dynamic) -> Dynamic { to_dynamic("response2") }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_mcp_server("server-a", handler1)
     |> options.with_mcp_server("server-b", handler2)
 
@@ -57,7 +57,7 @@ pub fn mcp_server_handler_is_callable_test() {
   }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_mcp_server("echo-server", handler)
 
   let assert [#(_, stored_handler)] = opts.mcp_servers
@@ -74,7 +74,7 @@ pub fn mcp_server_handler_is_callable_test() {
 
 pub fn with_file_checkpointing_enables_flag_test() {
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_file_checkpointing()
 
   opts.file_checkpointing_enabled
@@ -82,7 +82,7 @@ pub fn with_file_checkpointing_enables_flag_test() {
 }
 
 pub fn default_options_has_checkpointing_disabled_test() {
-  let opts = options.default_options()
+  let opts = options.bidir_options()
 
   opts.file_checkpointing_enabled
   |> should.be_false
@@ -91,7 +91,7 @@ pub fn default_options_has_checkpointing_disabled_test() {
 pub fn file_checkpointing_idempotent_test() {
   // Calling multiple times should still be True
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_file_checkpointing()
     |> options.with_file_checkpointing()
 
@@ -104,7 +104,7 @@ pub fn file_checkpointing_idempotent_test() {
 // =============================================================================
 
 pub fn default_options_has_empty_mcp_servers_test() {
-  let opts = options.default_options()
+  let opts = options.bidir_options()
 
   opts.mcp_servers
   |> should.equal([])
@@ -118,7 +118,7 @@ pub fn mcp_and_checkpointing_compose_test() {
   let handler = fn(_request: Dynamic) -> Dynamic { to_dynamic(Nil) }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_mcp_server("my-server", handler)
     |> options.with_file_checkpointing()
 
@@ -131,16 +131,12 @@ pub fn mcp_composes_with_other_options_test() {
   let handler = fn(_request: Dynamic) -> Dynamic { to_dynamic(Nil) }
 
   let opts =
-    options.default_options()
-    |> options.with_model("sonnet")
+    options.bidir_options()
     |> options.with_mcp_server("tools", handler)
-    |> options.with_max_turns(5)
     |> options.with_file_checkpointing()
     |> options.with_timeout(30_000)
 
   // All options should be set correctly
-  opts.model |> should.equal(option.Some("sonnet"))
-  opts.max_turns |> should.equal(option.Some(5))
   list.length(opts.mcp_servers) |> should.equal(1)
   opts.file_checkpointing_enabled |> should.be_true
   opts.timeout_ms |> should.equal(option.Some(30_000))
@@ -152,9 +148,8 @@ pub fn multiple_mcp_servers_with_other_options_test() {
   let handler3 = fn(_: Dynamic) -> Dynamic { to_dynamic(3) }
 
   let opts =
-    options.default_options()
+    options.bidir_options()
     |> options.with_mcp_server("server-1", handler1)
-    |> options.with_permission_mode(options.BypassPermissions)
     |> options.with_mcp_server("server-2", handler2)
     |> options.with_file_checkpointing()
     |> options.with_mcp_server("server-3", handler3)
@@ -165,6 +160,5 @@ pub fn multiple_mcp_servers_with_other_options_test() {
   names |> should.equal(["server-1", "server-2", "server-3"])
 
   // Other options should be set
-  opts.permission_mode |> should.equal(option.Some(options.BypassPermissions))
   opts.file_checkpointing_enabled |> should.be_true
 }

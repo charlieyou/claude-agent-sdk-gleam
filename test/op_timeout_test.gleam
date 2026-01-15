@@ -16,7 +16,7 @@ import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  RequestSessionStopped, RequestSuccess,
+  RequestSessionStopped, RequestSuccess, StartConfig,
 }
 import support/mock_bidir_runner
 
@@ -87,7 +87,7 @@ pub fn response_before_timeout_cancels_timer_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 100,
       // 100ms timeout

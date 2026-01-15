@@ -15,8 +15,9 @@
 /// gleam test -- --only sdk_permission
 /// ```
 import claude_agent_sdk/error.{type StartError, SpawnFailed}
-import claude_agent_sdk/internal/bidir.{
-  type HookConfig, type SubscriberMessage, HookConfig, Running, SessionEnded,
+import claude_agent_sdk/internal/bidir.{type HookConfig, type SubscriberMessage}
+import claude_agent_sdk/internal/bidir/actor.{
+  CliMessage, Failed, HookConfig, Running, SessionEnded, Starting, Stopped,
 }
 import claude_agent_sdk/internal/bidir_runner
 import e2e/helpers.{get_monotonic_ms, skip_if_no_e2e}
@@ -291,7 +292,7 @@ fn wait_for_running(
   session: process.Subject(bidir.ActorMessage),
   max_attempts: Int,
 ) -> Result(Nil, bidir.SessionLifecycle) {
-  wait_for_running_loop(session, max_attempts, bidir.Starting)
+  wait_for_running_loop(session, max_attempts, Starting)
 }
 
 fn wait_for_running_loop(
@@ -305,8 +306,8 @@ fn wait_for_running_loop(
       let state = bidir.get_lifecycle(session, 1000)
       case state {
         Running -> Ok(Nil)
-        bidir.Failed(_) -> Error(state)
-        bidir.Stopped -> Error(state)
+        Failed(_) -> Error(state)
+        Stopped -> Error(state)
         _ -> {
           process.sleep(100)
           wait_for_running_loop(session, max_attempts - 1, state)
@@ -356,7 +357,7 @@ fn collect_messages_loop(
     False -> #(acc, False)
     True ->
       case process.receive(subscriber, remaining_ms) {
-        Ok(bidir.CliMessage(msg)) ->
+        Ok(CliMessage(msg)) ->
           collect_messages_loop(subscriber, deadline_ms, [msg, ..acc])
         Ok(SessionEnded(_)) -> #(acc, True)
         Error(Nil) -> #(acc, False)

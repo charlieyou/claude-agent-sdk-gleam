@@ -15,7 +15,7 @@ import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  CheckpointingNotEnabled, RequestError, RequestSuccess,
+  CheckpointingNotEnabled, RequestError, RequestSuccess, StartConfig,
 }
 import support/mock_bidir_runner
 
@@ -32,7 +32,7 @@ pub fn rewind_files_sends_correct_wire_format_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 60_000,
       hook_timeouts: dict.new(),
@@ -138,7 +138,7 @@ pub fn rewind_files_receives_success_response_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 60_000,
       hook_timeouts: dict.new(),
@@ -195,7 +195,7 @@ pub fn rewind_files_receives_error_response_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 60_000,
       hook_timeouts: dict.new(),

@@ -11,6 +11,10 @@ import gleeunit/should
 
 import claude_agent_sdk/control.{AcceptEdits, BypassPermissions, Default, Plan}
 import claude_agent_sdk/internal/bidir.{type SubscriberMessage}
+import claude_agent_sdk/internal/bidir/actor.{
+  RequestError, RequestSuccess, SetPermissionModeCliError,
+  SetPermissionModeSessionStopped, SetPermissionModeTimeout, StartConfig,
+}
 import support/mock_bidir_runner
 
 // =============================================================================
@@ -173,7 +177,7 @@ pub fn set_permission_mode_receives_success_test() {
   // Assert: caller receives RequestSuccess
   let assert Ok(result) = process.receive(result_subject, 500)
   case result {
-    bidir.RequestSuccess(_payload) -> should.be_true(True)
+    RequestSuccess(_payload) -> should.be_true(True)
     _ -> should.fail()
   }
 
@@ -215,7 +219,7 @@ pub fn set_permission_mode_success_mapping_test() {
   // Verify RequestSuccess is returned (this is what set_permission_mode maps to Ok(Nil))
   let assert Ok(result) = process.receive(result_subject, 500)
   case result {
-    bidir.RequestSuccess(_) -> should.be_true(True)
+    RequestSuccess(_) -> should.be_true(True)
     _ -> should.fail()
   }
 
@@ -249,7 +253,7 @@ pub fn set_permission_mode_error_mapping_test() {
   // Verify RequestError is returned (this is what set_permission_mode maps to CliError)
   let assert Ok(result) = process.receive(result_subject, 500)
   case result {
-    bidir.RequestError(msg) -> should.equal(msg, "Invalid mode")
+    RequestError(msg) -> should.equal(msg, "Invalid mode")
     _ -> should.fail()
   }
 
@@ -266,7 +270,7 @@ pub fn set_permission_mode_sync_actor_timeout_test() {
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   // Use short actor timeout for faster test
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 100,
       hook_timeouts: dict.new(),
@@ -290,7 +294,7 @@ pub fn set_permission_mode_sync_actor_timeout_test() {
 
   // Assert: returns timeout error (from actor's RequestTimeout)
   case result {
-    Error(bidir.SetPermissionModeTimeout) -> should.be_true(True)
+    Error(SetPermissionModeTimeout) -> should.be_true(True)
     _ -> should.fail()
   }
 
@@ -314,7 +318,7 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   // Use short actor timeout so it would fire if not cancelled
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 50,
       hook_timeouts: dict.new(),
@@ -367,22 +371,22 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
 pub fn set_permission_mode_error_type_test() {
   // This test verifies the error type variants exist and pattern match correctly
   let _err1: bidir.SetPermissionModeError =
-    bidir.SetPermissionModeCliError("test")
-  let _err2: bidir.SetPermissionModeError = bidir.SetPermissionModeTimeout
+    SetPermissionModeCliError("test")
+  let _err2: bidir.SetPermissionModeError = SetPermissionModeTimeout
   let _err3: bidir.SetPermissionModeError =
-    bidir.SetPermissionModeSessionStopped
+    SetPermissionModeSessionStopped
 
   let check_variant = fn(err: bidir.SetPermissionModeError) {
     case err {
-      bidir.SetPermissionModeCliError(_) -> "cli_error"
-      bidir.SetPermissionModeTimeout -> "timeout"
-      bidir.SetPermissionModeSessionStopped -> "stopped"
+      SetPermissionModeCliError(_) -> "cli_error"
+      SetPermissionModeTimeout -> "timeout"
+      SetPermissionModeSessionStopped -> "stopped"
     }
   }
 
-  should.equal(check_variant(bidir.SetPermissionModeCliError("x")), "cli_error")
-  should.equal(check_variant(bidir.SetPermissionModeTimeout), "timeout")
-  should.equal(check_variant(bidir.SetPermissionModeSessionStopped), "stopped")
+  should.equal(check_variant(SetPermissionModeCliError("x")), "cli_error")
+  should.equal(check_variant(SetPermissionModeTimeout), "timeout")
+  should.equal(check_variant(SetPermissionModeSessionStopped), "stopped")
 }
 
 // =============================================================================

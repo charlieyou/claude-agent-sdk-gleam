@@ -16,7 +16,7 @@ import claude_agent_sdk/error.{
   CliExitedDuringInit, InitializationError, InitializationTimeout,
 }
 import claude_agent_sdk/internal/bidir.{type SubscriberMessage}
-import claude_agent_sdk/internal/bidir/actor.{InitFailed, SessionEnded}
+import claude_agent_sdk/internal/bidir/actor.{InitFailed, SessionEnded, StartConfig}
 import support/mock_bidir_runner
 
 // =============================================================================
@@ -161,7 +161,7 @@ pub fn timeout_transitions_to_failed_test() {
 
   // Use a short init timeout for testing (100ms instead of 10s)
   let config =
-    bidir.StartConfig(
+    StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 60_000,
       hook_timeouts: dict.new(),

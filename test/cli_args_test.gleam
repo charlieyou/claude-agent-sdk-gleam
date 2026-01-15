@@ -1,10 +1,15 @@
 /// Tests for CLI argument building from QueryOptions.
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/options.{
-  AcceptEdits, BypassPermissions, Plan, default_options, with_allowed_tools,
-  with_append_system_prompt, with_continue, with_disallowed_tools,
-  with_max_budget, with_max_turns, with_mcp_config, with_model,
-  with_permission_mode, with_resume, with_system_prompt,
+  AcceptEdits, BypassPermissions, Plan, default_options,
+  with_allowed_tools_query as with_allowed_tools,
+  with_append_system_prompt_query as with_append_system_prompt,
+  with_continue_query as with_continue,
+  with_disallowed_tools_query as with_disallowed_tools,
+  with_max_budget_query as with_max_budget,
+  with_max_turns_query as with_max_turns, with_mcp_config_query as with_mcp_config,
+  with_model_query as with_model, with_permission_mode_query as with_permission_mode,
+  with_resume_query as with_resume, with_system_prompt_query as with_system_prompt,
 }
 import gleam/list
 import gleam/string

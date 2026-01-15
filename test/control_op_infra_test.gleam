@@ -88,7 +88,7 @@ pub fn control_request_timeout_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    actor.StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 100,
       // 100ms timeout
@@ -141,7 +141,7 @@ pub fn late_response_after_timeout_discarded_test() {
   let mock = mock_bidir_runner.new()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   let config =
-    bidir.StartConfig(
+    actor.StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 50,
       // 50ms timeout

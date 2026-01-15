@@ -21,9 +21,10 @@
 /// gleam test -- --e2e
 /// ```
 import claude_agent_sdk/error.{type StartError, SpawnFailed}
-import claude_agent_sdk/internal/bidir.{
-  type HookConfig, type SubscriberMessage, CliMessage, HookConfig, Running,
-  SessionEnded,
+import claude_agent_sdk/internal/bidir.{type HookConfig, type SubscriberMessage}
+import claude_agent_sdk/internal/bidir/actor.{
+  CliMessage, Failed, HookConfig, Running, SessionEnded, StartConfig, Starting,
+  Stopped,
 }
 import claude_agent_sdk/internal/bidir_runner
 import e2e/helpers.{get_monotonic_ms, skip_if_no_e2e}
@@ -99,7 +100,7 @@ fn start_session_with_timeout_config(
       let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
       // Use custom config with shorter hook timeout
       let config =
-        bidir.StartConfig(
+        StartConfig(
           ..bidir.default_config(subscriber),
           default_hook_timeout_ms: hook_timeout_ms,
         )
@@ -129,7 +130,7 @@ fn wait_for_running(
   session: process.Subject(bidir.ActorMessage),
   max_attempts: Int,
 ) -> Result(Nil, bidir.SessionLifecycle) {
-  wait_for_running_loop(session, max_attempts, bidir.Starting)
+  wait_for_running_loop(session, max_attempts, Starting)
 }
 
 fn wait_for_running_loop(
@@ -143,8 +144,8 @@ fn wait_for_running_loop(
       let state = bidir.get_lifecycle(session, 1000)
       case state {
         Running -> Ok(Nil)
-        bidir.Failed(_) -> Error(state)
-        bidir.Stopped -> Error(state)
+        Failed(_) -> Error(state)
+        Stopped -> Error(state)
         _ -> {
           process.sleep(100)
           wait_for_running_loop(session, max_attempts - 1, state)

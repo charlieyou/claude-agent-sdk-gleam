@@ -139,7 +139,7 @@ pub fn has_bidir_features_with_can_use_tool_test() {
 
 pub fn has_bidir_features_with_model_only_test() {
   // Model is not a bidir feature
-  let opts = options.default_options() |> options.with_model("opus")
+  let opts = options.default_options() |> options.with_model_query("opus")
   cli.has_bidir_features(opts) |> should.be_false
 }
 
@@ -188,7 +188,7 @@ pub fn bidir_cli_args_includes_standard_args_test() {
 }
 
 pub fn bidir_cli_args_with_model_test() {
-  let opts = options.default_options() |> options.with_model("opus")
+  let opts = options.default_options() |> options.with_model_query("opus")
   let args = cli.build_bidir_cli_args(opts, "test prompt")
 
   assert_contains(args, "--model")

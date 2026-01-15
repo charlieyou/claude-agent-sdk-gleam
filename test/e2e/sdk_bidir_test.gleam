@@ -23,7 +23,7 @@ import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  HookConfig, RequestSuccess, StartConfig,
+  HookConfig, RequestError, RequestSuccess, StartConfig,
 }
 import e2e/helpers
 import support/mock_bidir_runner
@@ -158,7 +158,7 @@ pub fn sdk_40b_set_permission_mode_error_test_() {
   // Verify error response is received
   let assert Ok(result) = process.receive(result_subject, 500)
   case result {
-    bidir.RequestError(msg) -> {
+    actor.RequestError(msg) -> {
       should.equal(msg, "Permission mode not supported")
       helpers.log_info_with(ctx, "error_response_received", [
         #("error_msg", json.string(msg)),
@@ -267,7 +267,7 @@ pub fn sdk_41b_interrupt_no_operation_test_() {
   // Verify error response is received
   let assert Ok(result) = process.receive(result_subject, 500)
   case result {
-    bidir.RequestError(msg) -> {
+    actor.RequestError(msg) -> {
       should.equal(msg, "No operation to interrupt")
       helpers.log_info_with(ctx, "interrupt_error_received", [
         #("error_msg", json.string(msg)),

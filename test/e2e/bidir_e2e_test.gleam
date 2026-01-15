@@ -26,7 +26,8 @@ import claude_agent_sdk/internal/bidir.{
   type HookConfig, type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  CliMessage, HookConfig, RequestSuccess, Running, SessionEnded,
+  CliMessage, Failed, HookConfig, RequestError, RequestSessionStopped,
+  RequestSuccess, RequestTimeout, Running, SessionEnded, Starting, Stopped,
 }
 import claude_agent_sdk/internal/bidir_runner
 import gleam/dict
@@ -126,7 +127,7 @@ fn wait_for_running(
   session: process.Subject(bidir.ActorMessage),
   max_attempts: Int,
 ) -> Result(Nil, bidir.SessionLifecycle) {
-  wait_for_running_loop(session, max_attempts, bidir.Starting)
+  wait_for_running_loop(session, max_attempts, actor.Starting)
 }
 
 fn wait_for_running_loop(
@@ -140,8 +141,8 @@ fn wait_for_running_loop(
       let state = bidir.get_lifecycle(session, 1000)
       case state {
         Running -> Ok(Nil)
-        bidir.Failed(_) -> Error(state)
-        bidir.Stopped -> Error(state)
+        actor.Failed(_) -> Error(state)
+        actor.Stopped -> Error(state)
         _ -> {
           process.sleep(100)
           wait_for_running_loop(session, max_attempts - 1, state)
@@ -365,7 +366,7 @@ pub fn real_control_operations_test_() {
                         "set_model succeeded",
                       )
                     }
-                    Ok(bidir.RequestError(msg)) -> {
+                    Ok(actor.RequestError(msg)) -> {
                       // Error is acceptable - CLI may not support this operation
                       helpers.log_info_with(ctx, "set_model_error", [
                         #("error", json.string(msg)),
@@ -377,7 +378,7 @@ pub fn real_control_operations_test_() {
                           <> msg,
                       )
                     }
-                    Ok(bidir.RequestTimeout) -> {
+                    Ok(actor.RequestTimeout) -> {
                       helpers.log_info(ctx, "set_model_timeout")
                       helpers.log_test_complete(
                         ctx,
@@ -385,7 +386,7 @@ pub fn real_control_operations_test_() {
                         "set_model timed out (CLI may not respond)",
                       )
                     }
-                    Ok(bidir.RequestSessionStopped) -> {
+                    Ok(actor.RequestSessionStopped) -> {
                       helpers.log_info(ctx, "session_stopped_before_response")
                       helpers.log_test_complete(
                         ctx,
@@ -658,16 +659,16 @@ pub fn real_interrupt_test_() {
                     Ok(RequestSuccess(_)) -> {
                       helpers.log_info(ctx, "interrupt_succeeded")
                     }
-                    Ok(bidir.RequestError(msg)) -> {
+                    Ok(actor.RequestError(msg)) -> {
                       // Error may occur if nothing to interrupt
                       helpers.log_info_with(ctx, "interrupt_error", [
                         #("error", json.string(msg)),
                       ])
                     }
-                    Ok(bidir.RequestTimeout) -> {
+                    Ok(actor.RequestTimeout) -> {
                       helpers.log_info(ctx, "interrupt_timeout")
                     }
-                    Ok(bidir.RequestSessionStopped) -> {
+                    Ok(actor.RequestSessionStopped) -> {
                       helpers.log_info(ctx, "session_stopped_before_response")
                     }
                     Error(Nil) -> {

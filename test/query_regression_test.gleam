@@ -139,55 +139,6 @@ pub fn query_returns_message_iterator_test() {
 }
 
 // =============================================================================
-// Test: query() ignores bidir options with warning
-// =============================================================================
-
-/// Test that query() ignores bidirectional options with a warning.
-/// Users should not get errors when they set bidir options on query().
-pub fn query_ignores_bidir_options_with_warning_test() {
-  let system_json =
-    "{\"type\":\"system\",\"session_id\":\"sess-002\",\"subtype\":\"init\"}\n"
-  let result_json =
-    "{\"type\":\"result\",\"subtype\":\"success\",\"result\":\"done\"}\n"
-
-  let runner =
-    create_mock_runner("query_ignores_bidir", [system_json, result_json])
-
-  // Set bidir options that should be ignored
-  let opts =
-    claude_agent_sdk.default_options()
-    |> claude_agent_sdk.with_test_mode(runner)
-    |> options.with_pre_tool_use(fn(_ctx) { hook.Continue })
-
-  // query() should succeed despite bidir option being set
-  case claude_agent_sdk.query("Hello", opts) {
-    Error(err) -> {
-      io.println("Query should succeed, got error: " <> string.inspect(err))
-      should.fail()
-    }
-    Ok(stream) -> {
-      let result = claude_agent_sdk.collect_messages(stream)
-
-      // Should have messages
-      should.be_true(list.length(result.items) >= 1)
-
-      // No terminal error
-      should.equal(result.terminal_error, None)
-
-      // Should have at least one BidirOptionIgnored warning
-      let bidir_warnings =
-        list.filter(result.warnings, fn(w) {
-          case w.code {
-            error.BidirOptionIgnored -> True
-            _ -> False
-          }
-        })
-      should.be_true(list.length(bidir_warnings) >= 1)
-    }
-  }
-}
-
-// =============================================================================
 // Test: All existing message types parse correctly
 // =============================================================================
 
@@ -595,48 +546,3 @@ pub fn message_envelope_preserves_raw_json_test() {
   }
 }
 
-// =============================================================================
-// Test: Additional bidir options are ignored
-// =============================================================================
-
-/// Test that all bidirectional options are ignored by query().
-/// Covers: post_tool_use, stop, can_use_tool, timeout_ms
-pub fn query_ignores_all_bidir_options_test() {
-  let system_json = "{\"type\":\"system\",\"session_id\":\"sess-009\"}\n"
-  let result_json = "{\"type\":\"result\",\"subtype\":\"success\"}\n"
-
-  let runner =
-    create_mock_runner("all_bidir_ignored", [system_json, result_json])
-
-  // Set multiple bidir options - all should be ignored
-  let opts =
-    claude_agent_sdk.default_options()
-    |> claude_agent_sdk.with_test_mode(runner)
-    |> options.with_pre_tool_use(fn(_) { hook.Continue })
-    |> options.with_post_tool_use(fn(_) { hook.Continue })
-    |> options.with_stop(fn(_) { hook.Continue })
-    |> options.with_can_use_tool(fn(_) { hook.Allow })
-    |> options.with_timeout(30_000)
-
-  // query() should succeed
-  case claude_agent_sdk.query("Test", opts) {
-    Error(err) -> {
-      io.println("Should succeed, got: " <> string.inspect(err))
-      should.fail()
-    }
-    Ok(stream) -> {
-      let result = claude_agent_sdk.collect_messages(stream)
-      should.equal(list.length(result.items), 2)
-
-      // Should have exactly one BidirOptionIgnored warning (not one per option)
-      let bidir_warnings =
-        list.filter(result.warnings, fn(w) {
-          case w.code {
-            error.BidirOptionIgnored -> True
-            _ -> False
-          }
-        })
-      should.equal(list.length(bidir_warnings), 1)
-    }
-  }
-}

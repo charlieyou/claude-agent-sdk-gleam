@@ -229,7 +229,7 @@ pub fn test_rewind_files_with_checkpointing_test() {
 
   // Config WITH checkpointing enabled
   let config =
-    bidir.StartConfig(
+    actor.StartConfig(
       subscriber: subscriber,
       default_timeout_ms: 60_000,
       hook_timeouts: dict.new(),
