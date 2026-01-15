@@ -21,7 +21,7 @@ import claude_agent_sdk/internal/bidir/actor.{
   RequestError, SessionState, Starting, add_pending_hook, add_pending_request,
   empty_hook_config, flush_queued_ops, queue_operation,
 }
-import claude_agent_sdk/internal/stream
+import claude_agent_sdk/internal/line_framing
 import support/mock_bidir_runner
 
 // =============================================================================
@@ -54,7 +54,7 @@ fn test_state() -> SessionState {
     init_timeout_ms: 10_000,
     init_timer_ref: None,
     file_checkpointing_enabled: False,
-    line_buffer: stream.LineBuffer(<<>>),
+    line_buffer: line_framing.LineBuffer(<<>>),
   )
 }
 

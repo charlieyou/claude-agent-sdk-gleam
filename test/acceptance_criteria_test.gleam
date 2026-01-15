@@ -36,7 +36,7 @@ import claude_agent_sdk/internal/bidir/actor.{
 }
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/internal/request_tracker
-import claude_agent_sdk/internal/stream.{
+import claude_agent_sdk/internal/line_framing.{
   CompleteLine, NeedMoreData, normalize_crlf, read_line,
 }
 import claude_agent_sdk/options

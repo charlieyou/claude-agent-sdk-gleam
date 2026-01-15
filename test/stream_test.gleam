@@ -5,16 +5,19 @@ import claude_agent_sdk/error.{
 }
 import claude_agent_sdk/internal/constants
 import claude_agent_sdk/internal/port_ffi
+import claude_agent_sdk/internal/line_framing.{
+  BufferOverflow, CompleteLine, NeedMoreData, ReadError, append_to_buffer,
+  normalize_crlf, read_line,
+}
 import claude_agent_sdk/internal/stream.{
-  BufferOverflow, Closed, CompleteLine, Continue, EndOfStream, Message,
-  NeedMoreData, NextJsonDecodeError, NextProcessError, NextTooManyDecodeErrors,
-  PendingEndOfStream, ReadError, ResultReceived, Stop, Streaming, WarningEvent,
-  YieldEndOfStream, YieldProcessError, YieldWarningThenEnd, append_to_buffer,
-  close, collect_items, collect_messages, fold_stream, get_buffer,
+  Closed, Continue, EndOfStream, Message, NextJsonDecodeError, NextProcessError,
+  NextTooManyDecodeErrors, PendingEndOfStream, ResultReceived, Stop, Streaming,
+  WarningEvent, YieldEndOfStream, YieldProcessError, YieldWarningThenEnd, close,
+  collect_items, collect_messages, fold_stream, get_buffer,
   get_consecutive_decode_errors, get_result_seen, get_state, handle_exit_status,
   increment_decode_errors, is_closed, mark_closed, mark_pending_end_of_stream,
-  mark_result_received, new, new_with_warnings, next, normalize_crlf, read_line,
-  reset_decode_errors, set_buffer, to_yielder, with_stream,
+  mark_result_received, new, new_with_warnings, next, reset_decode_errors,
+  set_buffer, to_yielder, with_stream,
 }
 import gleam/bit_array
 import gleam/list

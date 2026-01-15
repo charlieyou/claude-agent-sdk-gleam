@@ -63,8 +63,10 @@ import claude_agent_sdk/hook.{type HookEvent}
 import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/control_decoder
 import claude_agent_sdk/internal/control_encoder
+import claude_agent_sdk/internal/line_framing.{
+  type LineBuffer, LineBuffer, Lines, PushBufferOverflow,
+}
 import claude_agent_sdk/internal/port_ffi
-import claude_agent_sdk/internal/stream
 import claude_agent_sdk/message
 
 // FFI: Convert any value to Dynamic (identity function at runtime)
@@ -518,7 +520,7 @@ pub type SessionState {
     /// Whether file checkpointing is enabled (for rewind_files support).
     file_checkpointing_enabled: Bool,
     /// Line buffer for incoming port data.
-    line_buffer: stream.LineBuffer,
+    line_buffer: LineBuffer,
   )
 }
 
@@ -765,7 +767,7 @@ fn start_internal(
           init_timeout_ms: config.init_timeout_ms,
           init_timer_ref: None,
           file_checkpointing_enabled: config.enable_file_checkpointing,
-          line_buffer: stream.LineBuffer(<<>>),
+          line_buffer: LineBuffer(<<>>),
         )
 
       // Build a selector that handles:
@@ -1966,15 +1968,15 @@ fn handle_port_data(
   state: SessionState,
   data: BitArray,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case stream.handle_port_data(state.line_buffer, data) {
-    stream.Lines(lines, new_buffer) -> {
+  case line_framing.handle_port_data(state.line_buffer, data) {
+    Lines(lines, new_buffer) -> {
       let updated_state = SessionState(..state, line_buffer: new_buffer)
       list.each(lines, fn(line) {
         actor.send(updated_state.self_subject, InjectedMessage(line))
       })
       actor.continue(updated_state)
     }
-    stream.PushBufferOverflow -> {
+    PushBufferOverflow -> {
       actor.continue(state)
     }
   }

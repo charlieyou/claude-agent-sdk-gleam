@@ -1,6 +1,6 @@
 /// Tests for push-based line buffering (LineBuffer + handle_port_data)
 import claude_agent_sdk/internal/constants
-import claude_agent_sdk/internal/stream.{
+import claude_agent_sdk/internal/line_framing.{
   LineBuffer, Lines, PushBufferOverflow, handle_port_data,
 }
 import gleam/bit_array
