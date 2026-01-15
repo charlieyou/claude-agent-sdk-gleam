@@ -1,8 +1,11 @@
 /// Port I/O abstraction layer.
 ///
-/// This module provides the ONLY access point to port_ffi for production code.
-/// All port operations go through this interface to enable testability via
-/// mock implementations.
+/// This module provides the ONLY access point to port_ffi for production code
+/// (src/). All port operations go through this interface to enable testability
+/// via mock implementations.
+///
+/// Note: Test code (test/) may import port_ffi directly when testing the FFI
+/// layer itself or when direct port access is needed for test fixtures.
 ///
 /// Functions exposed:
 /// - open_port, open_port_safe: Port spawning
