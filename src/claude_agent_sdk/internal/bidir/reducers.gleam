@@ -25,17 +25,17 @@
 import claude_agent_sdk/internal/bidir/actor
 
 // =============================================================================
-// Constants (re-exported from actor)
+// Constants (re-exported from actor - single source of truth)
 // =============================================================================
 
 /// Maximum number of operations that can be queued during initialization.
-pub const max_queued_ops: Int = 16
+pub const max_queued_ops = actor.max_queued_ops
 
 /// Maximum number of concurrent pending requests (SDK → CLI).
-pub const max_pending_requests: Int = 64
+pub const max_pending_requests = actor.max_pending_requests
 
 /// Maximum number of concurrent pending hooks (CLI → SDK).
-pub const max_pending_hooks: Int = 32
+pub const max_pending_hooks = actor.max_pending_hooks
 
 // =============================================================================
 // Re-exported Pure Functions

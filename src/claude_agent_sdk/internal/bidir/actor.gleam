@@ -2885,17 +2885,17 @@ fn generate_request_id() -> String {
 fn unique_integer() -> Int
 
 // =============================================================================
-// Backpressure Helpers
+// Backpressure Constants
 // =============================================================================
 
 /// Maximum number of operations that can be queued during initialization.
-const max_queued_ops: Int = 16
+pub const max_queued_ops: Int = 16
 
 /// Maximum number of pending SDK-initiated requests.
-const max_pending_requests: Int = 64
+pub const max_pending_requests: Int = 64
 
 /// Maximum number of pending hook callbacks.
-const max_pending_hooks: Int = 32
+pub const max_pending_hooks: Int = 32
 
 /// Queue an operation during initialization with backpressure limit.
 ///
