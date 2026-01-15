@@ -42,12 +42,12 @@ pub type SessionLifecycle {
 
 /// Stub for SessionState type.
 ///
-/// The full SessionState type is defined in bidir.gleam and contains
+/// The full SessionState type and its sub-records (SessionConfig, RuntimeState,
+/// PendingOps, Timers, Buffers) are defined in actor.gleam and contain
 /// OTP-dependent fields (Subject, Pid). This stub exists to satisfy the
-/// module structure requirement; the actual implementation remains in
-/// bidir.gleam until T003 (actor extraction).
+/// module structure requirement.
 pub type SessionState {
-  /// Placeholder - actual state is in bidir.gleam.
+  /// Placeholder - actual state is in actor.gleam.
   SessionStateStub
 }
 

@@ -74,6 +74,21 @@ pub type MessageRoute =
 pub type SessionState =
   actor.SessionState
 
+pub type SessionConfig =
+  actor.SessionConfig
+
+pub type RuntimeState =
+  actor.RuntimeState
+
+pub type PendingOps =
+  actor.PendingOps
+
+pub type Timers =
+  actor.Timers
+
+pub type Buffers =
+  actor.Buffers
+
 pub type ActorMessage =
   actor.ActorMessage
 

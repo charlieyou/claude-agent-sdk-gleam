@@ -17,8 +17,9 @@ import claude_agent_sdk/error.{InitQueueOverflow, TooManyPendingRequests}
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir/actor.{
   type ActorMessage, type PendingHook, type PendingRequest, type SessionState,
-  type SubscriberMessage, HookType, PendingHook, PendingRequest, QueuedRequest,
-  RequestError, SessionState, Starting, add_pending_hook, add_pending_request,
+  type SubscriberMessage, Buffers, HookType, PendingHook, PendingOps,
+  PendingRequest, QueuedRequest, RequestError, RuntimeState, SessionConfig,
+  SessionState, Starting, Timers, add_pending_hook, add_pending_request,
   empty_hook_config, flush_queued_ops, queue_operation,
 }
 import claude_agent_sdk/internal/line_framing
@@ -34,27 +35,35 @@ fn test_state() -> SessionState {
   let self_subject: process.Subject(ActorMessage) = process.new_subject()
   let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
   SessionState(
-    runner: mock.runner,
-    lifecycle: Starting,
-    pending_requests: dict.new(),
-    pending_hooks: dict.new(),
-    queued_ops: [],
-    hooks: empty_hook_config(),
-    mcp_handlers: dict.new(),
-    next_request_id: 0,
-    next_callback_id: 0,
-    subscriber: subscriber,
-    self_subject: self_subject,
-    capabilities: None,
-    default_timeout_ms: 60_000,
-    hook_timeouts: dict.new(),
-    default_hook_timeout_ms: 30_000,
-    init_request_id: None,
-    inject_subject: None,
-    init_timeout_ms: 10_000,
-    init_timer_ref: None,
-    file_checkpointing_enabled: False,
-    line_buffer: line_framing.LineBuffer(<<>>),
+    config: SessionConfig(
+      hooks: empty_hook_config(),
+      mcp_handlers: dict.new(),
+      default_timeout_ms: 60_000,
+      hook_timeouts: dict.new(),
+      default_hook_timeout_ms: 30_000,
+      file_checkpointing_enabled: False,
+    ),
+    runtime: RuntimeState(
+      runner: mock.runner,
+      lifecycle: Starting,
+      subscriber: subscriber,
+      self_subject: self_subject,
+      capabilities: None,
+      inject_subject: None,
+    ),
+    pending: PendingOps(
+      pending_requests: dict.new(),
+      pending_hooks: dict.new(),
+      queued_ops: [],
+      next_request_id: 0,
+      next_callback_id: 0,
+    ),
+    timers: Timers(
+      init_timeout_ms: 10_000,
+      init_timer_ref: None,
+      init_request_id: None,
+    ),
+    buffers: Buffers(line_buffer: line_framing.LineBuffer(<<>>)),
   )
 }
 
@@ -107,7 +116,7 @@ pub fn queue_operation_accepts_up_to_16_test() {
     })
 
   // Verify all 16 were added
-  should.equal(list.length(state.queued_ops), 16)
+  should.equal(list.length(state.pending.queued_ops), 16)
 }
 
 pub fn queue_operation_rejects_17th_with_overflow_error_test() {
@@ -150,7 +159,7 @@ pub fn queue_operation_overflow_preserves_existing_test() {
   let _result = queue_operation(state, op17)
 
   // Original state should still have exactly 16
-  should.equal(list.length(state.queued_ops), 16)
+  should.equal(list.length(state.pending.queued_ops), 16)
 }
 
 // =============================================================================
@@ -169,7 +178,7 @@ pub fn add_pending_request_accepts_up_to_64_test() {
     })
 
   // Verify all 64 were added
-  should.equal(dict.size(state.pending_requests), 64)
+  should.equal(dict.size(state.pending.pending_requests), 64)
 }
 
 pub fn add_pending_request_rejects_65th_test() {
@@ -212,7 +221,7 @@ pub fn add_pending_request_overflow_preserves_existing_test() {
   let _result = add_pending_request(state, "req-65", pending65)
 
   // Original state should still have exactly 64
-  should.equal(dict.size(state.pending_requests), 64)
+  should.equal(dict.size(state.pending.pending_requests), 64)
 }
 
 // =============================================================================
@@ -233,7 +242,7 @@ pub fn add_pending_hook_accepts_up_to_32_test() {
     })
 
   // Verify all 32 were added
-  should.equal(dict.size(state.pending_hooks), 32)
+  should.equal(dict.size(state.pending.pending_hooks), 32)
 }
 
 pub fn add_pending_hook_33rd_returns_immediate_response_test() {
@@ -252,7 +261,7 @@ pub fn add_pending_hook_33rd_returns_immediate_response_test() {
   let #(new_state, response) = add_pending_hook(state, "hook-33", hook33)
 
   // State should still have exactly 32
-  should.equal(dict.size(new_state.pending_hooks), 32)
+  should.equal(dict.size(new_state.pending.pending_hooks), 32)
 
   // Should have returned an immediate response
   case response {
@@ -277,7 +286,7 @@ pub fn add_pending_hook_overflow_preserves_existing_test() {
   let #(_, _) = add_pending_hook(state, "hook-33", hook33)
 
   // Original state should still have exactly 32
-  should.equal(dict.size(state.pending_hooks), 32)
+  should.equal(dict.size(state.pending.pending_hooks), 32)
 }
 
 // =============================================================================
@@ -315,10 +324,10 @@ pub fn flush_queued_ops_respects_pending_limit_test() {
   let flushed_state = flush_queued_ops(state_with_queued)
 
   // Should have exactly 64 pending requests (60 existing + 4 new)
-  should.equal(dict.size(flushed_state.pending_requests), 64)
+  should.equal(dict.size(flushed_state.pending.pending_requests), 64)
 
   // Queued ops should be cleared
-  should.equal(list.length(flushed_state.queued_ops), 0)
+  should.equal(list.length(flushed_state.pending.queued_ops), 0)
 
   // First 4 subjects should NOT have received error (they were added successfully)
   // Last 6 subjects should have received RequestError
@@ -365,10 +374,10 @@ pub fn flush_queued_ops_all_fit_when_space_available_test() {
   let flushed_state = flush_queued_ops(state_with_queued)
 
   // Should have exactly 60 pending requests (50 existing + 10 new)
-  should.equal(dict.size(flushed_state.pending_requests), 60)
+  should.equal(dict.size(flushed_state.pending.pending_requests), 60)
 
   // Queued ops should be cleared
-  should.equal(list.length(flushed_state.queued_ops), 0)
+  should.equal(list.length(flushed_state.pending.queued_ops), 0)
 
   // None of the subjects should have received an error
   list.each(reply_subjects, fn(pair) {

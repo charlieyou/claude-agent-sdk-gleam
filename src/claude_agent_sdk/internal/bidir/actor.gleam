@@ -473,57 +473,115 @@ pub fn resolve_pending(
 }
 
 // =============================================================================
-// Session State
+// Session State - Sub-records
 // =============================================================================
 
-/// Complete state for a bidirectional session actor.
+/// Configuration sub-record for session settings.
 ///
-/// Contains all state needed to manage the session lifecycle, route messages,
-/// and handle concurrent control operations.
-pub type SessionState {
-  SessionState(
-    /// The runner managing the CLI port.
-    runner: bidir_runner.BidirRunner,
-    /// Current lifecycle state.
-    lifecycle: SessionLifecycle,
-    /// Pending SDK-initiated requests awaiting CLI responses.
-    pending_requests: Dict(String, PendingRequest),
-    /// Pending CLI-initiated hooks awaiting SDK responses.
-    pending_hooks: Dict(String, PendingHook),
-    /// Operations queued while not Running.
-    queued_ops: List(QueuedOperation),
+/// Contains configuration that defines how the session operates.
+/// These fields are typically set at startup.
+pub type SessionConfig {
+  SessionConfig(
     /// Hook configuration and handlers.
     hooks: HookConfig,
     /// MCP server handlers (server_name -> handler).
     mcp_handlers: Dict(String, fn(Dynamic) -> Dynamic),
-    /// Counter for generating request IDs.
-    next_request_id: Int,
-    /// Counter for generating callback IDs.
-    next_callback_id: Int,
-    /// Subject for sending messages to subscriber.
-    subscriber: Subject(SubscriberMessage),
-    /// Actor subject for internal self-messages.
-    self_subject: Subject(ActorMessage),
-    /// CLI capabilities (populated after init response).
-    capabilities: Option(CliCapabilities),
     /// Default timeout for control requests (ms).
     default_timeout_ms: Int,
     /// Per-event hook timeouts (ms).
     hook_timeouts: Dict(HookEvent, Int),
     /// Default timeout for hook callbacks (ms).
     default_hook_timeout_ms: Int,
-    /// Request ID of the init request (for correlation).
-    init_request_id: Option(String),
+    /// Whether file checkpointing is enabled (for rewind_files support).
+    file_checkpointing_enabled: Bool,
+  )
+}
+
+/// Runtime state sub-record for OTP-dependent values.
+///
+/// Contains process references, subjects, and lifecycle state that
+/// are set up during actor initialization.
+pub type RuntimeState {
+  RuntimeState(
+    /// The runner managing the CLI port.
+    runner: bidir_runner.BidirRunner,
+    /// Current lifecycle state.
+    lifecycle: SessionLifecycle,
+    /// Subject for sending messages to subscriber.
+    subscriber: Subject(SubscriberMessage),
+    /// Actor subject for internal self-messages.
+    self_subject: Subject(ActorMessage),
+    /// CLI capabilities (populated after init response).
+    capabilities: Option(CliCapabilities),
     /// Subject for receiving injected messages (for testing).
     inject_subject: Option(Subject(String)),
+  )
+}
+
+/// Pending operations sub-record.
+///
+/// Tracks all in-flight requests, hooks, and queued operations.
+/// This is the most frequently mutated part of session state.
+pub type PendingOps {
+  PendingOps(
+    /// Pending SDK-initiated requests awaiting CLI responses.
+    pending_requests: Dict(String, PendingRequest),
+    /// Pending CLI-initiated hooks awaiting SDK responses.
+    pending_hooks: Dict(String, PendingHook),
+    /// Operations queued while not Running.
+    queued_ops: List(QueuedOperation),
+    /// Counter for generating request IDs.
+    next_request_id: Int,
+    /// Counter for generating callback IDs.
+    next_callback_id: Int,
+  )
+}
+
+/// Timer and initialization sub-record.
+///
+/// Contains timer configuration and references for initialization timeout.
+pub type Timers {
+  Timers(
     /// Timeout for initialization handshake (ms).
     init_timeout_ms: Int,
     /// Timer reference for init timeout (for cancellation on cleanup).
     init_timer_ref: Option(Dynamic),
-    /// Whether file checkpointing is enabled (for rewind_files support).
-    file_checkpointing_enabled: Bool,
+    /// Request ID of the init request (for correlation).
+    init_request_id: Option(String),
+  )
+}
+
+/// Buffer sub-record for I/O buffering.
+///
+/// Contains buffers used for message framing and processing.
+pub type Buffers {
+  Buffers(
     /// Line buffer for incoming port data.
     line_buffer: LineBuffer,
+  )
+}
+
+// =============================================================================
+// Session State - Main Record
+// =============================================================================
+
+/// Complete state for a bidirectional session actor.
+///
+/// Contains all state needed to manage the session lifecycle, route messages,
+/// and handle concurrent control operations. Organized into logical sub-records
+/// for clarity and to reduce flat field count.
+pub type SessionState {
+  SessionState(
+    /// Configuration settings (hooks, timeouts, MCP handlers).
+    config: SessionConfig,
+    /// OTP runtime state (runner, lifecycle, subjects).
+    runtime: RuntimeState,
+    /// Pending operations (requests, hooks, queued ops).
+    pending: PendingOps,
+    /// Timer state (init timeout).
+    timers: Timers,
+    /// I/O buffers.
+    buffers: Buffers,
   )
 }
 
@@ -746,31 +804,39 @@ fn start_internal(
   // Use new_with_initialiser to perform init handshake during actor start
   let builder =
     actor.new_with_initialiser(5000, fn(self_subject) {
-      // Build initial state
+      // Build initial state using sub-records
       let initial_state =
         SessionState(
-          runner: runner,
-          lifecycle: Starting,
-          pending_requests: dict.new(),
-          pending_hooks: dict.new(),
-          queued_ops: [],
-          hooks: hooks,
-          mcp_handlers: dict.from_list(config.mcp_servers),
-          next_request_id: 1,
-          // Start at 1 since req_0 is used for init
-          next_callback_id: 0,
-          subscriber: config.subscriber,
-          self_subject: self_subject,
-          capabilities: None,
-          default_timeout_ms: config.default_timeout_ms,
-          hook_timeouts: config.hook_timeouts,
-          default_hook_timeout_ms: config.default_hook_timeout_ms,
-          init_request_id: Some(init_request_id),
-          inject_subject: None,
-          init_timeout_ms: config.init_timeout_ms,
-          init_timer_ref: None,
-          file_checkpointing_enabled: config.enable_file_checkpointing,
-          line_buffer: LineBuffer(<<>>),
+          config: SessionConfig(
+            hooks: hooks,
+            mcp_handlers: dict.from_list(config.mcp_servers),
+            default_timeout_ms: config.default_timeout_ms,
+            hook_timeouts: config.hook_timeouts,
+            default_hook_timeout_ms: config.default_hook_timeout_ms,
+            file_checkpointing_enabled: config.enable_file_checkpointing,
+          ),
+          runtime: RuntimeState(
+            runner: runner,
+            lifecycle: Starting,
+            subscriber: config.subscriber,
+            self_subject: self_subject,
+            capabilities: None,
+            inject_subject: None,
+          ),
+          pending: PendingOps(
+            pending_requests: dict.new(),
+            pending_hooks: dict.new(),
+            queued_ops: [],
+            next_request_id: 1,
+            // Start at 1 since req_0 is used for init
+            next_callback_id: 0,
+          ),
+          timers: Timers(
+            init_timeout_ms: config.init_timeout_ms,
+            init_timer_ref: None,
+            init_request_id: Some(init_request_id),
+          ),
+          buffers: Buffers(line_buffer: LineBuffer(<<>>)),
         )
 
       // Build a selector that handles:
@@ -906,37 +972,37 @@ fn start_internal(
 /// 3. Schedule init timeout timer
 fn perform_init_handshake(state: SessionState) -> SessionState {
   // Transition from Starting to InitSent
-  let assert Ok(new_lifecycle) = transition(state.lifecycle, CliSpawned)
+  let assert Ok(new_lifecycle) = transition(state.runtime.lifecycle, CliSpawned)
 
   // Build the initialize request
-  let assert Some(request_id) = state.init_request_id
+  let assert Some(request_id) = state.timers.init_request_id
   let #(hook_registrations, updated_hooks, next_callback_id) =
-    build_hook_registrations(state.hooks, state.next_callback_id)
+    build_hook_registrations(state.config.hooks, state.pending.next_callback_id)
   // Extract MCP server names from handlers dict
-  let mcp_server_names = dict.keys(state.mcp_handlers)
+  let mcp_server_names = dict.keys(state.config.mcp_handlers)
   let init_request =
     control.Initialize(
       request_id: request_id,
       hooks: hook_registrations,
       mcp_servers: mcp_server_names,
-      enable_file_checkpointing: state.file_checkpointing_enabled,
+      enable_file_checkpointing: state.config.file_checkpointing_enabled,
     )
 
   // Encode and send the request
   let json_line = control_encoder.encode_request(init_request) <> "\n"
-  let write_fn = state.runner.write
+  let write_fn = state.runtime.runner.write
   let _result = write_fn(json_line)
 
   // Schedule init timeout (send message to self after delay)
   // Store the timer reference for later cancellation
-  let timer_ref = schedule_init_timeout(state.init_timeout_ms)
+  let timer_ref = schedule_init_timeout(state.timers.init_timeout_ms)
 
   SessionState(
     ..state,
-    lifecycle: new_lifecycle,
-    init_timer_ref: Some(timer_ref),
-    hooks: updated_hooks,
-    next_callback_id: next_callback_id,
+    config: SessionConfig(..state.config, hooks: updated_hooks),
+    runtime: RuntimeState(..state.runtime, lifecycle: new_lifecycle),
+    pending: PendingOps(..state.pending, next_callback_id: next_callback_id),
+    timers: Timers(..state.timers, init_timer_ref: Some(timer_ref)),
   )
 }
 
@@ -1027,7 +1093,10 @@ fn cleanup_pending_hook(
   // Remove from pending_hooks map
   SessionState(
     ..state,
-    pending_hooks: dict.delete(state.pending_hooks, request_id),
+    pending: PendingOps(
+      ..state.pending,
+      pending_hooks: dict.delete(state.pending.pending_hooks, request_id),
+    ),
   )
 }
 
@@ -1040,15 +1109,15 @@ fn handle_message(
 ) -> actor.Next(SessionState, ActorMessage) {
   case message {
     GetLifecycle(reply_to) -> {
-      process.send(reply_to, state.lifecycle)
+      process.send(reply_to, state.runtime.lifecycle)
       actor.continue(state)
     }
     GetCapabilities(reply_to) -> {
-      process.send(reply_to, state.capabilities)
+      process.send(reply_to, state.runtime.capabilities)
       actor.continue(state)
     }
     GetCheckpointingEnabled(reply_to) -> {
-      process.send(reply_to, state.file_checkpointing_enabled)
+      process.send(reply_to, state.config.file_checkpointing_enabled)
       actor.continue(state)
     }
     Ping(reply_to) -> {
@@ -1067,7 +1136,7 @@ fn handle_message(
       handle_port_closed(state)
     }
     StartInitHandshake -> {
-      case state.lifecycle {
+      case state.runtime.lifecycle {
         Starting -> actor.continue(perform_init_handshake(state))
         _ -> actor.continue(state)
       }
@@ -1120,7 +1189,7 @@ fn handle_hook_done(
   request_id: String,
   result: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case dict.get(state.pending_hooks, request_id) {
+  case dict.get(state.pending.pending_hooks, request_id) {
     Ok(pending) -> {
       // Send success response to CLI (hook or permission)
       case pending.callback_type {
@@ -1192,7 +1261,7 @@ fn handle_hook_error(
   request_id: String,
   reason: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case dict.get(state.pending_hooks, request_id) {
+  case dict.get(state.pending.pending_hooks, request_id) {
     Ok(pending) -> {
       // Branch response based on callback type
       case pending.callback_type {
@@ -1256,7 +1325,7 @@ fn handle_hook_timeout(
   request_id: String,
   msg_verify_ref: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case dict.get(state.pending_hooks, request_id) {
+  case dict.get(state.pending.pending_hooks, request_id) {
     Ok(pending) -> {
       // Verify ref matches to prevent stale timeouts from killing wrong task
       case dynamic_equals(pending.verify_ref, msg_verify_ref) {
@@ -1390,14 +1459,14 @@ fn handle_success_response(
   payload: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
   // Check if this is the init response
-  case state.init_request_id {
+  case state.timers.init_request_id {
     Some(init_id) if init_id == request_id -> {
       // This is the init success response
       handle_init_success(state, payload)
     }
     _ -> {
       // Not init response - correlate with pending_requests
-      case dict.get(state.pending_requests, request_id) {
+      case dict.get(state.pending.pending_requests, request_id) {
         Ok(pending) -> {
           // Cancel timeout timer
           case pending.timer_ref {
@@ -1413,7 +1482,13 @@ fn handle_success_response(
           let new_state =
             SessionState(
               ..state,
-              pending_requests: dict.delete(state.pending_requests, request_id),
+              pending: PendingOps(
+                ..state.pending,
+                pending_requests: dict.delete(
+                  state.pending.pending_requests,
+                  request_id,
+                ),
+              ),
             )
           actor.continue(new_state)
         }
@@ -1432,16 +1507,17 @@ fn handle_init_success(
   payload: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
   // Only process if in InitSent state
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     InitSent -> {
       // Transition to Running
-      let assert Ok(new_lifecycle) = transition(state.lifecycle, InitSuccess)
+      let assert Ok(new_lifecycle) =
+        transition(state.runtime.lifecycle, InitSuccess)
 
       // Parse capabilities from payload (basic extraction)
       let capabilities = parse_capabilities(payload)
 
       // Cancel init timeout timer and clear init state
-      case state.init_timer_ref {
+      case state.timers.init_timer_ref {
         Some(timer_ref) -> {
           let _ = cancel_timer(timer_ref)
           Nil
@@ -1451,10 +1527,16 @@ fn handle_init_success(
       let new_state =
         SessionState(
           ..state,
-          lifecycle: new_lifecycle,
-          capabilities: Some(capabilities),
-          init_request_id: None,
-          init_timer_ref: None,
+          runtime: RuntimeState(
+            ..state.runtime,
+            lifecycle: new_lifecycle,
+            capabilities: Some(capabilities),
+          ),
+          timers: Timers(
+            ..state.timers,
+            init_request_id: None,
+            init_timer_ref: None,
+          ),
         )
 
       // Flush queued operations (non-blocking)
@@ -1488,14 +1570,14 @@ fn handle_error_response(
   message: String,
 ) -> actor.Next(SessionState, ActorMessage) {
   // Check if this is the init response
-  case state.init_request_id {
+  case state.timers.init_request_id {
     Some(init_id) if init_id == request_id -> {
       // This is init error response
       handle_init_error(state, message)
     }
     _ -> {
       // Not init response - correlate with pending_requests
-      case dict.get(state.pending_requests, request_id) {
+      case dict.get(state.pending.pending_requests, request_id) {
         Ok(pending) -> {
           // Cancel timeout timer
           case pending.timer_ref {
@@ -1511,7 +1593,13 @@ fn handle_error_response(
           let new_state =
             SessionState(
               ..state,
-              pending_requests: dict.delete(state.pending_requests, request_id),
+              pending: PendingOps(
+                ..state.pending,
+                pending_requests: dict.delete(
+                  state.pending.pending_requests,
+                  request_id,
+                ),
+              ),
             )
           actor.continue(new_state)
         }
@@ -1530,14 +1618,18 @@ fn handle_init_error(
   message: String,
 ) -> actor.Next(SessionState, ActorMessage) {
   // Only process if in InitSent state
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     InitSent -> {
       // Transition to Failed with error message
       let assert Ok(new_lifecycle) =
-        transition(state.lifecycle, ErrorOccurred(message))
+        transition(state.runtime.lifecycle, ErrorOccurred(message))
 
       // Cleanup and stop
-      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      let new_state =
+        SessionState(
+          ..state,
+          runtime: RuntimeState(..state.runtime, lifecycle: new_lifecycle),
+        )
       cleanup_session(new_state, InitFailed(InitializationError(message)))
       actor.stop()
     }
@@ -1556,7 +1648,7 @@ fn handle_control_request(
   state: SessionState,
   request: IncomingControlRequest,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     InitSent -> {
       // Implicit confirmation! CLI is sending control requests,
       // proving it understood our initialization and registered our hooks.
@@ -1622,9 +1714,9 @@ fn dispatch_hook_callback(
       // Use unified dispatch decision maker (fail-open policy for hooks)
       let decision =
         callbacks.decide_dispatch(
-          dict.size(state.pending_hooks),
+          dict.size(state.pending.pending_hooks),
           max_pending_hooks,
-          state.hooks.handlers,
+          state.config.hooks.handlers,
           callback_id,
           FailOpen,
         )
@@ -1670,7 +1762,7 @@ fn dispatch_permission_hook_callback(
 
   let response_output = case decode.run(input, decoder) {
     Ok(#(tool_name, tool_input)) -> {
-      case dict.get(state.hooks.permission_handlers, tool_name) {
+      case dict.get(state.config.hooks.permission_handlers, tool_name) {
         Ok(handler) -> {
           let permission_input =
             to_dynamic(
@@ -1734,9 +1826,9 @@ fn dispatch_permission_callback(
   // Use unified dispatch decision maker (fail-deny policy for permissions)
   let decision =
     callbacks.decide_dispatch(
-      dict.size(state.pending_hooks),
+      dict.size(state.pending.pending_hooks),
       max_pending_hooks,
-      state.hooks.permission_handlers,
+      state.config.hooks.permission_handlers,
       tool_name,
       FailDeny,
     )
@@ -1810,7 +1902,7 @@ fn dispatch_async_callback(
   // Schedule timeout for first-event-wins protocol
   // Returns {TimerRef, VerifyRef} tuple
   let #(timer_ref, verify_ref) =
-    schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
+    schedule_hook_timeout(state.config.default_hook_timeout_ms, request_id)
 
   // Record the pending hook with timer and verify references
   let pending =
@@ -1824,8 +1916,13 @@ fn dispatch_async_callback(
       received_at: started_at,
       callback_type: callback_type,
     )
-  let new_pending = dict.insert(state.pending_hooks, request_id, pending)
-  let new_state = SessionState(..state, pending_hooks: new_pending)
+  let new_pending =
+    dict.insert(state.pending.pending_hooks, request_id, pending)
+  let new_state =
+    SessionState(
+      ..state,
+      pending: PendingOps(..state.pending, pending_hooks: new_pending),
+    )
 
   // For hooks, send async acknowledgment; for permissions, no immediate response
   case callback_type {
@@ -1837,7 +1934,10 @@ fn dispatch_async_callback(
             to_dynamic(
               dict.from_list([
                 #("async", to_dynamic(True)),
-                #("asyncTimeout", to_dynamic(state.default_hook_timeout_ms)),
+                #(
+                  "asyncTimeout",
+                  to_dynamic(state.config.default_hook_timeout_ms),
+                ),
               ]),
             ),
           ),
@@ -1857,7 +1957,7 @@ fn send_control_response(
   response: OutgoingControlResponse,
 ) -> Nil {
   let json_line = control_encoder.encode_response(response) <> "\n"
-  let write_fn = state.runner.write
+  let write_fn = state.runtime.runner.write
   let _result = write_fn(json_line)
   Nil
 }
@@ -1877,10 +1977,11 @@ fn handle_implicit_confirmation(
   request: IncomingControlRequest,
 ) -> actor.Next(SessionState, ActorMessage) {
   // Transition to Running
-  let assert Ok(new_lifecycle) = transition(state.lifecycle, InitSuccess)
+  let assert Ok(new_lifecycle) =
+    transition(state.runtime.lifecycle, InitSuccess)
 
   // Cancel init timeout timer
-  case state.init_timer_ref {
+  case state.timers.init_timer_ref {
     Some(timer_ref) -> {
       let _ = cancel_timer(timer_ref)
       Nil
@@ -1893,15 +1994,21 @@ fn handle_implicit_confirmation(
   let new_state =
     SessionState(
       ..state,
-      lifecycle: new_lifecycle,
-      capabilities: Some(CliCapabilities(
-        supported_commands: [],
-        hooks_supported: True,
-        permissions_supported: True,
-        mcp_sdk_servers_supported: True,
-      )),
-      init_request_id: None,
-      init_timer_ref: None,
+      runtime: RuntimeState(
+        ..state.runtime,
+        lifecycle: new_lifecycle,
+        capabilities: Some(CliCapabilities(
+          supported_commands: [],
+          hooks_supported: True,
+          permissions_supported: True,
+          mcp_sdk_servers_supported: True,
+        )),
+      ),
+      timers: Timers(
+        ..state.timers,
+        init_request_id: None,
+        init_timer_ref: None,
+      ),
     )
 
   // Flush queued operations (non-blocking)
@@ -1941,18 +2048,28 @@ fn handle_implicit_confirmation(
 fn handle_port_closed(
   state: SessionState,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     InitSent -> {
       // Port closed during init - transition to Failed
-      let assert Ok(new_lifecycle) = transition(state.lifecycle, PortClosed)
-      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      let assert Ok(new_lifecycle) =
+        transition(state.runtime.lifecycle, PortClosed)
+      let new_state =
+        SessionState(
+          ..state,
+          runtime: RuntimeState(..state.runtime, lifecycle: new_lifecycle),
+        )
       cleanup_session(new_state, InitFailed(CliExitedDuringInit))
       actor.stop()
     }
     Running -> {
       // Port closed during running - transition to Stopped
-      let assert Ok(new_lifecycle) = transition(state.lifecycle, PortClosed)
-      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      let assert Ok(new_lifecycle) =
+        transition(state.runtime.lifecycle, PortClosed)
+      let new_state =
+        SessionState(
+          ..state,
+          runtime: RuntimeState(..state.runtime, lifecycle: new_lifecycle),
+        )
       cleanup_session(new_state, CliExited(0))
       actor.stop()
     }
@@ -1967,11 +2084,16 @@ fn handle_port_closed(
 fn handle_init_timeout(
   state: SessionState,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     InitSent -> {
       // Timeout during init - transition to Failed
-      let assert Ok(new_lifecycle) = transition(state.lifecycle, InitTimeout)
-      let new_state = SessionState(..state, lifecycle: new_lifecycle)
+      let assert Ok(new_lifecycle) =
+        transition(state.runtime.lifecycle, InitTimeout)
+      let new_state =
+        SessionState(
+          ..state,
+          runtime: RuntimeState(..state.runtime, lifecycle: new_lifecycle),
+        )
       cleanup_session(new_state, InitFailed(InitializationTimeout))
       actor.stop()
     }
@@ -1987,7 +2109,7 @@ fn handle_port_message(
   state: SessionState,
   msg: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case bidir_runner.decode_port_message(msg, state.runner.port) {
+  case bidir_runner.decode_port_message(msg, state.runtime.runner.port) {
     Ok(bidir_runner.PortData(data)) -> handle_port_data(state, data)
     Ok(bidir_runner.PortExitStatus(_code)) -> handle_port_closed(state)
     Error(_) -> actor.continue(state)
@@ -1999,11 +2121,12 @@ fn handle_port_data(
   state: SessionState,
   data: BitArray,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case line_framing.handle_port_data(state.line_buffer, data) {
+  case line_framing.handle_port_data(state.buffers.line_buffer, data) {
     Lines(lines, new_buffer) -> {
-      let updated_state = SessionState(..state, line_buffer: new_buffer)
+      let updated_state =
+        SessionState(..state, buffers: Buffers(line_buffer: new_buffer))
       list.each(lines, fn(line) {
-        actor.send(updated_state.self_subject, InjectedMessage(line))
+        actor.send(updated_state.runtime.self_subject, InjectedMessage(line))
       })
       actor.continue(updated_state)
     }
@@ -2040,10 +2163,10 @@ fn handle_send_control_request(
   // Extract request_id from the request
   let request_id = get_request_id(request)
 
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     Running -> {
       // Check backpressure limit
-      case dict.size(state.pending_requests) >= max_pending_requests {
+      case dict.size(state.pending.pending_requests) >= max_pending_requests {
         True -> {
           // At capacity - reject immediately
           process.send(
@@ -2055,12 +2178,15 @@ fn handle_send_control_request(
         False -> {
           // Encode and send request to CLI
           let json_payload = control_encoder.encode_request(request)
-          let write_fn = state.runner.write
+          let write_fn = state.runtime.runner.write
           let _result = write_fn(json_payload <> "\n")
 
           // Schedule timeout timer
           let timer_ref =
-            schedule_request_timeout(state.default_timeout_ms, request_id)
+            schedule_request_timeout(
+              state.config.default_timeout_ms,
+              request_id,
+            )
 
           // Register pending request
           let pending_req =
@@ -2071,8 +2197,15 @@ fn handle_send_control_request(
               timer_ref: Some(timer_ref),
             )
           let new_pending =
-            dict.insert(state.pending_requests, request_id, pending_req)
-          let new_state = SessionState(..state, pending_requests: new_pending)
+            dict.insert(state.pending.pending_requests, request_id, pending_req)
+          let new_state =
+            SessionState(
+              ..state,
+              pending: PendingOps(
+                ..state.pending,
+                pending_requests: new_pending,
+              ),
+            )
           actor.continue(new_state)
         }
       }
@@ -2110,9 +2243,9 @@ fn handle_send_user_message(
   prompt: String,
 ) -> actor.Next(SessionState, ActorMessage) {
   let json_payload = encode_user_message(prompt)
-  let write_fn = state.runner.write
+  let write_fn = state.runtime.runner.write
 
-  case state.lifecycle {
+  case state.runtime.lifecycle {
     Running -> {
       let _result = write_fn(json_payload <> "\n")
       actor.continue(state)
@@ -2148,13 +2281,17 @@ fn handle_request_timeout(
   state: SessionState,
   request_id: String,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case dict.get(state.pending_requests, request_id) {
+  case dict.get(state.pending.pending_requests, request_id) {
     Ok(pending) -> {
       // Request still pending - send timeout to caller
       process.send(pending.reply_to, RequestTimeout)
       // Remove from pending (timer already fired, no need to cancel)
-      let new_pending = dict.delete(state.pending_requests, request_id)
-      let new_state = SessionState(..state, pending_requests: new_pending)
+      let new_pending = dict.delete(state.pending.pending_requests, request_id)
+      let new_state =
+        SessionState(
+          ..state,
+          pending: PendingOps(..state.pending, pending_requests: new_pending),
+        )
       actor.continue(new_state)
     }
     Error(Nil) -> {
@@ -2173,7 +2310,7 @@ fn handle_cancel_pending_request(
   state: SessionState,
   request_id: String,
 ) -> actor.Next(SessionState, ActorMessage) {
-  case dict.get(state.pending_requests, request_id) {
+  case dict.get(state.pending.pending_requests, request_id) {
     Ok(pending) -> {
       // Cancel the actor's timer to prevent stale timeout message
       case pending.timer_ref {
@@ -2184,8 +2321,12 @@ fn handle_cancel_pending_request(
         None -> Nil
       }
       // Remove from pending (no response sent - client already timed out)
-      let new_pending = dict.delete(state.pending_requests, request_id)
-      let new_state = SessionState(..state, pending_requests: new_pending)
+      let new_pending = dict.delete(state.pending.pending_requests, request_id)
+      let new_state =
+        SessionState(
+          ..state,
+          pending: PendingOps(..state.pending, pending_requests: new_pending),
+        )
       actor.continue(new_state)
     }
     Error(Nil) -> {
@@ -2205,13 +2346,13 @@ fn handle_cancel_pending_request(
 @internal
 pub fn flush_queued_ops(state: SessionState) -> SessionState {
   // Reverse to process in FIFO order (queue_operation prepends)
-  let ops_in_order = list.reverse(state.queued_ops)
+  let ops_in_order = list.reverse(state.pending.queued_ops)
 
   // Process each queued operation and accumulate updated pending_requests
   let #(new_pending, _) =
     list.fold(
       ops_in_order,
-      #(state.pending_requests, state.runner),
+      #(state.pending.pending_requests, state.runtime.runner),
       fn(acc, op) {
         let #(pending, runner) = acc
         case op {
@@ -2233,7 +2374,10 @@ pub fn flush_queued_ops(state: SessionState) -> SessionState {
 
                 // Schedule timeout timer for the flushed request
                 let timer_ref =
-                  schedule_request_timeout(state.default_timeout_ms, request_id)
+                  schedule_request_timeout(
+                    state.config.default_timeout_ms,
+                    request_id,
+                  )
 
                 // Register in pending_requests for response correlation
                 let pending_req =
@@ -2258,7 +2402,14 @@ pub fn flush_queued_ops(state: SessionState) -> SessionState {
       },
     )
 
-  SessionState(..state, queued_ops: [], pending_requests: new_pending)
+  SessionState(
+    ..state,
+    pending: PendingOps(
+      ..state.pending,
+      queued_ops: [],
+      pending_requests: new_pending,
+    ),
+  )
 }
 
 /// Forward a regular message to the subscriber.
@@ -2270,7 +2421,7 @@ fn forward_to_subscriber(
 ) -> actor.Next(SessionState, ActorMessage) {
   // Convert Message to Dynamic for CliMessage envelope
   let payload = to_dynamic(msg)
-  process.send(state.subscriber, CliMessage(payload))
+  process.send(state.runtime.subscriber, CliMessage(payload))
   actor.continue(state)
 }
 
@@ -2287,7 +2438,7 @@ fn forward_to_subscriber(
 /// immediately after cleanup, terminating the actor process.
 fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
   // 1. Cancel init timeout timer if active
-  case state.init_timer_ref {
+  case state.timers.init_timer_ref {
     Some(timer_ref) -> {
       let _ = cancel_timer(timer_ref)
       Nil
@@ -2297,7 +2448,7 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
 
   // 2. Cancel timers and resolve all pending SDK-initiated requests
   let _ =
-    dict.each(state.pending_requests, fn(_request_id, pending) {
+    dict.each(state.pending.pending_requests, fn(_request_id, pending) {
       // Cancel timeout timer
       case pending.timer_ref {
         Some(timer_ref) -> {
@@ -2312,12 +2463,16 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
 
   // 3. Clean up all pending hook callbacks using consolidated cleanup
   let _ =
-    dict.fold(state.pending_hooks, state, fn(acc_state, request_id, pending) {
-      cleanup_pending_hook(acc_state, request_id, pending, SessionStopping)
-    })
+    dict.fold(
+      state.pending.pending_hooks,
+      state,
+      fn(acc_state, request_id, pending) {
+        cleanup_pending_hook(acc_state, request_id, pending, SessionStopping)
+      },
+    )
 
   // 4. Resolve all queued operations with session stopped error
-  list.each(state.queued_ops, fn(op) {
+  list.each(state.pending.queued_ops, fn(op) {
     case op {
       QueuedRequest(_request_id, _payload, reply_to) -> {
         process.send(reply_to, RequestSessionStopped)
@@ -2327,11 +2482,11 @@ fn cleanup_session(state: SessionState, reason: StopReason) -> Nil {
   })
 
   // 5. Close the runner (terminates CLI process)
-  let close_fn = state.runner.close
+  let close_fn = state.runtime.runner.close
   close_fn()
 
   // 6. Notify subscriber that session has ended
-  process.send(state.subscriber, SessionEnded(reason))
+  process.send(state.runtime.subscriber, SessionEnded(reason))
 
   Nil
 }
@@ -2750,12 +2905,21 @@ pub fn queue_operation(
   state: SessionState,
   op: QueuedOperation,
 ) -> Result(SessionState, SessionError) {
-  case list.length(state.queued_ops) >= max_queued_ops {
+  case list.length(state.pending.queued_ops) >= max_queued_ops {
     True ->
       Error(InitQueueOverflow(
         "Too many operations queued during initialization (max 16)",
       ))
-    False -> Ok(SessionState(..state, queued_ops: [op, ..state.queued_ops]))
+    False ->
+      Ok(
+        SessionState(
+          ..state,
+          pending: PendingOps(..state.pending, queued_ops: [
+            op,
+            ..state.pending.queued_ops
+          ]),
+        ),
+      )
   }
 }
 
@@ -2772,17 +2936,20 @@ pub fn add_pending_request(
   request_id: String,
   pending: PendingRequest,
 ) -> Result(SessionState, SessionError) {
-  case dict.size(state.pending_requests) >= max_pending_requests {
+  case dict.size(state.pending.pending_requests) >= max_pending_requests {
     True ->
       Error(TooManyPendingRequests("Too many pending control requests (max 64)"))
     False ->
       Ok(
         SessionState(
           ..state,
-          pending_requests: dict.insert(
-            state.pending_requests,
-            request_id,
-            pending,
+          pending: PendingOps(
+            ..state.pending,
+            pending_requests: dict.insert(
+              state.pending.pending_requests,
+              request_id,
+              pending,
+            ),
           ),
         ),
       )
@@ -2804,7 +2971,7 @@ pub fn add_pending_hook(
   _callback_id: String,
   hook: PendingHook,
 ) -> #(SessionState, Option(String)) {
-  case dict.size(state.pending_hooks) >= max_pending_hooks {
+  case dict.size(state.pending.pending_hooks) >= max_pending_hooks {
     True -> {
       // Return immediate fail-open response using hook.request_id for correlation
       // Use proper JSON encoding to handle special characters in request_id
@@ -2827,7 +2994,14 @@ pub fn add_pending_hook(
       SessionState(
         ..state,
         // Key by request_id for lookup in handle_hook_done
-        pending_hooks: dict.insert(state.pending_hooks, hook.request_id, hook),
+        pending: PendingOps(
+          ..state.pending,
+          pending_hooks: dict.insert(
+            state.pending.pending_hooks,
+            hook.request_id,
+            hook,
+          ),
+        ),
       ),
       None,
     )
