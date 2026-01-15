@@ -44,6 +44,18 @@ pub type DecodeError {
   JsonDecodeError(String)
 }
 
+/// Run a decoder and wrap errors with JsonDecodeError.
+/// Centralizes the pattern of running decode.run and formatting errors.
+fn decode_with_error_wrap(
+  raw: Dynamic,
+  decoder: decode.Decoder(a),
+) -> Result(a, DecodeError) {
+  case decode.run(raw, decoder) {
+    Ok(value) -> Ok(value)
+    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+  }
+}
+
 /// Decode a JSON string into a Message type.
 /// Returns DecodeError for invalid JSON, unknown types, or missing required fields.
 pub fn decode_message(json_string: String) -> Result(Message, DecodeError) {
@@ -181,9 +193,9 @@ pub fn decode_system_message(raw: Dynamic) -> Result(Message, DecodeError) {
       claude_code_version:,
     ))
   }
-  case decode.run(raw, decoder) {
+  case decode_with_error_wrap(raw, decoder) {
     Ok(msg) -> Ok(System(msg))
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -217,9 +229,9 @@ pub fn decode_assistant_message(raw: Dynamic) -> Result(Message, DecodeError) {
       message:,
     ))
   }
-  case decode.run(raw, decoder) {
+  case decode_with_error_wrap(raw, decoder) {
     Ok(msg) -> Ok(Assistant(msg))
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -259,9 +271,9 @@ pub fn decode_user_message(raw: Dynamic) -> Result(Message, DecodeError) {
       tool_use_result:,
     ))
   }
-  case decode.run(raw, decoder) {
+  case decode_with_error_wrap(raw, decoder) {
     Ok(msg) -> Ok(User(msg))
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -360,9 +372,9 @@ pub fn decode_result_message(raw: Dynamic) -> Result(Message, DecodeError) {
       errors:,
     ))
   }
-  case decode.run(raw, decoder) {
+  case decode_with_error_wrap(raw, decoder) {
     Ok(msg) -> Ok(Result(msg))
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -561,9 +573,9 @@ pub fn decode_content_blocks(
   raw: Dynamic,
 ) -> Result(List(ContentBlock), DecodeError) {
   let list_decoder = decode.list(decode.dynamic)
-  case decode.run(raw, list_decoder) {
+  case decode_with_error_wrap(raw, list_decoder) {
     Ok(dynamics) -> decode_content_block_list(dynamics, [])
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -649,20 +661,20 @@ pub fn decode_text_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) {
     use block_type <- decode.field("type", decode.string)
     decode.success(block_type)
   }
-  case decode.run(raw, type_decoder) {
+  case decode_with_error_wrap(raw, type_decoder) {
     Ok("text") -> {
       let text_decoder = {
         use text <- decode.field("text", decode.string)
         decode.success(text)
       }
-      case decode.run(raw, text_decoder) {
+      case decode_with_error_wrap(raw, text_decoder) {
         Ok(text) -> Ok(TextBlock(text))
-        Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+        Error(e) -> Error(e)
       }
     }
     Ok(other) ->
       Error(JsonDecodeError("Expected type 'text', got '" <> other <> "'"))
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -672,7 +684,7 @@ pub fn decode_tool_use_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) 
     use block_type <- decode.field("type", decode.string)
     decode.success(block_type)
   }
-  case decode.run(raw, type_decoder) {
+  case decode_with_error_wrap(raw, type_decoder) {
     Ok("tool_use") -> {
       let decoder = {
         use id <- decode.field("id", decode.string)
@@ -680,14 +692,14 @@ pub fn decode_tool_use_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) 
         use input <- decode.field("input", decode.dynamic)
         decode.success(#(id, name, input))
       }
-      case decode.run(raw, decoder) {
+      case decode_with_error_wrap(raw, decoder) {
         Ok(#(id, name, input)) -> Ok(ToolUseBlock(id:, name:, input:))
-        Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+        Error(e) -> Error(e)
       }
     }
     Ok(other) ->
       Error(JsonDecodeError("Expected type 'tool_use', got '" <> other <> "'"))
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
+    Error(e) -> Error(e)
   }
 }
 
@@ -705,10 +717,7 @@ pub fn decode_tool_result_block(
     )
     decode.success(ToolResultBlock(tool_use_id:, content:, is_error:))
   }
-  case decode.run(raw, decoder) {
-    Ok(result) -> Ok(result)
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
-  }
+  decode_with_error_wrap(raw, decoder)
 }
 
 // =============================================================================
@@ -758,10 +767,7 @@ pub fn decode_usage(raw: Dynamic) -> Result(Usage, DecodeError) {
       cache_read_input_tokens:,
     ))
   }
-  case decode.run(raw, decoder) {
-    Ok(usage) -> Ok(usage)
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
-  }
+  decode_with_error_wrap(raw, decoder)
 }
 
 /// Decode McpServerStatus from Dynamic.
@@ -773,10 +779,7 @@ pub fn decode_mcp_server_status(
     use status <- decode.field("status", decode.string)
     decode.success(McpServerStatus(name:, status:))
   }
-  case decode.run(raw, decoder) {
-    Ok(mcp_status) -> Ok(mcp_status)
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
-  }
+  decode_with_error_wrap(raw, decoder)
 }
 
 /// Decode PermissionDenial from Dynamic.
@@ -789,10 +792,7 @@ pub fn decode_permission_denial(
     use tool_input <- decode.field("tool_input", decode.dynamic)
     decode.success(PermissionDenial(tool_name:, tool_use_id:, tool_input:))
   }
-  case decode.run(raw, decoder) {
-    Ok(denial) -> Ok(denial)
-    Error(errors) -> Error(JsonDecodeError(format_decode_errors(errors)))
-  }
+  decode_with_error_wrap(raw, decoder)
 }
 
 /// Format decode errors as a string.
