@@ -4,11 +4,11 @@ import claude_agent_sdk/error.{
   UnexpectedMessageAfterResult, UnparseableCliVersion, Warning,
 }
 import claude_agent_sdk/internal/constants
-import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/line_framing.{
   BufferOverflow, CompleteLine, NeedMoreData, ReadError, append_to_buffer,
   normalize_crlf, read_line,
 }
+import claude_agent_sdk/internal/port_ffi
 import claude_agent_sdk/internal/stream.{
   Closed, Continue, EndOfStream, Message, NextJsonDecodeError, NextProcessError,
   NextTooManyDecodeErrors, PendingEndOfStream, ResultReceived, Stop, Streaming,

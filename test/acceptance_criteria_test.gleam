@@ -35,10 +35,10 @@ import claude_agent_sdk/internal/bidir/actor.{
   Running, StartConfig,
 }
 import claude_agent_sdk/internal/cli
-import claude_agent_sdk/internal/request_tracker
 import claude_agent_sdk/internal/line_framing.{
   CompleteLine, NeedMoreData, normalize_crlf, read_line,
 }
+import claude_agent_sdk/internal/request_tracker
 import claude_agent_sdk/options
 import support/full_mock_runner
 import support/mock_bidir_runner

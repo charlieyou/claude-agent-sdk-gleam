@@ -370,11 +370,9 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
 /// Test: synchronous set_permission_mode error type variants
 pub fn set_permission_mode_error_type_test() {
   // This test verifies the error type variants exist and pattern match correctly
-  let _err1: bidir.SetPermissionModeError =
-    SetPermissionModeCliError("test")
+  let _err1: bidir.SetPermissionModeError = SetPermissionModeCliError("test")
   let _err2: bidir.SetPermissionModeError = SetPermissionModeTimeout
-  let _err3: bidir.SetPermissionModeError =
-    SetPermissionModeSessionStopped
+  let _err3: bidir.SetPermissionModeError = SetPermissionModeSessionStopped
 
   let check_variant = fn(err: bidir.SetPermissionModeError) {
     case err {

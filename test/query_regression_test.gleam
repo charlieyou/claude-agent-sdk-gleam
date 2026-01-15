@@ -545,4 +545,3 @@ pub fn message_envelope_preserves_raw_json_test() {
     }
   }
 }
-

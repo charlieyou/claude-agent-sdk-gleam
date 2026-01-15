@@ -16,7 +16,9 @@ import claude_agent_sdk/error.{
   CliExitedDuringInit, InitializationError, InitializationTimeout,
 }
 import claude_agent_sdk/internal/bidir.{type SubscriberMessage}
-import claude_agent_sdk/internal/bidir/actor.{InitFailed, SessionEnded, StartConfig}
+import claude_agent_sdk/internal/bidir/actor.{
+  InitFailed, SessionEnded, StartConfig,
+}
 import support/mock_bidir_runner
 
 // =============================================================================
