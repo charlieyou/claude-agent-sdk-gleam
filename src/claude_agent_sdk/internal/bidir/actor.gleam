@@ -60,6 +60,9 @@ import claude_agent_sdk/error.{
   InitializationTimeout, RuntimeError, TooManyPendingRequests,
 }
 import claude_agent_sdk/hook.{type HookEvent}
+import claude_agent_sdk/internal/bidir/callbacks.{
+  FailDeny, FailOpen, RejectAtCapacity, RejectUnknownHandler, SpawnCallback,
+}
 import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/control_decoder
 import claude_agent_sdk/internal/control_encoder
@@ -1616,76 +1619,37 @@ fn dispatch_hook_callback(
   case callback_id == permission_hook_callback_id {
     True -> dispatch_permission_hook_callback(state, request_id, input)
     False -> {
-      // Check backpressure limit before spawning task
-      case dict.size(state.pending_hooks) >= max_pending_hooks {
-        True -> {
-          // At capacity - send fail-open response without spawning
+      // Use unified dispatch decision maker (fail-open policy for hooks)
+      let decision =
+        callbacks.decide_dispatch(
+          dict.size(state.pending_hooks),
+          max_pending_hooks,
+          state.hooks.handlers,
+          callback_id,
+          FailOpen,
+        )
+      case decision {
+        SpawnCallback(handler) -> {
+          dispatch_async_callback(
+            state,
+            request_id,
+            callback_id,
+            input,
+            handler,
+            HookType,
+          )
+        }
+        RejectAtCapacity(FailOpen) | RejectUnknownHandler(FailOpen) -> {
+          // Fail-open: send continue: true response
           let fail_open_result =
             to_dynamic(dict.from_list([#("continue", True)]))
           let response = HookResponse(request_id, HookSuccess(fail_open_result))
           send_control_response(state, response)
           actor.continue(state)
         }
-        False -> {
-          case dict.get(state.hooks.handlers, callback_id) {
-            Ok(handler) -> {
-              // Record start time for timeout duration logging
-              let started_at = port_ffi.monotonic_time_ms()
-
-              // Spawn a task to execute the handler asynchronously
-              // The task will send HookDone message back when complete
-              let parent_pid = process.self()
-              let #(task_pid, monitor_ref) =
-                spawn_hook_task(parent_pid, request_id, handler, input)
-
-              // Schedule timeout for first-event-wins protocol
-              // Returns {TimerRef, VerifyRef} tuple
-              let #(timer_ref, verify_ref) =
-                schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
-
-              // Record the pending hook with timer and verify references
-              let pending =
-                PendingHook(
-                  task_pid: task_pid,
-                  monitor_ref: monitor_ref,
-                  timer_ref: timer_ref,
-                  verify_ref: verify_ref,
-                  callback_id: callback_id,
-                  request_id: request_id,
-                  received_at: started_at,
-                  callback_type: HookType,
-                )
-              let new_pending =
-                dict.insert(state.pending_hooks, request_id, pending)
-              let async_response =
-                HookResponse(
-                  request_id,
-                  HookSuccess(
-                    to_dynamic(
-                      dict.from_list([
-                        #("async", to_dynamic(True)),
-                        #(
-                          "asyncTimeout",
-                          to_dynamic(state.default_hook_timeout_ms),
-                        ),
-                      ]),
-                    ),
-                  ),
-                )
-              send_control_response(state, async_response)
-              actor.continue(SessionState(..state, pending_hooks: new_pending))
-            }
-            Error(Nil) -> {
-              // Unknown callback_id - send fail-open success response
-              // This allows the CLI to proceed rather than hang waiting for a response
-              let fail_open_result =
-                to_dynamic(dict.from_list([#("continue", True)]))
-              let response =
-                HookResponse(request_id, HookSuccess(fail_open_result))
-              send_control_response(state, response)
-              actor.continue(state)
-            }
-          }
+        // These cases won't occur with FailOpen policy, but must be handled
+        RejectAtCapacity(FailDeny) | RejectUnknownHandler(FailDeny) -> {
+          actor.continue(state)
         }
       }
     }
@@ -1767,55 +1731,122 @@ fn dispatch_permission_callback(
   tool_name: String,
   input: Dynamic,
 ) -> actor.Next(SessionState, ActorMessage) {
-  // Check backpressure limit before spawning task
-  case dict.size(state.pending_hooks) >= max_pending_hooks {
-    True -> {
-      // At capacity - send fail-deny response (security-first)
+  // Use unified dispatch decision maker (fail-deny policy for permissions)
+  let decision =
+    callbacks.decide_dispatch(
+      dict.size(state.pending_hooks),
+      max_pending_hooks,
+      state.hooks.permission_handlers,
+      tool_name,
+      FailDeny,
+    )
+  case decision {
+    SpawnCallback(handler) -> {
+      dispatch_async_callback(
+        state,
+        request_id,
+        tool_name,
+        input,
+        handler,
+        PermissionType,
+      )
+    }
+    RejectAtCapacity(FailDeny) -> {
+      // Fail-deny: deny at capacity (security-first)
       let response =
         PermissionResponse(request_id, Deny(Some("Too many pending requests")))
       send_control_response(state, response)
       actor.continue(state)
     }
-    False -> {
-      case dict.get(state.hooks.permission_handlers, tool_name) {
-        Ok(handler) -> {
-          // Record start time for timeout duration logging
-          let started_at = port_ffi.monotonic_time_ms()
+    RejectUnknownHandler(FailDeny) -> {
+      // Fail-deny: deny unknown tool (security-first)
+      let response = PermissionResponse(request_id, Deny(Some("Unknown tool")))
+      send_control_response(state, response)
+      actor.continue(state)
+    }
+    // These cases won't occur with FailDeny policy, but must be handled
+    RejectAtCapacity(FailOpen) | RejectUnknownHandler(FailOpen) -> {
+      actor.continue(state)
+    }
+  }
+}
 
-          // Spawn a task to execute the handler asynchronously
-          let parent_pid = process.self()
-          let #(task_pid, monitor_ref) =
-            spawn_hook_task(parent_pid, request_id, handler, input)
+/// Unified async callback dispatch for hook and permission callbacks.
+///
+/// Handles the common spawn/timer/pending logic for both callback types.
+/// Called after decide_dispatch returns SpawnCallback.
+///
+/// This function:
+/// 1. Records start time for timeout duration logging
+/// 2. Spawns task to execute handler asynchronously
+/// 3. Schedules timeout for first-event-wins protocol
+/// 4. Records pending hook with appropriate callback type
+/// 5. For hooks only: sends async acknowledgment response
+///
+/// ## Parameters
+/// - state: Current session state
+/// - request_id: Request ID for response correlation
+/// - callback_id: The callback/tool identifier
+/// - input: Handler input (Dynamic)
+/// - handler: Handler function to spawn
+/// - callback_type: HookType (fail-open) or PermissionType (fail-deny)
+fn dispatch_async_callback(
+  state: SessionState,
+  request_id: String,
+  callback_id: String,
+  input: Dynamic,
+  handler: fn(Dynamic) -> Dynamic,
+  callback_type: CallbackType,
+) -> actor.Next(SessionState, ActorMessage) {
+  // Record start time for timeout duration logging
+  let started_at = port_ffi.monotonic_time_ms()
 
-          // Schedule timeout for first-event-wins protocol
-          let #(timer_ref, verify_ref) =
-            schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
+  // Spawn a task to execute the handler asynchronously
+  // The task will send HookDone message back when complete
+  let parent_pid = process.self()
+  let #(task_pid, monitor_ref) =
+    spawn_hook_task(parent_pid, request_id, handler, input)
 
-          // Record the pending hook with PermissionCallback type
-          let pending =
-            PendingHook(
-              task_pid: task_pid,
-              monitor_ref: monitor_ref,
-              timer_ref: timer_ref,
-              verify_ref: verify_ref,
-              callback_id: tool_name,
-              request_id: request_id,
-              received_at: started_at,
-              callback_type: PermissionType,
-            )
-          let new_pending =
-            dict.insert(state.pending_hooks, request_id, pending)
-          actor.continue(SessionState(..state, pending_hooks: new_pending))
-        }
-        Error(Nil) -> {
-          // Unknown tool_name - send fail-deny response (security-first)
-          // Unlike hooks, unknown permission handlers deny rather than allow
-          let response =
-            PermissionResponse(request_id, Deny(Some("Unknown tool")))
-          send_control_response(state, response)
-          actor.continue(state)
-        }
-      }
+  // Schedule timeout for first-event-wins protocol
+  // Returns {TimerRef, VerifyRef} tuple
+  let #(timer_ref, verify_ref) =
+    schedule_hook_timeout(state.default_hook_timeout_ms, request_id)
+
+  // Record the pending hook with timer and verify references
+  let pending =
+    PendingHook(
+      task_pid: task_pid,
+      monitor_ref: monitor_ref,
+      timer_ref: timer_ref,
+      verify_ref: verify_ref,
+      callback_id: callback_id,
+      request_id: request_id,
+      received_at: started_at,
+      callback_type: callback_type,
+    )
+  let new_pending = dict.insert(state.pending_hooks, request_id, pending)
+  let new_state = SessionState(..state, pending_hooks: new_pending)
+
+  // For hooks, send async acknowledgment; for permissions, no immediate response
+  case callback_type {
+    HookType -> {
+      let async_response =
+        HookResponse(
+          request_id,
+          HookSuccess(
+            to_dynamic(
+              dict.from_list([
+                #("async", to_dynamic(True)),
+                #("asyncTimeout", to_dynamic(state.default_hook_timeout_ms)),
+              ]),
+            ),
+          ),
+        )
+      send_control_response(state, async_response)
+      actor.continue(new_state)
+    }
+    PermissionType -> {
+      actor.continue(new_state)
     }
   }
 }
