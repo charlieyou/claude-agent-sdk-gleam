@@ -1,6 +1,7 @@
 import claude_agent_sdk/error.{SpawnFailed}
 import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/port_ffi
+import claude_agent_sdk/internal/port_io
 import gleam/bit_array
 import gleam/erlang/process
 import gleam/string
@@ -237,13 +238,13 @@ pub fn mock_close_callback_test() {
 pub fn mock_write_error_test() {
   let runner =
     bidir_runner.mock(
-      on_write: fn(_) { Error(port_ffi.PortClosed) },
+      on_write: fn(_) { Error(port_io.PortClosed) },
       on_close: fn() { Nil },
     )
 
   let result = runner.write("data")
   case result {
-    Error(port_ffi.PortClosed) -> should.be_true(True)
+    Error(port_io.PortClosed) -> should.be_true(True)
     _ -> should.fail()
   }
 }
@@ -284,11 +285,11 @@ pub fn mock_runner_helper_notifies_close_test() {
 /// MockRunner custom write behavior test.
 pub fn mock_runner_custom_write_test() {
   let mock =
-    mock_bidir_runner.new_with_write(fn(_) { Error(port_ffi.PortClosed) })
+    mock_bidir_runner.new_with_write(fn(_) { Error(port_io.PortClosed) })
 
   let result = mock.runner.write("will fail")
   case result {
-    Error(port_ffi.PortClosed) -> should.be_true(True)
+    Error(port_io.PortClosed) -> should.be_true(True)
     _ -> should.fail()
   }
 }

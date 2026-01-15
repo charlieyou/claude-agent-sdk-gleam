@@ -20,7 +20,7 @@ import claude_agent_sdk/internal/line_framing.{
   BufferOverflow, CompleteLine, ExitReceived, NeedMoreData, PortClosed,
   ReadError, append_to_buffer, read_line,
 }
-import claude_agent_sdk/internal/port_ffi.{type Port, Data, ExitStatus, Timeout}
+import claude_agent_sdk/internal/port_io.{type Port, Data, ExitStatus, Timeout}
 import claude_agent_sdk/message.{type MessageEnvelope, Result}
 import claude_agent_sdk/runner.{type Handle, type Runner}
 import gleam/bit_array
@@ -364,7 +364,7 @@ pub fn mark_closed(stream: QueryStream) -> QueryStream {
     False -> {
       // Perform actual cleanup based on source type
       case internal.source {
-        PortSource(port) -> port_ffi.ffi_close_port(port)
+        PortSource(port) -> port_io.close_port(port)
         RunnerSource(runner:, handle:) -> runner.close(runner, handle)
       }
       QueryStream(QueryStreamInternal(..internal, state: Closed, closed: True))
@@ -528,19 +528,19 @@ fn receive_from_source(
       // Determine timeout based on state
       let port_result = case internal.state {
         // Streaming: block indefinitely
-        Streaming -> port_ffi.receive_blocking(port)
+        Streaming -> port_io.receive_blocking(port)
         // ResultReceived: use drain timeout (100ms)
         ResultReceived ->
-          port_ffi.receive_timeout(port, constants.post_result_drain_timeout_ms)
+          port_io.receive_timeout(port, constants.post_result_drain_timeout_ms)
         // PendingEndOfStream/Closed: shouldn't get here, but use minimal timeout
-        PendingEndOfStream | Closed -> port_ffi.receive_timeout(port, 0)
+        PendingEndOfStream | Closed -> port_io.receive_timeout(port, 0)
       }
       // Convert port result to unified format
       case port_result {
         Ok(Data(bytes)) -> SourceData(bytes)
         Ok(ExitStatus(code)) -> SourceExitStatus(code)
         Ok(Timeout) -> SourceTimeout
-        Ok(port_ffi.Eof) -> SourceEof
+        Ok(port_io.Eof) -> SourceEof
         Error(msg) -> SourceError(msg)
       }
     }
@@ -854,7 +854,7 @@ pub fn with_stream(
     Error(e) -> Error(e)
     Ok(stream) -> {
       // Use rescue to catch panics and ensure cleanup
-      let callback_result = port_ffi.rescue(fn() { f(stream) })
+      let callback_result = port_io.rescue(fn() { f(stream) })
       // Always close, regardless of how f returns (including panic)
       let _ = close(stream)
       // Re-raise if callback panicked

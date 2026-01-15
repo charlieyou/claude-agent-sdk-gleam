@@ -34,7 +34,7 @@ import gleam/option.{type Option, None, Some}
 
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
-import claude_agent_sdk/internal/port_ffi.{type WriteError}
+import claude_agent_sdk/internal/port_io.{type WriteError}
 
 // =============================================================================
 // Types

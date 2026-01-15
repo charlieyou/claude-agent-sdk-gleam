@@ -36,7 +36,7 @@ import gleam/erlang/process.{type Subject}
 
 import claude_agent_sdk/event
 import claude_agent_sdk/internal/cli
-import claude_agent_sdk/internal/port_ffi
+import claude_agent_sdk/internal/port_io
 import claude_agent_sdk/internal/stream as internal_stream
 import claude_agent_sdk/session
 
@@ -461,7 +461,7 @@ pub fn query_new(
       }
     }
     False -> {
-      case port_ffi.find_cli_path(cli_name) {
+      case port_io.find_cli_path(cli_name) {
         Error(_) ->
           Error(error.CliNotFoundError(
             "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
@@ -605,7 +605,7 @@ fn spawn_query_new_cli(
       }
     }
     False ->
-      case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
+      case port_io.open_port_safe(cli_path, args, cwd) {
         Error(reason) -> Error(error.SpawnError(reason))
         Ok(port) -> Ok(internal_stream.new_with_warnings(port, warnings))
       }
@@ -632,7 +632,7 @@ pub fn query(
     }
     False -> {
       // Production mode: Find CLI in PATH
-      case port_ffi.find_cli_path(cli_name) {
+      case port_io.find_cli_path(cli_name) {
         Error(_) ->
           Error(error.CliNotFoundError(
             "Claude CLI not found in PATH. Install with: npm install -g @anthropic-ai/claude-code",
@@ -800,7 +800,7 @@ fn spawn_query_with_warnings(
       }
     }
     False ->
-      case port_ffi.ffi_open_port_safe(cli_path, args, cwd) {
+      case port_io.open_port_safe(cli_path, args, cwd) {
         Error(reason) -> Error(error.SpawnError(reason))
         Ok(port) -> Ok(internal_stream.new_with_warnings(port, all_warnings))
       }

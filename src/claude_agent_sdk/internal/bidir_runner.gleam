@@ -5,9 +5,8 @@ import gleam/dynamic/decode
 import gleam/erlang/atom
 
 import claude_agent_sdk/error.{type StartError, SpawnFailed}
-import claude_agent_sdk/internal/port_ffi.{
-  type Port, type WriteError, ffi_close_port, find_cli_path, port_write,
-  wrap_port,
+import claude_agent_sdk/internal/port_io.{
+  type Port, type WriteError, close_port, find_cli_path, wrap_port, write,
 }
 
 /// FFI binding to erlang:make_ref/0 for creating unique references.
@@ -100,10 +99,10 @@ pub fn start_raw(
     Ok(port) -> {
       // Create the write function that sends data to the port
       let write_fn = fn(data: String) -> Result(Nil, WriteError) {
-        port_write(port, data)
+        write(port, data)
       }
       // Create the close function that closes the port (uses safe wrapper with drain)
-      let close_fn = fn() -> Nil { ffi_close_port(port) }
+      let close_fn = fn() -> Nil { close_port(port) }
       Ok(BidirRunner(port: port, write: write_fn, close: close_fn))
     }
   }
@@ -143,7 +142,7 @@ pub fn decode_port_message(msg: Dynamic, port: Port) -> Result(PortMessage, Nil)
 /// Compare a Dynamic port value with a typed Port
 fn ports_equal(dynamic_port: Dynamic, port: Port) -> Bool {
   // Use public accessor to get raw port from wrapper
-  let port_inner = port_ffi.port_to_dynamic(port)
+  let port_inner = port_io.port_to_dynamic(port)
   exact_equals(dynamic_port, port_inner)
 }
 

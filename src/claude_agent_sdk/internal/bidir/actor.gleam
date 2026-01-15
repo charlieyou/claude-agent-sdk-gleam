@@ -69,7 +69,7 @@ import claude_agent_sdk/internal/control_encoder
 import claude_agent_sdk/internal/line_framing.{
   type LineBuffer, LineBuffer, Lines, PushBufferOverflow,
 }
-import claude_agent_sdk/internal/port_ffi
+import claude_agent_sdk/internal/port_io
 import claude_agent_sdk/message
 
 // FFI: Convert any value to Dynamic (identity function at runtime)
@@ -84,12 +84,12 @@ fn dynamic_equals(a: Dynamic, b: Dynamic) -> Bool
 ///
 /// Used to filter select_other messages: only actual port messages should be
 /// routed to handle_port_message. Other messages are treated as unexpected.
-fn is_port_tuple(msg: Dynamic, port: port_ffi.Port) -> Bool {
+fn is_port_tuple(msg: Dynamic, port: port_io.Port) -> Bool {
   // Extract first element of tuple using decode.at for consistency with
   // other tuple decoding in this file (e.g., select_record handlers)
   case decode.run(msg, decode.at([0], decode.dynamic)) {
     Ok(first_elem) -> {
-      let port_dyn = port_ffi.port_to_dynamic(port)
+      let port_dyn = port_io.port_to_dynamic(port)
       dynamic_equals(first_elem, port_dyn)
     }
     Error(_) -> False
@@ -955,7 +955,7 @@ fn start_internal(
     Ok(started) -> {
       let session = started.data
       let assert Ok(pid) = process.subject_owner(session)
-      port_ffi.connect_port(runner.port, pid)
+      port_io.connect_port(runner.port, pid)
       actor.send(session, StartInitHandshake)
       let _ = actor.call(session, 1000, GetLifecycle)
       Ok(session)
@@ -1331,7 +1331,7 @@ fn handle_hook_timeout(
       case dynamic_equals(pending.verify_ref, msg_verify_ref) {
         True -> {
           // Calculate elapsed time for logging
-          let elapsed_ms = port_ffi.monotonic_time_ms() - pending.received_at
+          let elapsed_ms = port_io.monotonic_time_ms() - pending.received_at
 
           // Branch response based on callback type
           case pending.callback_type {
@@ -1891,7 +1891,7 @@ fn dispatch_async_callback(
   callback_type: CallbackType,
 ) -> actor.Next(SessionState, ActorMessage) {
   // Record start time for timeout duration logging
-  let started_at = port_ffi.monotonic_time_ms()
+  let started_at = port_io.monotonic_time_ms()
 
   // Spawn a task to execute the handler asynchronously
   // The task will send HookDone message back when complete

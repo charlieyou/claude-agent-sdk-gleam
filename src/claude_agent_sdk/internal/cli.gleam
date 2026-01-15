@@ -3,7 +3,7 @@
 //// and provides pure version parsing functions for unit testing.
 
 import claude_agent_sdk/internal/constants
-import claude_agent_sdk/internal/port_ffi.{
+import claude_agent_sdk/internal/port_io.{
   type Port, Data, Eof, ExitStatus, Timeout,
 }
 import claude_agent_sdk/options.{
@@ -61,20 +61,20 @@ pub fn detect_cli_version(
   cli_path: String,
 ) -> Result(CliVersion, VersionCheckError) {
   // Spawn the CLI with --version (using safe version to handle spawn failures)
-  case port_ffi.ffi_open_port_safe(cli_path, ["--version"], ".") {
+  case port_io.open_port_safe(cli_path, ["--version"], ".") {
     Error(reason) -> Error(SpawnFailed(reason))
     Ok(port) -> {
       // Collect output with timeout
       case collect_version_output(port, <<>>) {
         Ok(output) -> {
-          port_ffi.ffi_close_port(port)
+          port_io.close_port(port)
           case parse_version_string(output) {
             Ok(version) -> Ok(version)
             Error(Nil) -> Error(ParseFailed(output))
           }
         }
         Error(err) -> {
-          port_ffi.ffi_close_port(port)
+          port_io.close_port(port)
           Error(err)
         }
       }
@@ -87,7 +87,7 @@ fn collect_version_output(
   port: Port,
   acc: BitArray,
 ) -> Result(String, VersionCheckError) {
-  case port_ffi.receive_timeout(port, constants.version_detection_timeout_ms) {
+  case port_io.receive_timeout(port, constants.version_detection_timeout_ms) {
     Ok(msg) ->
       case msg {
         Data(bytes) ->

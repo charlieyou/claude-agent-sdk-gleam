@@ -1,7 +1,7 @@
 /// Test helpers for mocking BidirRunner.
 /// Provides utilities for capturing writes in tests.
 import claude_agent_sdk/internal/bidir_runner.{type BidirRunner}
-import claude_agent_sdk/internal/port_ffi.{type WriteError}
+import claude_agent_sdk/internal/port_io.{type WriteError}
 import gleam/erlang/process.{type Subject}
 
 /// A mock runner with capture capabilities for testing.
