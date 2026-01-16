@@ -8,21 +8,23 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Pid, type Subject}
+import gleam/int
 import gleam/list
 import gleam/option.{None}
 import gleeunit/should
 
 import claude_agent_sdk/error.{InitQueueOverflow, TooManyPendingRequests}
 import claude_agent_sdk/internal/bidir/actor.{
-  type PendingHook, type PendingRequest, type RequestResult, type RuntimeState,
-  type SessionState, Buffers, HookConfig, HookType, PendingHook, PendingOps,
-  PendingRequest, QueuedRequest, QueuedUserMessage, SessionConfig, SessionState,
-  Timers,
+  type PendingHook, type PendingRequest, type RequestResult, type SessionState,
+  Buffers, HookConfig, HookType, PendingHook, PendingOps, PendingRequest,
+  QueuedRequest, QueuedUserMessage, RuntimeState, SessionConfig, SessionState,
+  Starting, Timers,
 }
 import claude_agent_sdk/internal/bidir/reducers.{
   add_pending_hook, add_pending_request, max_pending_hooks, max_pending_requests,
   max_queued_ops, queue_operation,
 }
+import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/line_framing.{LineBuffer}
 
 // =============================================================================
@@ -60,8 +62,18 @@ fn test_state() -> SessionState {
 }
 
 /// Stub RuntimeState - reducers don't access these fields.
-@external(erlang, "reducers_test_ffi", "stub_runtime")
-fn stub_runtime() -> RuntimeState
+fn stub_runtime() -> actor.RuntimeState {
+  RuntimeState(
+    runner: bidir_runner.mock(on_write: fn(_) { Ok(Nil) }, on_close: fn() {
+      Nil
+    }),
+    lifecycle: Starting,
+    subscriber: stub_subject(),
+    self_subject: stub_subject(),
+    capabilities: None,
+    inject_subject: None,
+  )
+}
 
 /// Create a stub PendingRequest for testing.
 fn stub_pending_request(request_id: String) -> PendingRequest {
@@ -90,8 +102,10 @@ fn stub_pending_hook(request_id: String) -> PendingHook {
 @external(erlang, "gleam_stdlib", "identity")
 fn to_dynamic(a: a) -> Dynamic
 
+/// Create a stub Subject - the Erlang FFI returns a reference that Gleam
+/// interprets as whatever type is declared, making this polymorphic.
 @external(erlang, "reducers_test_ffi", "stub_subject")
-fn stub_subject() -> Subject(RequestResult)
+fn stub_subject() -> Subject(a)
 
 @external(erlang, "reducers_test_ffi", "stub_pid")
 fn stub_pid() -> Pid
@@ -130,7 +144,7 @@ pub fn queue_operation_rejects_at_capacity_test() {
   // Fill queue to capacity
   let state =
     list.fold(list.range(1, max_queued_ops), test_state(), fn(s, i) {
-      let op = QueuedUserMessage("msg" <> int_to_string(i))
+      let op = QueuedUserMessage("msg" <> int.to_string(i))
       let assert Ok(new_s) = queue_operation(s, op)
       new_s
     })
@@ -163,7 +177,7 @@ pub fn add_pending_request_rejects_at_capacity_test() {
   // Fill to capacity
   let state =
     list.fold(list.range(1, max_pending_requests), test_state(), fn(s, i) {
-      let id = "req-" <> int_to_string(i)
+      let id = "req-" <> int.to_string(i)
       let pending = stub_pending_request(id)
       let assert Ok(new_s) = add_pending_request(s, id, pending)
       new_s
@@ -195,7 +209,7 @@ pub fn add_pending_hook_returns_response_at_capacity_test() {
   // Fill to capacity
   let state =
     list.fold(list.range(1, max_pending_hooks), test_state(), fn(s, i) {
-      let hook = stub_pending_hook("hook-" <> int_to_string(i))
+      let hook = stub_pending_hook("hook-" <> int.to_string(i))
       let #(new_s, _) = add_pending_hook(s, "cb", hook)
       new_s
     })
@@ -207,26 +221,4 @@ pub fn add_pending_hook_returns_response_at_capacity_test() {
   should.be_some(response)
   // State should be unchanged (hook not added)
   should.equal(dict.size(new_state.pending.pending_hooks), max_pending_hooks)
-}
-
-// =============================================================================
-// Helper Functions
-// =============================================================================
-
-fn int_to_string(i: Int) -> String {
-  case i {
-    0 -> "0"
-    1 -> "1"
-    2 -> "2"
-    3 -> "3"
-    4 -> "4"
-    5 -> "5"
-    6 -> "6"
-    7 -> "7"
-    8 -> "8"
-    9 -> "9"
-    _ if i >= 10 && i < 100 -> int_to_string(i / 10) <> int_to_string(i % 10)
-    _ if i >= 100 -> int_to_string(i / 100) <> int_to_string(i % 100)
-    _ -> "?"
-  }
 }
