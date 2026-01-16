@@ -1065,6 +1065,170 @@ pub fn with_bidir_runner_factory_query(
 }
 
 // =============================================================================
+// Option Merge Functions
+// =============================================================================
+
+/// Merge two CliOptions, with `override` values taking precedence.
+///
+/// Merge rules:
+/// - Scalar options (Option(T)): override wins if Some, else base
+/// - Bool fields: OR (True in either = True)
+/// - env, settings (Dict): Deep merge, override keys win
+/// - add_dirs, extra_args (List): Append (base ++ override)
+/// - betas, allowed_tools, disallowed_tools (List): Replace (override wins if Some)
+pub fn merge_cli_options(base: CliOptions, override: CliOptions) -> CliOptions {
+  CliOptions(
+    // Scalar fields - override wins if Some
+    model: merge_option(base.model, override.model),
+    max_turns: merge_option(base.max_turns, override.max_turns),
+    max_budget_usd: merge_option(base.max_budget_usd, override.max_budget_usd),
+    system_prompt: merge_option(base.system_prompt, override.system_prompt),
+    append_system_prompt: merge_option(
+      base.append_system_prompt,
+      override.append_system_prompt,
+    ),
+    mcp_config_path: merge_option(
+      base.mcp_config_path,
+      override.mcp_config_path,
+    ),
+    permission_mode: merge_option(
+      base.permission_mode,
+      override.permission_mode,
+    ),
+    resume_session_id: merge_option(
+      base.resume_session_id,
+      override.resume_session_id,
+    ),
+    cwd: merge_option(base.cwd, override.cwd),
+    cli_path: merge_option(base.cli_path, override.cli_path),
+    fallback_model: merge_option(base.fallback_model, override.fallback_model),
+    permission_prompt_tool_name: merge_option(
+      base.permission_prompt_tool_name,
+      override.permission_prompt_tool_name,
+    ),
+    // Bool fields - OR
+    continue_session: base.continue_session || override.continue_session,
+    // Dict fields - deep merge
+    env: merge_dict_option(base.env, override.env),
+    settings: merge_dict_option(base.settings, override.settings),
+    // List fields - append
+    add_dirs: append_list_option(base.add_dirs, override.add_dirs),
+    extra_args: append_list_option(base.extra_args, override.extra_args),
+    // List fields - replace (override wins if Some)
+    betas: merge_option(base.betas, override.betas),
+    allowed_tools: merge_option(base.allowed_tools, override.allowed_tools),
+    disallowed_tools: merge_option(
+      base.disallowed_tools,
+      override.disallowed_tools,
+    ),
+  )
+}
+
+/// Merge two BidirOptions, with `override` values taking precedence.
+///
+/// Merge rules:
+/// - Scalar options (Option(T)): override wins if Some, else base
+/// - Bool fields: OR (True in either = True)
+/// - hook_timeouts (Dict): Deep merge, override keys win
+/// - mcp_servers, plugins (List): Append (base ++ override)
+/// - agents, setting_sources (List): Replace (override wins if Some)
+/// - Hook callbacks: override wins if Some (not merged)
+pub fn merge_bidir_options(
+  base: BidirOptions,
+  override: BidirOptions,
+) -> BidirOptions {
+  BidirOptions(
+    // Hook callbacks - override wins if Some
+    on_pre_tool_use: merge_option(
+      base.on_pre_tool_use,
+      override.on_pre_tool_use,
+    ),
+    on_post_tool_use: merge_option(
+      base.on_post_tool_use,
+      override.on_post_tool_use,
+    ),
+    on_user_prompt_submit: merge_option(
+      base.on_user_prompt_submit,
+      override.on_user_prompt_submit,
+    ),
+    on_stop: merge_option(base.on_stop, override.on_stop),
+    on_subagent_stop: merge_option(
+      base.on_subagent_stop,
+      override.on_subagent_stop,
+    ),
+    on_pre_compact: merge_option(base.on_pre_compact, override.on_pre_compact),
+    on_can_use_tool: merge_option(
+      base.on_can_use_tool,
+      override.on_can_use_tool,
+    ),
+    // List fields - append
+    mcp_servers: list.append(base.mcp_servers, override.mcp_servers),
+    // Bool fields - OR
+    file_checkpointing_enabled: base.file_checkpointing_enabled
+      || override.file_checkpointing_enabled,
+    include_partial_messages: base.include_partial_messages
+      || override.include_partial_messages,
+    // Scalar fields - override wins if Some
+    timeout_ms: merge_option(base.timeout_ms, override.timeout_ms),
+    bidir_runner_factory: merge_option(
+      base.bidir_runner_factory,
+      override.bidir_runner_factory,
+    ),
+    fork_session: merge_option(base.fork_session, override.fork_session),
+    sandbox: merge_option(base.sandbox, override.sandbox),
+    max_thinking_tokens: merge_option(
+      base.max_thinking_tokens,
+      override.max_thinking_tokens,
+    ),
+    output_format: merge_option(base.output_format, override.output_format),
+    // Dict fields - deep merge
+    hook_timeouts: dict.merge(base.hook_timeouts, override.hook_timeouts),
+    // List fields - append
+    plugins: append_list_option(base.plugins, override.plugins),
+    // List fields - replace (override wins if Some)
+    agents: merge_option(base.agents, override.agents),
+    setting_sources: merge_option(
+      base.setting_sources,
+      override.setting_sources,
+    ),
+  )
+}
+
+/// Helper: merge two Option values, override wins if Some.
+fn merge_option(base: Option(a), override: Option(a)) -> Option(a) {
+  case override {
+    Some(_) -> override
+    None -> base
+  }
+}
+
+/// Helper: deep merge two Option(Dict) values.
+fn merge_dict_option(
+  base: Option(Dict(k, v)),
+  override: Option(Dict(k, v)),
+) -> Option(Dict(k, v)) {
+  case base, override {
+    Some(b), Some(o) -> Some(dict.merge(b, o))
+    Some(b), None -> Some(b)
+    None, Some(o) -> Some(o)
+    None, None -> None
+  }
+}
+
+/// Helper: append two Option(List) values.
+fn append_list_option(
+  base: Option(List(a)),
+  override: Option(List(a)),
+) -> Option(List(a)) {
+  case base, override {
+    Some(b), Some(o) -> Some(list.append(b, o))
+    Some(b), None -> Some(b)
+    None, Some(o) -> Some(o)
+    None, None -> None
+  }
+}
+
+// =============================================================================
 // Check for bidir features
 // =============================================================================
 
