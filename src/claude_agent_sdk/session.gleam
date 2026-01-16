@@ -3,22 +3,13 @@
 /// This module defines the Session opaque type that represents a handle to
 /// a bidirectional CLI session. The Session wraps an OTP Subject for
 /// communicating with the underlying GenServer actor.
-///
-/// ## Current Status: Skeleton
-///
-/// This is the initial type definition. The actual actor implementation
-/// will be added in Epic 8 (Bidirectional Protocol).
 import gleam/erlang/process.{type Subject}
 
 import claude_agent_sdk/event.{type SessionEvent}
-import claude_agent_sdk/message.{type Message}
-
-/// Message type for session actor communication.
-/// Will be expanded with actual messages in Epic 8.
-pub type SessionMessage {
-  /// Placeholder message for type completeness.
-  Shutdown
+import claude_agent_sdk/internal/bidir/actor.{
+  type ActorMessage, type SubscriberMessage,
 }
+import claude_agent_sdk/message.{type Message}
 
 /// Opaque session handle for bidirectional mode.
 ///
@@ -30,16 +21,18 @@ pub type SessionMessage {
 /// - actor: Subject for sending commands to the session GenServer
 /// - messages: Subject for receiving Message pushes
 /// - events: Subject for receiving SessionEvent lifecycle events
+/// - subscriber: Subject for receiving SubscriberMessage notifications
 pub opaque type Session {
   Session(
-    actor: Subject(SessionMessage),
+    actor: Subject(ActorMessage),
     messages: Subject(Message),
     events: Subject(SessionEvent),
+    subscriber: Subject(SubscriberMessage),
   )
 }
 
 /// Get the underlying actor subject from a session (internal use only).
-pub fn get_actor(session: Session) -> Subject(SessionMessage) {
+pub fn get_actor(session: Session) -> Subject(ActorMessage) {
   session.actor
 }
 
@@ -63,9 +56,22 @@ pub fn get_events(session: Session) -> Subject(SessionEvent) {
 ///
 /// Used by the session GenServer to construct a Session handle.
 pub fn new(
-  actor: Subject(SessionMessage),
+  actor: Subject(ActorMessage),
   messages: Subject(Message),
   events: Subject(SessionEvent),
+  subscriber: Subject(SubscriberMessage),
 ) -> Session {
-  Session(actor: actor, messages: messages, events: events)
+  Session(
+    actor: actor,
+    messages: messages,
+    events: events,
+    subscriber: subscriber,
+  )
+}
+
+/// Get the subscriber Subject from a session (internal use only).
+///
+/// The returned Subject receives SubscriberMessage values from the actor.
+pub fn get_subscriber(session: Session) -> Subject(SubscriberMessage) {
+  session.subscriber
 }

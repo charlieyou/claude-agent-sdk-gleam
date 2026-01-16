@@ -269,3 +269,100 @@ pub fn shutdown_resolves_queued_operations_test() {
     Error(_) -> should.fail()
   }
 }
+
+// =============================================================================
+// Public API Integration Tests (start_session_new)
+// =============================================================================
+
+import claude_agent_sdk
+import claude_agent_sdk/options
+import claude_agent_sdk/session
+
+pub fn start_session_new_with_mock_runner_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure options with mock runner factory
+  let cli_opts = options.cli_options()
+  let sdk_opts = options.sdk_options()
+  let bidir_opts =
+    options.bidir_options()
+    |> options.with_bidir_runner_factory(fn() { runner })
+
+  // Start session through public API
+  let result =
+    claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
+
+  // Should succeed
+  should.be_ok(result)
+
+  // Get the session and verify it's usable
+  let assert Ok(sess) = result
+
+  // Verify we can access the subscriber for events
+  let subscriber = session.get_subscriber(sess)
+
+  // Shutdown via the actor subject
+  let actor_subject = session.get_actor(sess)
+  bidir.shutdown(actor_subject)
+
+  // Give it time to shutdown
+  process.sleep(50)
+
+  // Verify subscriber received SessionEnded
+  case process.receive(subscriber, 100) {
+    Ok(SessionEnded(UserRequested)) -> should.be_true(True)
+    Ok(_other) -> should.fail()
+    Error(_) -> should.fail()
+  }
+}
+
+pub fn start_session_new_emits_lifecycle_via_subscriber_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure options with mock runner factory
+  let cli_opts = options.cli_options()
+  let sdk_opts = options.sdk_options()
+  let bidir_opts =
+    options.bidir_options()
+    |> options.with_bidir_runner_factory(fn() { runner })
+
+  // Start session through public API
+  let assert Ok(sess) =
+    claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
+
+  // Verify session lifecycle is InitSent (waiting for CLI handshake)
+  let actor_subject = session.get_actor(sess)
+  let lifecycle = bidir.get_lifecycle(actor_subject, 1000)
+  should.equal(lifecycle, InitSent)
+
+  // Clean up
+  bidir.shutdown(actor_subject)
+  process.sleep(50)
+}
+
+pub fn start_session_legacy_works_with_query_options_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure legacy QueryOptions with mock runner factory
+  let query_opts =
+    options.default_options()
+    |> options.with_bidir_runner_factory_query(fn() { runner })
+
+  // Start session through legacy API
+  let result = claude_agent_sdk.start_session("test prompt", query_opts)
+
+  // Should succeed
+  should.be_ok(result)
+
+  // Get the session and clean up
+  let assert Ok(sess) = result
+  let actor_subject = session.get_actor(sess)
+  bidir.shutdown(actor_subject)
+  process.sleep(50)
+}

@@ -14,9 +14,12 @@ import claude_agent_sdk.{
 }
 import claude_agent_sdk/error
 import claude_agent_sdk/event.{type SessionEvent}
+import claude_agent_sdk/internal/bidir/actor.{
+  type ActorMessage, type SubscriberMessage,
+}
 import claude_agent_sdk/message.{type Message}
 import claude_agent_sdk/options
-import claude_agent_sdk/session.{type SessionMessage}
+import claude_agent_sdk/session
 
 // =============================================================================
 // Error Type Tests (Pass in Phase 1)
@@ -74,10 +77,11 @@ pub fn stop_error_to_string_test() {
 /// Helper to create a dummy Session for testing.
 /// Uses session.new directly to bypass start_session which returns NotImplemented.
 fn get_test_session() -> Session {
-  let actor: process.Subject(SessionMessage) = process.new_subject()
+  let actor: process.Subject(ActorMessage) = process.new_subject()
   let messages: process.Subject(Message) = process.new_subject()
   let events: process.Subject(SessionEvent) = process.new_subject()
-  session.new(actor, messages, events)
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  session.new(actor, messages, events, subscriber)
 }
 
 /// Test that interrupt compiles and returns ControlNotImplemented.

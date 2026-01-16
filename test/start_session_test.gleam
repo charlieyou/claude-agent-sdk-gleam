@@ -1,37 +1,47 @@
 /// Tests for start_session() bidirectional session API.
 ///
 /// This test file exercises the start_session() entry point and related types.
+import gleam/erlang/process
 import gleam/io
 import gleeunit/should
 
 import claude_agent_sdk.{
   type Session, type StartError, default_options, start_error_to_string,
-  start_session,
+  start_session, start_session_new,
 }
 import claude_agent_sdk/error
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/options
+import claude_agent_sdk/session
+import support/mock_bidir_runner
 
 // =============================================================================
 // API Surface Tests
 // =============================================================================
 
-/// Test that start_session compiles and returns an error (stub not yet implemented).
+/// Test that start_session with mock runner succeeds.
 ///
-/// This test verifies the API surface is correct. The current stub returns
-/// SpawnFailed until actual implementation is complete.
+/// Uses a mock runner factory to avoid needing real CLI.
 pub fn start_session_returns_error_test() {
-  let options = default_options()
+  // Create mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
 
-  case start_session("Hello, Claude!", options) {
-    Error(error.SpawnFailed(_)) -> {
-      // Expected: stub returns SpawnFailed with "not yet implemented" message
+  let query_opts =
+    default_options()
+    |> options.with_bidir_runner_factory_query(fn() { runner })
+
+  case start_session("Hello, Claude!", query_opts) {
+    Ok(sess) -> {
+      // Expected: succeeds with mock runner
+      // Clean up
+      let actor = session.get_actor(sess)
+      bidir.shutdown(actor)
+      process.sleep(50)
       should.be_true(True)
     }
-    Error(_other) -> {
-      // Other error variants are also acceptable
-      should.be_true(True)
-    }
-    Ok(_session) -> {
-      // Unexpected success - implementation not ready
+    Error(_) -> {
+      // Should not fail with mock runner
       should.fail()
     }
   }

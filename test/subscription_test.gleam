@@ -8,6 +8,7 @@ import gleeunit/should
 
 import claude_agent_sdk
 import claude_agent_sdk/event
+import claude_agent_sdk/internal/bidir/actor.{type SubscriberMessage}
 import claude_agent_sdk/session
 
 // =============================================================================
@@ -20,10 +21,11 @@ pub fn messages_returns_subject_test() {
   let actor_subject = process.new_subject()
   let messages_subject = process.new_subject()
   let events_subject = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
 
   // Create a session with the subjects
   let test_session =
-    session.new(actor_subject, messages_subject, events_subject)
+    session.new(actor_subject, messages_subject, events_subject, subscriber)
 
   // Get the messages subject via public API
   let result = claude_agent_sdk.messages(test_session)
@@ -42,10 +44,11 @@ pub fn events_returns_subject_test() {
   let actor_subject = process.new_subject()
   let messages_subject = process.new_subject()
   let events_subject = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
 
   // Create a session with the subjects
   let test_session =
-    session.new(actor_subject, messages_subject, events_subject)
+    session.new(actor_subject, messages_subject, events_subject, subscriber)
 
   // Get the events subject via public API
   let result = claude_agent_sdk.events(test_session)
