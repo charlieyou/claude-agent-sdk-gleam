@@ -12,8 +12,10 @@ import claude_agent_sdk/options.{
 }
 import gleam/bit_array
 import gleam/dict
+import gleam/dynamic.{type Dynamic}
 import gleam/float
 import gleam/int
+import gleam/json.{type Json}
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
@@ -517,15 +519,38 @@ fn build_args_with_base_cli(
     None -> args
   }
 
-  // Add prompt separator and prompt (if provided)
-  let args = case prompt {
-    Some(p) -> list.append(args, ["--", p])
+  // Add optional settings as JSON string
+  let args = case options.settings {
+    Some(settings_map) -> {
+      let json_str = settings_to_json(settings_map)
+      list.append(args, ["--settings", json_str])
+    }
     None -> args
   }
 
-  // Add extra_args at the very end (after prompt if present)
-  case options.extra_args {
+  // Add extra_args before prompt separator (so they're treated as flags)
+  let args = case options.extra_args {
     Some(extra) -> list.append(args, extra)
     None -> args
   }
+
+  // Add prompt separator and prompt at the end
+  case prompt {
+    Some(p) -> list.append(args, ["--", p])
+    None -> args
+  }
 }
+
+/// Convert settings dict to JSON string for CLI --settings flag.
+fn settings_to_json(settings: dict.Dict(String, Dynamic)) -> String {
+  settings
+  |> dict.to_list
+  |> list.map(fn(pair) { #(pair.0, dynamic_to_json(pair.1)) })
+  |> json.object
+  |> json.to_string
+}
+
+/// Convert a Dynamic value to Json.
+/// Uses Erlang's json:encode with custom encoder for Gleam types.
+@external(erlang, "control_encoder_ffi", "encode_dynamic")
+fn dynamic_to_json(value: Dynamic) -> Json
