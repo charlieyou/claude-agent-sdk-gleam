@@ -920,8 +920,9 @@ pub fn start_session_new(
           )
         })
 
-      // Wait for the bridge to report back with the actor subject
-      case process.receive(setup_subject, 5000) {
+      // Wait for the bridge to report back with the actor subject.
+      // Use default_timeout for consistency with user-configured timeout.
+      case process.receive(setup_subject, default_timeout) {
         Ok(SetupOk(actor_subject, subscriber)) -> {
           Ok(session.new(actor_subject, messages, events, subscriber))
         }
