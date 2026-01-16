@@ -11,6 +11,7 @@ import claude_agent_sdk/options.{
   BypassPermissions, Plan,
 }
 import gleam/bit_array
+import gleam/dict
 import gleam/float
 import gleam/int
 import gleam/list
@@ -477,9 +478,54 @@ fn build_args_with_base_cli(
       }
   }
 
-  // Add prompt separator and prompt at the end (if provided)
-  case prompt {
+  // Add optional fallback_model
+  let args = case options.fallback_model {
+    Some(model) -> list.append(args, ["--fallback-model", model])
+    None -> args
+  }
+
+  // Add optional betas (repeated --beta flag)
+  let args = case options.betas {
+    Some(betas) ->
+      list.fold(betas, args, fn(acc, beta) {
+        list.append(acc, ["--beta", beta])
+      })
+    None -> args
+  }
+
+  // Add optional permission_prompt_tool_name
+  let args = case options.permission_prompt_tool_name {
+    Some(name) -> list.append(args, ["--permission-prompt-tool-name", name])
+    None -> args
+  }
+
+  // Add optional add_dirs (repeated --add-dir flag)
+  let args = case options.add_dirs {
+    Some(dirs) ->
+      list.fold(dirs, args, fn(acc, dir) {
+        list.append(acc, ["--add-dir", dir])
+      })
+    None -> args
+  }
+
+  // Add optional env (repeated --env KEY=VALUE flag)
+  let args = case options.env {
+    Some(env_map) ->
+      dict.fold(env_map, args, fn(acc, key, value) {
+        list.append(acc, ["--env", key <> "=" <> value])
+      })
+    None -> args
+  }
+
+  // Add prompt separator and prompt (if provided)
+  let args = case prompt {
     Some(p) -> list.append(args, ["--", p])
+    None -> args
+  }
+
+  // Add extra_args at the very end (after prompt if present)
+  case options.extra_args {
+    Some(extra) -> list.append(args, extra)
     None -> args
   }
 }
