@@ -146,13 +146,33 @@ pub fn rewind_files_timeout_with_dummy_session_test() {
   }
 }
 
-/// Test that stop returns Ok for a dummy session (idempotent when actor dead).
-/// With no real actor, stop detects that the actor is not alive and returns
-/// Ok(Nil) (idempotent behavior - already stopped is treated as success).
-pub fn stop_returns_ok_for_dead_session_test() {
-  let session = get_test_session()
-  case stop(session) {
-    // Stop is idempotent - dead actor means "already stopped" which is Ok
+/// Test that stop returns Ok immediately for a session with dead actor.
+/// Creates a subject owned by a process that exits, so is_alive returns False.
+pub fn stop_returns_ok_for_dead_actor_test() {
+  // Spawn a process that creates a subject and immediately exits
+  let parent = process.new_subject()
+  let _pid =
+    process.spawn_unlinked(fn() {
+      let actor: process.Subject(ActorMessage) = process.new_subject()
+      process.send(parent, actor)
+      // Process exits immediately after sending subject
+    })
+
+  // Receive the subject from the now-dead process
+  let assert Ok(dead_actor) = process.receive(parent, 1000)
+
+  // Give process time to exit
+  process.sleep(50)
+
+  // Build session with dead actor's subject
+  let messages: process.Subject(Message) = process.new_subject()
+  let events: process.Subject(SessionEvent) = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let session_with_dead_actor =
+    session.new(dead_actor, messages, events, subscriber)
+
+  case stop(session_with_dead_actor) {
+    // Stop is idempotent - dead actor returns immediately with Ok
     Ok(Nil) -> should.be_true(True)
     Error(_) -> should.fail()
   }

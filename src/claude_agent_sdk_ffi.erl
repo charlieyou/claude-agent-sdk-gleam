@@ -283,12 +283,13 @@ port_os_pid(Port) ->
 %% Sends a signal to an OS process.
 %% Signal should be an integer (e.g., 15 for SIGTERM, 9 for SIGKILL).
 %% Returns {ok, nil} on success, {error, Reason} on failure.
-%% Uses os:cmd to send signal via kill command for portability.
+%% Uses shell exit code to determine success since kill outputs to stderr.
 os_kill(OsPid, Signal) when is_integer(OsPid), is_integer(Signal) ->
-    Cmd = io_lib:format("kill -~B ~B 2>/dev/null", [Signal, OsPid]),
+    %% Shell construct: run kill, suppress output, echo "ok" or "error" based on exit code
+    Cmd = io_lib:format("kill -~B ~B >/dev/null 2>&1 && echo ok || echo error", [Signal, OsPid]),
     Result = os:cmd(Cmd),
-    %% kill returns empty string on success (exit 0)
-    case Result of
-        [] -> {<<"ok">>, nil};
-        _ -> {<<"error">>, list_to_binary(Result)}
+    %% Result will be "ok\n" on success, "error\n" on failure
+    case string:trim(Result) of
+        "ok" -> {<<"ok">>, nil};
+        _ -> {<<"error">>, <<"process_not_found">>}
     end.

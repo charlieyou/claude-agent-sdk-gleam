@@ -1162,8 +1162,9 @@ pub fn rewind_files(
 ///
 /// All pending control operations will receive a `SessionStopped` error.
 ///
-/// This function is idempotent: calling it multiple times returns `Ok(Nil)` if
-/// the session is already stopped.
+/// This function is idempotent: calling it multiple times always returns `Ok(Nil)`.
+/// A session that is already stopped or has a dead actor is treated as successfully
+/// stopped.
 ///
 /// ## Parameters
 ///
@@ -1171,8 +1172,7 @@ pub fn rewind_files(
 ///
 /// ## Returns
 ///
-/// - `Ok(Nil)`: Session stopped successfully
-/// - `Error(StopSessionClosed)`: Session is already closed (idempotent success)
+/// - `Ok(Nil)`: Session stopped successfully (or was already stopped)
 pub fn stop(sess: Session) -> Result(Nil, StopError) {
   let actor_subject = session.get_actor(sess)
   case bidir.stop_session(actor_subject) {
