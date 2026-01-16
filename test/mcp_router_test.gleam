@@ -84,6 +84,71 @@ pub fn route_invokes_handler_with_message_test() {
   }
 }
 
+/// Test: Request id correlation - id "abc" → response id "abc".
+///
+/// Acceptance Criteria (T006): request id "abc" → response id "abc"
+pub fn route_request_id_abc_returns_response_id_abc_test() {
+  let handlers =
+    dict.from_list([
+      #("test-server", fn(_: Dynamic) -> Dynamic { to_dynamic("result") }),
+    ])
+
+  let result =
+    mcp_router.route(handlers, "abc", "test-server", to_dynamic(dict.new()))
+
+  case result {
+    mcp_router.Routed(response) -> {
+      case response {
+        McpResponse(req_id, _data) -> should.equal(req_id, "abc")
+        _ -> should.fail()
+      }
+    }
+    mcp_router.ServerNotFound(_) -> should.fail()
+  }
+}
+
+/// Test: Malformed request (no id) → error response with null id.
+///
+/// Acceptance Criteria (T006): malformed request (no id) → error response with null id
+///
+/// Per JSON-RPC 2.0 spec, when a request has no id, the error response
+/// should have id: null and use error code -32600 (Invalid Request).
+pub fn make_jsonrpc_error_null_id_returns_null_id_test() {
+  let error_response =
+    mcp_router.make_jsonrpc_error_null_id("Missing request id")
+
+  // Verify the response structure
+  let id_decoder = decode.at(["id"], decode.optional(decode.string))
+  case decode.run(error_response, id_decoder) {
+    Ok(id) -> {
+      // id should be None (null in JSON)
+      should.equal(id, None)
+    }
+    Error(_) -> should.fail()
+  }
+
+  // Verify error code is -32600 (Invalid Request)
+  let code_decoder = decode.at(["error", "code"], decode.int)
+  case decode.run(error_response, code_decoder) {
+    Ok(code) -> should.equal(code, -32_600)
+    Error(_) -> should.fail()
+  }
+
+  // Verify jsonrpc version is "2.0"
+  let version_decoder = decode.at(["jsonrpc"], decode.string)
+  case decode.run(error_response, version_decoder) {
+    Ok(version) -> should.equal(version, "2.0")
+    Error(_) -> should.fail()
+  }
+
+  // Verify error message is present
+  let msg_decoder = decode.at(["error", "message"], decode.string)
+  case decode.run(error_response, msg_decoder) {
+    Ok(msg) -> should.equal(msg, "Missing request id")
+    Error(_) -> should.fail()
+  }
+}
+
 // =============================================================================
 // Integration Test: MCP Message Flow (CLI → Handler → Response)
 // =============================================================================
