@@ -35,6 +35,9 @@ import gleam/string
 import gleam/erlang/process.{type Subject}
 
 import claude_agent_sdk/event
+import claude_agent_sdk/internal/bidir
+import claude_agent_sdk/internal/bidir/actor
+import claude_agent_sdk/internal/bidir_runner
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/internal/port_io
 import claude_agent_sdk/internal/stream as internal_stream
@@ -849,26 +852,66 @@ fn spawn_query_with_warnings(
 /// }
 /// ```
 pub fn start_session_new(
-  _cli_opts: CliOptions,
+  cli_opts: CliOptions,
   _sdk_opts: SdkOptions,
-  _bidir_opts: BidirOptions,
+  bidir_opts: BidirOptions,
 ) -> Result(Session, StartError) {
-  // TODO: Implement actual session start
-  Error(error.SpawnFailed(reason: "start_session_new not yet implemented"))
+  // Create subjects for message flow
+  let subscriber = process.new_subject()
+  let messages = process.new_subject()
+  let events = process.new_subject()
+
+  // Get or create runner
+  let runner_result = case bidir_opts.bidir_runner_factory {
+    Some(factory) -> Ok(factory())
+    None -> {
+      let args = cli.build_bidir_cli_args_new(cli_opts)
+      bidir_runner.start(args)
+    }
+  }
+
+  case runner_result {
+    Error(err) -> Error(err)
+    Ok(runner) -> {
+      // Build StartConfig from BidirOptions using default_config + record update
+      let default_timeout = case bidir_opts.timeout_ms {
+        Some(ms) -> ms
+        None -> 60_000
+      }
+      let config =
+        actor.StartConfig(
+          ..bidir.default_config(subscriber),
+          default_timeout_ms: default_timeout,
+          hook_timeouts: bidir_opts.hook_timeouts,
+          enable_file_checkpointing: bidir_opts.file_checkpointing_enabled,
+          mcp_servers: bidir_opts.mcp_servers,
+        )
+
+      // Start the actor
+      case bidir.start(runner, config) {
+        Ok(actor_subject) -> {
+          Ok(session.new(actor_subject, messages, events, subscriber))
+        }
+        Error(err) -> Error(err)
+      }
+    }
+  }
 }
 
 /// Start a bidirectional session with Claude CLI (legacy API).
 ///
 /// **DEPRECATED**: Use `start_session_new(cli_opts, sdk_opts, bidir_opts)`.
 ///
-/// ## Current Status: Skeleton (TDD Phase 1)
-///
-/// This function currently returns `Error(SpawnFailed)` as a placeholder.
+/// Note: The prompt parameter is ignored in bidirectional mode as messages
+/// are sent through the session interface.
 pub fn start_session(
   _prompt: String,
-  _options: QueryOptions,
+  query_options: QueryOptions,
 ) -> Result(Session, StartError) {
-  Error(error.SpawnFailed(reason: "start_session not yet implemented"))
+  let cli_opts = options.cli_options_from_query(query_options)
+  let sdk_opts = options.sdk_options_from_query(query_options)
+  let bidir_opts = options.bidir_options_from_query(query_options)
+  start_session_new(cli_opts, sdk_opts, bidir_opts)
 }
 
 // =============================================================================
