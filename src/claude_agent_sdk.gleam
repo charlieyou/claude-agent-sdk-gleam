@@ -1156,12 +1156,14 @@ pub fn rewind_files(
 
 /// Gracefully stop the session.
 ///
-/// Non-blocking; initiates shutdown and returns immediately.
+/// Sends SIGTERM to the CLI process and waits up to 5 seconds for it to exit.
+/// If the process does not exit within 5 seconds, sends SIGKILL.
+/// Returns after the process has terminated.
 ///
-/// ## Current Status: Skeleton (TDD Phase 1)
+/// All pending control operations will receive a `SessionStopped` error.
 ///
-/// This function currently returns `Error(StopNotImplemented)` as a placeholder.
-/// The actual implementation will be added in Epic 8.
+/// This function is idempotent: calling it multiple times returns `Ok(Nil)` if
+/// the session is already stopped.
 ///
 /// ## Parameters
 ///
@@ -1169,11 +1171,14 @@ pub fn rewind_files(
 ///
 /// ## Returns
 ///
-/// - `Ok(Nil)`: Shutdown initiated
-/// - `Error(StopSessionClosed)`: Session is already closed
-/// - `Error(StopNotImplemented)`: Not yet implemented (current)
-pub fn stop(_session: Session) -> Result(Nil, StopError) {
-  Error(error.StopNotImplemented)
+/// - `Ok(Nil)`: Session stopped successfully
+/// - `Error(StopSessionClosed)`: Session is already closed (idempotent success)
+pub fn stop(sess: Session) -> Result(Nil, StopError) {
+  let actor_subject = session.get_actor(sess)
+  case bidir.stop_session(actor_subject) {
+    Ok(Nil) -> Ok(Nil)
+    Error(actor.StopAlreadyStopped) -> Ok(Nil)
+  }
 }
 
 // =============================================================================

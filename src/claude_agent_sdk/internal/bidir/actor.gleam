@@ -278,6 +278,20 @@ pub type RewindFilesError {
   RewindFilesSessionStopped
 }
 
+/// Error type for stop_session operation.
+pub type StopSessionError {
+  /// Session was already stopped (idempotent - treat as success).
+  StopAlreadyStopped
+}
+
+/// Result type for stop_session internal response.
+pub type StopSessionResult {
+  /// Stop completed successfully.
+  StopSuccess
+  /// Stop failed because session was already stopped.
+  StopWasAlreadyStopped
+}
+
 /// Callback type discriminator for fail-open vs fail-deny behavior.
 ///
 /// Determines how timeout/crash errors are handled:
@@ -639,6 +653,10 @@ pub type ActorMessage {
   HookTimeout(request_id: String, verify_ref: Dynamic)
   /// Cancel a pending request (for client-side timeout cleanup).
   CancelPendingRequest(request_id: String)
+  /// Stop the session with SIGTERM/SIGKILL semantics.
+  /// Sends SIGTERM, waits up to 5s, sends SIGKILL if needed.
+  /// Returns after process termination confirmed.
+  StopSession(reply_to: Subject(StopSessionResult))
 }
 
 /// Responses from synchronous operations.
@@ -1171,6 +1189,9 @@ fn handle_message(
     }
     CancelPendingRequest(request_id) -> {
       handle_cancel_pending_request(state, request_id)
+    }
+    StopSession(reply_to) -> {
+      handle_stop_session(state, reply_to)
     }
     UnexpectedMessage(msg) -> {
       // Log and discard unexpected messages that reached our mailbox
@@ -3155,5 +3176,141 @@ pub fn add_pending_hook(
       ),
       None,
     )
+  }
+}
+
+// =============================================================================
+// Stop Session with SIGTERM/SIGKILL Semantics
+// =============================================================================
+
+/// Stop the session with SIGTERM/SIGKILL semantics.
+///
+/// Sends SIGTERM to the CLI process, waits up to 5 seconds for graceful shutdown,
+/// then sends SIGKILL if the process hasn't exited. Returns after the process
+/// terminates.
+///
+/// This is a synchronous call that blocks until termination is confirmed.
+/// Idempotent: returns Ok(Nil) if session is already stopped.
+///
+/// ## Behavior
+///
+/// 1. If session is already Stopped/Failed, returns Ok(Nil) immediately
+/// 2. Otherwise sends SIGTERM to CLI process
+/// 3. Waits up to 5 seconds for port exit_status message
+/// 4. If not exited, sends SIGKILL and waits briefly
+/// 5. Calls cleanup_session to resolve pending ops with SessionStopped
+/// 6. Stops the actor
+///
+/// ## Returns
+///
+/// - `Ok(Nil)` - Session stopped successfully (or was already stopped)
+/// - `Error(StopAlreadyStopped)` - Session was already stopped (idempotent success)
+pub fn stop_session(
+  session: Subject(ActorMessage),
+) -> Result(Nil, StopSessionError) {
+  // Use actor.call with generous timeout (5s SIGTERM wait + 1s SIGKILL wait + margin)
+  let stop_timeout_ms = 7000
+
+  // Check if actor is still alive first
+  case process.subject_owner(session) {
+    Error(Nil) -> Error(StopAlreadyStopped)
+    Ok(pid) -> {
+      case process.is_alive(pid) {
+        False -> Error(StopAlreadyStopped)
+        True -> {
+          let result_subject: Subject(StopSessionResult) = process.new_subject()
+          actor.send(session, StopSession(result_subject))
+
+          case process.receive(result_subject, stop_timeout_ms) {
+            Ok(StopSuccess) -> Ok(Nil)
+            Ok(StopWasAlreadyStopped) -> Ok(Nil)
+            // Actor died before responding - that's fine, session is stopped
+            Error(Nil) -> Ok(Nil)
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Handle StopSession message: graceful shutdown with SIGTERM/SIGKILL semantics.
+fn handle_stop_session(
+  state: SessionState,
+  reply_to: Subject(StopSessionResult),
+) -> actor.Next(SessionState, ActorMessage) {
+  case state.runtime.lifecycle {
+    // Already stopped or failed - idempotent success
+    Stopped | Failed(_) -> {
+      process.send(reply_to, StopWasAlreadyStopped)
+      actor.continue(state)
+    }
+
+    // In any other state, perform graceful stop
+    Starting | InitSent | Running -> {
+      // Get OS PID for signal sending
+      let port = state.runtime.runner.port
+      case port_io.get_port_os_pid(port) {
+        Ok(os_pid) -> {
+          // Send SIGTERM for graceful shutdown
+          let _ = port_io.os_kill(os_pid, port_io.sigterm)
+
+          // Wait up to 5 seconds for process to exit
+          // We poll in small increments to be responsive
+          let exited = wait_for_process_exit(os_pid, 5000, 100)
+
+          case exited {
+            False -> {
+              // Process didn't exit gracefully - send SIGKILL
+              let _ = port_io.os_kill(os_pid, port_io.sigkill)
+              // Brief wait for SIGKILL to take effect
+              process.sleep(100)
+              Nil
+            }
+            True -> Nil
+          }
+        }
+        // Port already closed or no OS PID available
+        Error(_) -> Nil
+      }
+
+      // Now perform cleanup (resolve pending ops, notify subscriber)
+      cleanup_session(state, UserRequested)
+
+      // Send success response
+      process.send(reply_to, StopSuccess)
+
+      // Stop the actor
+      actor.stop()
+    }
+  }
+}
+
+/// Wait for an OS process to exit by polling.
+///
+/// Checks every `poll_interval_ms` if the process still exists.
+/// Returns True if process exited within timeout, False otherwise.
+fn wait_for_process_exit(
+  os_pid: Int,
+  remaining_ms: Int,
+  poll_interval_ms: Int,
+) -> Bool {
+  case remaining_ms <= 0 {
+    True -> False
+    False -> {
+      // Check if process exists by sending signal 0 (doesn't kill, just checks)
+      case port_io.os_kill(os_pid, 0) {
+        // Error means process doesn't exist (exited)
+        Error(_) -> True
+        // Ok means process still exists
+        Ok(Nil) -> {
+          process.sleep(poll_interval_ms)
+          wait_for_process_exit(
+            os_pid,
+            remaining_ms - poll_interval_ms,
+            poll_interval_ms,
+          )
+        }
+      }
+    }
   }
 }

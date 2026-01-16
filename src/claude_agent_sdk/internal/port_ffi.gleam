@@ -295,3 +295,57 @@ pub fn supports_stderr_to_stdout() -> Bool {
     Error(_) -> False
   }
 }
+
+// ============================================================================
+// Process Signal Operations
+// ============================================================================
+
+/// FFI binding for port_os_pid - returns {ok, Int} | {error, Reason}
+@external(erlang, "claude_agent_sdk_ffi", "port_os_pid")
+fn ffi_port_os_pid(port: Dynamic) -> Dynamic
+
+/// Get the OS process ID for a spawned port.
+/// Returns Ok(pid) if the port has an OS process, Error otherwise.
+pub fn get_port_os_pid(port: Port) -> Result(Int, String) {
+  let result = ffi_port_os_pid(port_to_dynamic(port))
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    use payload <- decode.field(1, decode.dynamic)
+    decode.success(#(tag, payload))
+  }
+  case decode.run(result, result_decoder) {
+    Ok(#("ok", pid_dynamic)) ->
+      case decode.run(pid_dynamic, decode.int) {
+        Ok(pid) -> Ok(pid)
+        Error(_) -> Error("invalid pid format")
+      }
+    Ok(#("error", reason_dynamic)) ->
+      case decode.run(reason_dynamic, decode.string) {
+        Ok(reason) -> Error(reason)
+        Error(_) -> Error("unknown error")
+      }
+    Ok(_) -> Error("invalid FFI response tag")
+    Error(_) -> Error("invalid FFI response format")
+  }
+}
+
+/// FFI binding for os_kill - returns {ok, nil} | {error, Reason}
+@external(erlang, "claude_agent_sdk_ffi", "os_kill")
+fn ffi_os_kill(os_pid: Int, signal: Int) -> Dynamic
+
+/// Send a signal to an OS process.
+/// Returns Ok(Nil) on success, Error with reason on failure.
+pub fn os_kill(os_pid: Int, signal: Int) -> Result(Nil, String) {
+  let result = ffi_os_kill(os_pid, signal)
+  let result_decoder = {
+    use tag <- decode.field(0, decode.string)
+    use _payload <- decode.field(1, decode.dynamic)
+    decode.success(tag)
+  }
+  case decode.run(result, result_decoder) {
+    Ok("ok") -> Ok(Nil)
+    Ok("error") -> Error("signal failed")
+    Ok(_) -> Error("invalid FFI response tag")
+    Error(_) -> Error("invalid FFI response format")
+  }
+}

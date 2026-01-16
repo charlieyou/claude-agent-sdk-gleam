@@ -146,3 +146,25 @@ pub fn port_to_dynamic(port: Port) -> Dynamic {
 pub fn wrap_port(dynamic: Dynamic) -> Port {
   port_ffi.wrap_port(dynamic)
 }
+
+// ============================================================================
+// Process Signal Operations
+// ============================================================================
+
+/// Get the OS process ID for a spawned port.
+/// Returns Ok(pid) if the port has an OS process, Error otherwise.
+pub fn get_port_os_pid(port: Port) -> Result(Int, String) {
+  port_ffi.get_port_os_pid(port)
+}
+
+/// Send a signal to an OS process.
+/// Returns Ok(Nil) on success, Error with reason on failure.
+pub fn os_kill(os_pid: Int, signal: Int) -> Result(Nil, String) {
+  port_ffi.os_kill(os_pid, signal)
+}
+
+/// SIGTERM signal number (15).
+pub const sigterm: Int = 15
+
+/// SIGKILL signal number (9).
+pub const sigkill: Int = 9

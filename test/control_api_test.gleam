@@ -146,13 +146,15 @@ pub fn rewind_files_timeout_with_dummy_session_test() {
   }
 }
 
-/// Test that stop compiles and returns StopNotImplemented.
-pub fn stop_returns_not_implemented_test() {
+/// Test that stop returns Ok for a dummy session (idempotent when actor dead).
+/// With no real actor, stop detects that the actor is not alive and returns
+/// Ok(Nil) (idempotent behavior - already stopped is treated as success).
+pub fn stop_returns_ok_for_dead_session_test() {
   let session = get_test_session()
   case stop(session) {
-    Error(error.StopNotImplemented) -> should.be_true(True)
-    Error(_other) -> should.fail()
-    Ok(_) -> should.fail()
+    // Stop is idempotent - dead actor means "already stopped" which is Ok
+    Ok(Nil) -> should.be_true(True)
+    Error(_) -> should.fail()
   }
 }
 

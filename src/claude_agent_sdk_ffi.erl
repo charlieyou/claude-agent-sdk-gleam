@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, port_connect/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, otp_version/0, check_stderr_support/0, exact_equals/2]).
+-export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, port_connect/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, otp_version/0, check_stderr_support/0, exact_equals/2, port_os_pid/1, os_kill/2]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -266,3 +266,29 @@ check_stderr_support() ->
 %% Used for comparing port references in decoded messages.
 exact_equals(A, B) ->
     A =:= B.
+
+%% Gets the OS process ID for a spawned port.
+%% Returns {ok, Pid} if the port is still open and has an OS pid,
+%% or {error, <<"not_available">>} if the port is closed or not a spawn port.
+port_os_pid(Port) ->
+    try
+        case erlang:port_info(Port, os_pid) of
+            {os_pid, OsPid} when is_integer(OsPid) -> {<<"ok">>, OsPid};
+            undefined -> {<<"error">>, <<"not_available">>}
+        end
+    catch
+        error:badarg -> {<<"error">>, <<"port_closed">>}
+    end.
+
+%% Sends a signal to an OS process.
+%% Signal should be an integer (e.g., 15 for SIGTERM, 9 for SIGKILL).
+%% Returns {ok, nil} on success, {error, Reason} on failure.
+%% Uses os:cmd to send signal via kill command for portability.
+os_kill(OsPid, Signal) when is_integer(OsPid), is_integer(Signal) ->
+    Cmd = io_lib:format("kill -~B ~B 2>/dev/null", [Signal, OsPid]),
+    Result = os:cmd(Cmd),
+    %% kill returns empty string on success (exit 0)
+    case Result of
+        [] -> {<<"ok">>, nil};
+        _ -> {<<"error">>, list_to_binary(Result)}
+    end.

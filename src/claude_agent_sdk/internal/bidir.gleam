@@ -47,6 +47,9 @@ pub type SetModelError =
 pub type RewindFilesError =
   actor.RewindFilesError
 
+pub type StopSessionError =
+  actor.StopSessionError
+
 pub type CallbackType =
   actor.CallbackType
 
@@ -147,6 +150,8 @@ pub const set_permission_mode = actor.set_permission_mode
 pub const set_model = actor.set_model
 
 pub const rewind_files = actor.rewind_files
+
+pub const stop_session = actor.stop_session
 
 pub const queue_operation = actor.queue_operation
 
