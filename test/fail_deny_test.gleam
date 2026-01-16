@@ -5,6 +5,7 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Subject}
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -108,6 +109,7 @@ pub fn permission_timeout_returns_deny_test() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -182,6 +184,7 @@ pub fn permission_crash_returns_deny_test() {
       default_hook_timeout_ms: 5000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -253,6 +256,7 @@ pub fn hook_timeout_still_returns_continue_test() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -317,6 +321,7 @@ pub fn hook_crash_still_returns_continue_test() {
       default_hook_timeout_ms: 5000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

@@ -7,6 +7,7 @@
 /// - 30s timeout (longer than default)
 import gleam/dict
 import gleam/erlang/process
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -40,6 +41,7 @@ pub fn rewind_files_sends_correct_wire_format_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
@@ -146,6 +148,7 @@ pub fn rewind_files_receives_success_response_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
@@ -203,6 +206,7 @@ pub fn rewind_files_receives_error_response_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)

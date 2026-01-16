@@ -15,6 +15,7 @@ import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process
 import gleam/json
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -324,6 +325,7 @@ pub fn sdk_42_hook_timeout_test_() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

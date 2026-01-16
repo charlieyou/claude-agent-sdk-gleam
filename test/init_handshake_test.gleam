@@ -9,6 +9,7 @@
 /// - queued_ops flushed on success
 import gleam/dict
 import gleam/erlang/process
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -171,6 +172,7 @@ pub fn timeout_transitions_to_failed_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   // Start actor

@@ -9,6 +9,7 @@ import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/process.{type Subject}
 import gleam/json
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -359,6 +360,7 @@ pub fn hook_timeout_fails_open_test() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) =
@@ -442,6 +444,7 @@ pub fn permission_timeout_fails_deny_test() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) =

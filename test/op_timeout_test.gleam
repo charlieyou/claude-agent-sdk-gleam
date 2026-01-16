@@ -9,6 +9,7 @@
 /// edge cases specific to T6 acceptance criteria.
 import gleam/dict
 import gleam/erlang/process
+import gleam/option.{None}
 import gleeunit/should
 
 import claude_agent_sdk/control.{Interrupt}
@@ -96,6 +97,7 @@ pub fn response_before_timeout_cancels_timer_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)

@@ -43,6 +43,7 @@ fn test_state() -> SessionState {
       hook_timeouts: dict.new(),
       default_hook_timeout_ms: 5000,
       file_checkpointing_enabled: False,
+      on_warning: None,
     ),
     runtime: stub_runtime(),
     pending: PendingOps(

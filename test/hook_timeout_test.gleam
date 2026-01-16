@@ -6,6 +6,7 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -82,6 +83,7 @@ pub fn fast_callback_completes_before_timeout_test() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -151,6 +153,7 @@ pub fn slow_callback_times_out_test() {
       default_hook_timeout_ms: 100,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -224,6 +227,7 @@ pub fn late_hook_done_ignored_after_timeout_test() {
       default_hook_timeout_ms: 50,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

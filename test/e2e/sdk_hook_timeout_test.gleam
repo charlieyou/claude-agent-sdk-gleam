@@ -35,6 +35,7 @@ import gleam/erlang/process
 import gleam/int
 import gleam/io
 import gleam/json
+import gleam/option.{None}
 import gleeunit/should
 
 // FFI for creating Dynamic values

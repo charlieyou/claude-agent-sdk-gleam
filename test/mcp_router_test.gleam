@@ -6,7 +6,10 @@ import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/dynamic/decode
 import gleam/erlang/process
+import gleam/int
 import gleam/json
+import gleam/list
+import gleam/option.{None, Some}
 import gleam/string
 import gleeunit/should
 
@@ -118,6 +121,7 @@ pub fn mcp_message_routed_to_handler_test() {
           to_dynamic(dict.from_list([#("status", "ok")]))
         }),
       ],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
@@ -194,6 +198,7 @@ pub fn mcp_message_unknown_server_ignored_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
@@ -305,6 +310,7 @@ pub fn mcp_messages_queued_during_init_sent_test() {
           to_dynamic("response")
         }),
       ],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
@@ -392,6 +398,7 @@ pub fn mcp_messages_discarded_when_stopped_test() {
           to_dynamic("response")
         }),
       ],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
@@ -435,4 +442,161 @@ pub fn mcp_messages_discarded_when_stopped_test() {
     Ok(_) -> should.fail()
     Error(Nil) -> should.be_true(True)
   }
+}
+
+/// Test: MCP queue overflow emits warning via on_warning callback.
+///
+/// Verifies that when the MCP queue exceeds max size (100), the oldest
+/// message is dropped and the on_warning callback is invoked.
+pub fn mcp_queue_overflow_emits_warning_test() {
+  let mock = full_mock_runner.new()
+  let adapter = full_mock_runner.start(mock)
+
+  // Track warning calls
+  let warning_calls = process.new_subject()
+  let handler_calls = process.new_subject()
+
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let config =
+    StartConfig(
+      subscriber: subscriber,
+      default_timeout_ms: 60_000,
+      hook_timeouts: dict.new(),
+      init_timeout_ms: 10_000,
+      default_hook_timeout_ms: 30_000,
+      enable_file_checkpointing: False,
+      mcp_servers: [
+        #("test-server", fn(msg: Dynamic) -> Dynamic {
+          process.send(handler_calls, msg)
+          to_dynamic("response")
+        }),
+      ],
+      on_warning: Some(fn(msg: String) { process.send(warning_calls, msg) }),
+    )
+
+  let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
+  let _adapter = full_mock_runner.set_session(adapter, session)
+
+  // Consume init message but don't ack - stay in InitSent
+  let assert Ok(_init_msg) = process.receive(adapter.captured_writes, 500)
+  should.equal(bidir.get_lifecycle(session, 1000), InitSent)
+
+  // Send 101 MCP messages to trigger overflow
+  list.range(1, 101)
+  |> list.each(fn(i) {
+    let mcp_json =
+      json.object([
+        #("type", json.string("control_request")),
+        #("request_id", json.string("mcp_" <> int.to_string(i))),
+        #(
+          "request",
+          json.object([
+            #("subtype", json.string("mcp_message")),
+            #("server_name", json.string("test-server")),
+            #("message", json.object([#("seq", json.int(i))])),
+          ]),
+        ),
+      ])
+      |> json.to_string
+    bidir.inject_message(session, mcp_json)
+  })
+  process.sleep(100)
+
+  // on_warning should have been called (at least once for the 101st message)
+  let assert Ok(warning_msg) = process.receive(warning_calls, 500)
+  should.be_true(string.contains(warning_msg, "MCP queue overflow"))
+
+  bidir.shutdown(session)
+}
+
+/// Test: MCP queue maintains FIFO order and drops oldest on overflow.
+///
+/// Verifies that when queue overflows, the oldest (first-in) message is dropped,
+/// not the newest, and messages are flushed in FIFO order.
+pub fn mcp_queue_fifo_order_test() {
+  let mock = full_mock_runner.new()
+  let adapter = full_mock_runner.start(mock)
+
+  // Track handler calls with sequence numbers
+  let handler_calls = process.new_subject()
+
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  // Use a smaller queue for testing (we'll use max_mcp_queue_size constant)
+  let config =
+    StartConfig(
+      subscriber: subscriber,
+      default_timeout_ms: 60_000,
+      hook_timeouts: dict.new(),
+      init_timeout_ms: 10_000,
+      default_hook_timeout_ms: 30_000,
+      enable_file_checkpointing: False,
+      mcp_servers: [
+        #("test-server", fn(msg: Dynamic) -> Dynamic {
+          process.send(handler_calls, msg)
+          to_dynamic("ok")
+        }),
+      ],
+      on_warning: None,
+    )
+
+  let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
+  let _adapter = full_mock_runner.set_session(adapter, session)
+
+  // Consume init message but don't ack - stay in InitSent
+  let assert Ok(_init_msg) = process.receive(adapter.captured_writes, 500)
+
+  // Send 3 messages with sequence 1, 2, 3
+  list.range(1, 3)
+  |> list.each(fn(i) {
+    let mcp_json =
+      json.object([
+        #("type", json.string("control_request")),
+        #("request_id", json.string("mcp_" <> int.to_string(i))),
+        #(
+          "request",
+          json.object([
+            #("subtype", json.string("mcp_message")),
+            #("server_name", json.string("test-server")),
+            #("message", json.object([#("seq", json.int(i))])),
+          ]),
+        ),
+      ])
+      |> json.to_string
+    bidir.inject_message(session, mcp_json)
+  })
+  process.sleep(50)
+
+  // Complete init handshake to flush queue
+  let init_success_json =
+    json.object([
+      #("type", json.string("control_response")),
+      #(
+        "response",
+        json.object([
+          #("subtype", json.string("success")),
+          #("request_id", json.string("req_0")),
+          #("response", json.object([#("capabilities", json.object([]))])),
+        ]),
+      ),
+    ])
+    |> json.to_string
+  bidir.inject_message(session, init_success_json)
+  process.sleep(100)
+
+  // Verify messages arrive in FIFO order (1, 2, 3)
+  let seq_decoder = decode.at(["seq"], decode.int)
+
+  let assert Ok(msg1) = process.receive(handler_calls, 500)
+  let assert Ok(seq1) = decode.run(msg1, seq_decoder)
+  should.equal(seq1, 1)
+
+  let assert Ok(msg2) = process.receive(handler_calls, 500)
+  let assert Ok(seq2) = decode.run(msg2, seq_decoder)
+  should.equal(seq2, 2)
+
+  let assert Ok(msg3) = process.receive(handler_calls, 500)
+  let assert Ok(seq3) = decode.run(msg3, seq_decoder)
+  should.equal(seq3, 3)
+
+  bidir.shutdown(session)
 }

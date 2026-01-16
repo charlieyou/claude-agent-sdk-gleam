@@ -17,6 +17,7 @@
 /// {"type":"control_response","response":{"subtype":"error","request_id":"...","error":"..."}}
 import gleam/dict
 import gleam/erlang/process
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -240,6 +241,7 @@ pub fn test_rewind_files_with_checkpointing_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: True,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(adapter.bidir_runner, config)

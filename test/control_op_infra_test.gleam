@@ -9,6 +9,7 @@
 /// CLI responds: {"type":"control_response","response":{"subtype":"success","request_id":"req_1"}}
 import gleam/dict
 import gleam/erlang/process
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -97,6 +98,7 @@ pub fn control_request_timeout_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)
@@ -150,6 +152,7 @@ pub fn late_response_after_timeout_discarded_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(mock.runner, config)

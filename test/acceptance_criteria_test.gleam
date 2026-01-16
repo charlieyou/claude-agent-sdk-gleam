@@ -23,7 +23,7 @@
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process.{type Subject}
-import gleam/option
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -537,6 +537,7 @@ pub fn test_ac10_hook_errors_fail_open_test() {
       default_hook_timeout_ms: 5000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)
@@ -612,6 +613,7 @@ pub fn test_ac11_permission_errors_fail_deny_test() {
       default_hook_timeout_ms: 5000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start_with_hooks(mock.runner, config, hooks)

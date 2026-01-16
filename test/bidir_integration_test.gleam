@@ -6,6 +6,7 @@ import gleam/dict
 import gleam/dynamic.{type Dynamic}
 import gleam/erlang/process
 import gleam/json
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -197,6 +198,7 @@ pub fn init_handshake_with_hooks_test() {
       mcp_servers: [
         #("test_server", fn(_: Dynamic) -> Dynamic { to_dynamic(Nil) }),
       ],
+      on_warning: None,
     )
 
   let assert Ok(session) = bidir.start(adapter.bidir_runner, config)

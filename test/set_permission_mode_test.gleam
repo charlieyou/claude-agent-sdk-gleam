@@ -6,6 +6,7 @@
 /// - Synchronous public API (bidir.set_permission_mode)
 import gleam/dict
 import gleam/erlang/process
+import gleam/option.{None}
 import gleam/string
 import gleeunit/should
 
@@ -278,6 +279,7 @@ pub fn set_permission_mode_sync_actor_timeout_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
   let assert Ok(session) = bidir.start(mock.runner, config)
 
@@ -326,6 +328,7 @@ pub fn set_permission_mode_cancels_pending_on_client_timeout_test() {
       default_hook_timeout_ms: 30_000,
       enable_file_checkpointing: False,
       mcp_servers: [],
+      on_warning: None,
     )
   let assert Ok(session) = bidir.start(mock.runner, config)
 

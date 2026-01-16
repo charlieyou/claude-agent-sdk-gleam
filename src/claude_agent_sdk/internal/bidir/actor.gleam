@@ -509,6 +509,8 @@ pub type SessionConfig {
     default_hook_timeout_ms: Int,
     /// Whether file checkpointing is enabled (for rewind_files support).
     file_checkpointing_enabled: Bool,
+    /// Optional callback for warning messages (e.g., MCP queue overflow).
+    on_warning: Option(fn(String) -> Nil),
   )
 }
 
@@ -695,6 +697,8 @@ pub type StartConfig {
     enable_file_checkpointing: Bool,
     /// MCP server handlers (name -> handler function). Default: empty.
     mcp_servers: List(#(String, fn(Dynamic) -> Dynamic)),
+    /// Optional callback for warning messages (e.g., MCP queue overflow).
+    on_warning: Option(fn(String) -> Nil),
   )
 }
 
@@ -708,6 +712,7 @@ pub fn default_config(subscriber: Subject(SubscriberMessage)) -> StartConfig {
     default_hook_timeout_ms: 30_000,
     enable_file_checkpointing: False,
     mcp_servers: [],
+    on_warning: None,
   )
 }
 
@@ -835,6 +840,7 @@ fn start_internal(
             hook_timeouts: config.hook_timeouts,
             default_hook_timeout_ms: config.default_hook_timeout_ms,
             file_checkpointing_enabled: config.enable_file_checkpointing,
+            on_warning: config.on_warning,
           ),
           runtime: RuntimeState(
             runner: runner,
@@ -1910,7 +1916,8 @@ fn dispatch_permission_callback(
 /// Queue an MCP message during InitSent state.
 ///
 /// MCP messages are queued (max 100) until session transitions to Running.
-/// On overflow, oldest message is dropped and warning is logged to stderr.
+/// On overflow, oldest message is dropped and warning is emitted via on_warning
+/// callback (falls back to stderr if no callback configured).
 fn queue_mcp_message(
   state: SessionState,
   request: IncomingControlRequest,
@@ -1921,12 +1928,12 @@ fn queue_mcp_message(
   // If at capacity, drop oldest (last in list since we prepend)
   let new_queue = case queue_len >= max_mcp_queue_size {
     True -> {
-      // Drop oldest (last element) and log warning
-      io.println_error(
+      // Drop oldest (last element) and emit warning
+      let warning_msg =
         "MCP queue overflow: dropping oldest message (max "
         <> int.to_string(max_mcp_queue_size)
-        <> ")",
-      )
+        <> ")"
+      emit_warning(state, warning_msg)
       // Remove last element (oldest) and prepend new one
       let trimmed = list.take(queue, max_mcp_queue_size - 1)
       [request, ..trimmed]
@@ -1943,6 +1950,14 @@ fn queue_mcp_message(
       pending: PendingOps(..state.pending, mcp_queue: new_queue),
     )
   actor.continue(new_state)
+}
+
+/// Emit a warning via the on_warning callback, or stderr if not configured.
+fn emit_warning(state: SessionState, message: String) -> Nil {
+  case state.config.on_warning {
+    Some(callback) -> callback(message)
+    None -> io.println_error(message)
+  }
 }
 
 /// Dispatch an MCP message to the registered server handler.
