@@ -69,6 +69,7 @@ import claude_agent_sdk/internal/control_encoder
 import claude_agent_sdk/internal/line_framing.{
   type LineBuffer, LineBuffer, Lines, PushBufferOverflow,
 }
+import claude_agent_sdk/internal/mcp_router
 import claude_agent_sdk/internal/port_io
 import claude_agent_sdk/message
 
@@ -1684,9 +1685,8 @@ fn handle_control_request(
           }
           dispatch_permission_callback(state, request_id, tool_name, input)
         }
-        McpMessage(..) -> {
-          // TODO: Implement mcp_message handler
-          actor.continue(state)
+        McpMessage(request_id, server_name, message) -> {
+          dispatch_mcp_message(state, request_id, server_name, message)
         }
       }
     }
@@ -1858,6 +1858,36 @@ fn dispatch_permission_callback(
     }
     // These cases won't occur with FailDeny policy, but must be handled
     RejectAtCapacity(FailOpen) | RejectUnknownHandler(FailOpen) -> {
+      actor.continue(state)
+    }
+  }
+}
+
+/// Dispatch an MCP message to the registered server handler.
+///
+/// Routes the message via mcp_router and sends McpResponse to CLI.
+/// Unknown server names are logged and silently ignored.
+fn dispatch_mcp_message(
+  state: SessionState,
+  request_id: String,
+  server_name: String,
+  message: Dynamic,
+) -> actor.Next(SessionState, ActorMessage) {
+  case
+    mcp_router.route(
+      state.config.mcp_handlers,
+      request_id,
+      server_name,
+      message,
+    )
+  {
+    mcp_router.Routed(response) -> {
+      send_control_response(state, response)
+      actor.continue(state)
+    }
+    mcp_router.ServerNotFound(name) -> {
+      // Log and ignore - no handler registered for this server
+      io.println("MCP: No handler for server '" <> name <> "', ignoring")
       actor.continue(state)
     }
   }
@@ -2037,9 +2067,8 @@ fn handle_implicit_confirmation(
         )
       dispatch_permission_callback(flushed_state, request_id, tool_name, input)
     }
-    McpMessage(..) -> {
-      // TODO: Implement mcp_message handler
-      actor.continue(flushed_state)
+    McpMessage(request_id, server_name, message) -> {
+      dispatch_mcp_message(flushed_state, request_id, server_name, message)
     }
   }
 }
