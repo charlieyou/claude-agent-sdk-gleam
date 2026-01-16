@@ -206,7 +206,7 @@ pub fn unknown_version_stores_raw_output_test() {
 pub fn detect_cli_version_nonexistent_path_returns_spawn_failed_test() {
   // Calling detect_cli_version with a nonexistent path should return
   // Error(SpawnFailed(_)) rather than crashing
-  let result = detect_cli_version("/nonexistent/path/to/cli")
+  let result = detect_cli_version("/nonexistent/path/to/cli", ".")
   case result {
     Error(SpawnFailed(reason)) -> {
       // Should contain "enoent" in some form (file not found)

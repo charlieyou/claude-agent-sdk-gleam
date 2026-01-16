@@ -60,11 +60,16 @@ pub fn default_version_timeout_ms() -> Int {
 
 /// Detect CLI version by spawning `cli_path --version` and parsing output.
 /// Uses port_ffi directly with a 5-second timeout.
+///
+/// The `cwd` parameter specifies the working directory for spawning the CLI.
+/// Use `"."` to use the current process working directory, or an absolute path
+/// for a specific directory. This is important when `cli_path` is relative.
 pub fn detect_cli_version(
   cli_path: String,
+  cwd: String,
 ) -> Result(CliVersion, VersionCheckError) {
   // Spawn the CLI with --version (using safe version to handle spawn failures)
-  case port_io.open_port_safe(cli_path, ["--version"], ".") {
+  case port_io.open_port_safe(cli_path, ["--version"], cwd) {
     Error(reason) -> Error(SpawnFailed(reason))
     Ok(port) -> {
       // Collect output with timeout
