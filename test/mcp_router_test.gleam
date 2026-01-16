@@ -13,7 +13,8 @@ import gleeunit/should
 import claude_agent_sdk/control.{McpResponse}
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir/actor.{
-  type SubscriberMessage, Running, StartConfig,
+  type ActorMessage, type SubscriberMessage, InitSent, InjectedMessage, Running,
+  StartConfig,
 }
 import claude_agent_sdk/internal/mcp_router
 import support/full_mock_runner
@@ -233,4 +234,205 @@ pub fn mcp_message_unknown_server_ignored_test() {
   // No response should be sent (check that nothing new in writes)
   // Note: We can't easily assert "nothing received" but session stability proves it
   bidir.shutdown(session)
+}
+
+// =============================================================================
+// T005 Tests: MCP Message Lifecycle State Machine
+// =============================================================================
+
+/// Test: Handler error returns JSON-RPC error response with code -32603.
+///
+/// Acceptance Criteria: Handler error → -32603 response
+pub fn handler_error_returns_jsonrpc_error_test() {
+  // Handler that panics
+  let handlers =
+    dict.from_list([
+      #("crash-server", fn(_: Dynamic) -> Dynamic { panic as "Handler crash!" }),
+    ])
+
+  let result =
+    mcp_router.route(
+      handlers,
+      "req_error",
+      "crash-server",
+      to_dynamic(dict.new()),
+    )
+
+  case result {
+    mcp_router.Routed(response) -> {
+      // Should be routed with error response
+      case response {
+        McpResponse(req_id, data) -> {
+          should.equal(req_id, "req_error")
+          // Verify error response contains -32603 code
+          let code_decoder = decode.at(["error", "code"], decode.int)
+          case decode.run(data, code_decoder) {
+            Ok(code) -> should.equal(code, -32_603)
+            Error(_) -> should.fail()
+          }
+        }
+        _ -> should.fail()
+      }
+    }
+    mcp_router.ServerNotFound(_) -> should.fail()
+  }
+}
+
+/// Test: MCP messages during InitSent are queued, not immediately routed.
+///
+/// This verifies that MCP messages arriving before init completes are queued
+/// and not processed until the session transitions to Running.
+pub fn mcp_messages_queued_during_init_sent_test() {
+  let mock = full_mock_runner.new()
+  // Don't auto-ack init - we want to stay in InitSent
+  let adapter = full_mock_runner.start(mock)
+
+  // Track handler invocations
+  let handler_calls = process.new_subject()
+
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let config =
+    StartConfig(
+      subscriber: subscriber,
+      default_timeout_ms: 60_000,
+      hook_timeouts: dict.new(),
+      init_timeout_ms: 10_000,
+      default_hook_timeout_ms: 30_000,
+      enable_file_checkpointing: False,
+      mcp_servers: [
+        #("test-server", fn(msg: Dynamic) -> Dynamic {
+          process.send(handler_calls, msg)
+          to_dynamic("response")
+        }),
+      ],
+    )
+
+  let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
+  let adapter = full_mock_runner.set_session(adapter, session)
+
+  // Consume init message but don't ack
+  let assert Ok(_init_msg) = process.receive(adapter.captured_writes, 500)
+
+  // Session should be in InitSent
+  should.equal(bidir.get_lifecycle(session, 1000), actor.InitSent)
+
+  // Inject MCP message while in InitSent
+  let mcp_message_json =
+    json.object([
+      #("type", json.string("control_request")),
+      #("request_id", json.string("mcp_queued")),
+      #(
+        "request",
+        json.object([
+          #("subtype", json.string("mcp_message")),
+          #("server_name", json.string("test-server")),
+          #("message", json.object([#("data", json.string("queued"))])),
+        ]),
+      ),
+    ])
+    |> json.to_string
+
+  bidir.inject_message(session, mcp_message_json)
+  process.sleep(50)
+
+  // Handler should NOT have been called (message is queued)
+  case process.receive(handler_calls, 100) {
+    Ok(_) -> should.fail()
+    // Expected: no message
+    Error(Nil) -> should.be_true(True)
+  }
+
+  // Now complete init handshake manually by injecting init response
+  let init_success_json =
+    json.object([
+      #("type", json.string("control_response")),
+      #(
+        "response",
+        json.object([
+          #("subtype", json.string("success")),
+          #("request_id", json.string("req_0")),
+          #("response", json.object([#("capabilities", json.object([]))])),
+        ]),
+      ),
+    ])
+    |> json.to_string
+  bidir.inject_message(session, init_success_json)
+  process.sleep(100)
+
+  // Session should be running
+  should.equal(bidir.get_lifecycle(session, 1000), Running)
+
+  // Handler should now have been called (queued message flushed)
+  let assert Ok(_received_msg) = process.receive(handler_calls, 500)
+
+  bidir.shutdown(session)
+}
+
+/// Test: MCP messages during Stopped are discarded silently.
+pub fn mcp_messages_discarded_when_stopped_test() {
+  let mock =
+    full_mock_runner.new()
+    |> full_mock_runner.with_auto_init_ack()
+
+  let adapter = full_mock_runner.start(mock)
+
+  let handler_calls = process.new_subject()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let config =
+    StartConfig(
+      subscriber: subscriber,
+      default_timeout_ms: 60_000,
+      hook_timeouts: dict.new(),
+      init_timeout_ms: 10_000,
+      default_hook_timeout_ms: 30_000,
+      enable_file_checkpointing: False,
+      mcp_servers: [
+        #("test-server", fn(msg: Dynamic) -> Dynamic {
+          process.send(handler_calls, msg)
+          to_dynamic("response")
+        }),
+      ],
+    )
+
+  let assert Ok(session) = bidir.start(adapter.bidir_runner, config)
+  let adapter = full_mock_runner.set_session(adapter, session)
+
+  // Complete init
+  let assert Ok(init_msg) = process.receive(adapter.captured_writes, 500)
+  let _adapter = full_mock_runner.capture_init_request(adapter, init_msg)
+  let _adapter = full_mock_runner.process_init(adapter)
+  process.sleep(50)
+
+  should.equal(bidir.get_lifecycle(session, 1000), Running)
+
+  // Shutdown session (transition to Stopped)
+  bidir.shutdown(session)
+  process.sleep(50)
+
+  // Try to inject MCP message after shutdown
+  // (Note: this may fail silently if the actor is already dead, which is fine)
+  let mcp_message_json =
+    json.object([
+      #("type", json.string("control_request")),
+      #("request_id", json.string("mcp_after_stop")),
+      #(
+        "request",
+        json.object([
+          #("subtype", json.string("mcp_message")),
+          #("server_name", json.string("test-server")),
+          #("message", json.object([#("data", json.string("ignored"))])),
+        ]),
+      ),
+    ])
+    |> json.to_string
+
+  // Send message to dead actor - will be silently dropped
+  process.send(session, InjectedMessage(mcp_message_json))
+  process.sleep(50)
+
+  // Handler should not have been called
+  case process.receive(handler_calls, 100) {
+    Ok(_) -> should.fail()
+    Error(Nil) -> should.be_true(True)
+  }
 }

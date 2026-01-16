@@ -531,6 +531,8 @@ pub type PendingOps {
     pending_hooks: Dict(String, PendingHook),
     /// Operations queued while not Running.
     queued_ops: List(QueuedOperation),
+    /// MCP messages queued during InitSent state (max 100, oldest dropped on overflow).
+    mcp_queue: List(IncomingControlRequest),
     /// Counter for generating request IDs.
     next_request_id: Int,
     /// Counter for generating callback IDs.
@@ -828,6 +830,7 @@ fn start_internal(
             pending_requests: dict.new(),
             pending_hooks: dict.new(),
             queued_ops: [],
+            mcp_queue: [],
             next_request_id: 1,
             // Start at 1 since req_0 is used for init
             next_callback_id: 0,
@@ -1543,7 +1546,10 @@ fn handle_init_success(
       // Flush queued operations (non-blocking)
       let flushed_state = flush_queued_ops(new_state)
 
-      actor.continue(flushed_state)
+      // Flush queued MCP messages
+      let final_state = flush_mcp_queue(flushed_state)
+
+      actor.continue(final_state)
     }
     _ -> {
       // Not in InitSent - ignore (might be duplicate response)
@@ -1643,17 +1649,34 @@ fn handle_init_error(
 
 /// Handle incoming control request from CLI.
 ///
-/// Control requests (hook_callback, can_use_tool, mcp_message) during InitSent
-/// trigger implicit confirmation - proving CLI accepted our handshake.
+/// Control requests during InitSent:
+/// - Hook/Permission requests trigger implicit confirmation (proving CLI accepted handshake)
+/// - MCP messages are queued (max 100, oldest dropped on overflow)
+///
+/// Control requests during Running:
+/// - All requests processed immediately
+///
+/// Control requests during Stopped/Failed:
+/// - MCP messages discarded silently
+/// - Other requests ignored
 fn handle_control_request(
   state: SessionState,
   request: IncomingControlRequest,
 ) -> actor.Next(SessionState, ActorMessage) {
   case state.runtime.lifecycle {
     InitSent -> {
-      // Implicit confirmation! CLI is sending control requests,
-      // proving it understood our initialization and registered our hooks.
-      handle_implicit_confirmation(state, request)
+      case request {
+        // MCP messages are queued during InitSent, not implicit confirmation
+        McpMessage(..) -> {
+          queue_mcp_message(state, request)
+        }
+        // Hook/Permission requests trigger implicit confirmation
+        _ -> {
+          // Implicit confirmation! CLI is sending control requests,
+          // proving it understood our initialization and registered our hooks.
+          handle_implicit_confirmation(state, request)
+        }
+      }
     }
     Running -> {
       // Normal request processing in Running state
@@ -1691,7 +1714,7 @@ fn handle_control_request(
       }
     }
     _ -> {
-      // Not in a state to handle requests - ignore
+      // Stopped/Failed state - MCP messages discarded silently, others ignored
       actor.continue(state)
     }
   }
@@ -1861,6 +1884,44 @@ fn dispatch_permission_callback(
       actor.continue(state)
     }
   }
+}
+
+/// Queue an MCP message during InitSent state.
+///
+/// MCP messages are queued (max 100) until session transitions to Running.
+/// On overflow, oldest message is dropped and warning is logged to stderr.
+fn queue_mcp_message(
+  state: SessionState,
+  request: IncomingControlRequest,
+) -> actor.Next(SessionState, ActorMessage) {
+  let queue = state.pending.mcp_queue
+  let queue_len = list.length(queue)
+
+  // If at capacity, drop oldest (last in list since we prepend)
+  let new_queue = case queue_len >= max_mcp_queue_size {
+    True -> {
+      // Drop oldest (last element) and log warning
+      io.println_error(
+        "MCP queue overflow: dropping oldest message (max "
+        <> int.to_string(max_mcp_queue_size)
+        <> ")",
+      )
+      // Remove last element (oldest) and prepend new one
+      let trimmed = list.take(queue, max_mcp_queue_size - 1)
+      [request, ..trimmed]
+    }
+    False -> {
+      // Space available, just prepend
+      [request, ..queue]
+    }
+  }
+
+  let new_state =
+    SessionState(
+      ..state,
+      pending: PendingOps(..state.pending, mcp_queue: new_queue),
+    )
+  actor.continue(new_state)
 }
 
 /// Dispatch an MCP message to the registered server handler.
@@ -2044,11 +2105,14 @@ fn handle_implicit_confirmation(
   // Flush queued operations (non-blocking)
   let flushed_state = flush_queued_ops(new_state)
 
+  // Flush queued MCP messages
+  let final_state = flush_mcp_queue(flushed_state)
+
   // Now process the triggering request in Running state
   // Dispatch the request that triggered implicit confirmation
   case request {
     HookCallback(request_id, callback_id, input, _tool_use_id) -> {
-      dispatch_hook_callback(flushed_state, request_id, callback_id, input)
+      dispatch_hook_callback(final_state, request_id, callback_id, input)
     }
     CanUseTool(
       request_id,
@@ -2065,10 +2129,10 @@ fn handle_implicit_confirmation(
             #("permission_suggestions", to_dynamic(permission_suggestions)),
           ]),
         )
-      dispatch_permission_callback(flushed_state, request_id, tool_name, input)
+      dispatch_permission_callback(final_state, request_id, tool_name, input)
     }
     McpMessage(request_id, server_name, message) -> {
-      dispatch_mcp_message(flushed_state, request_id, server_name, message)
+      dispatch_mcp_message(final_state, request_id, server_name, message)
     }
   }
 }
@@ -2439,6 +2503,60 @@ pub fn flush_queued_ops(state: SessionState) -> SessionState {
       pending_requests: new_pending,
     ),
   )
+}
+
+/// Flush queued MCP messages after transitioning to Running.
+///
+/// Dispatches all queued MCP messages in FIFO order.
+/// Called after flush_queued_ops when transitioning to Running state.
+fn flush_mcp_queue(state: SessionState) -> SessionState {
+  // Reverse to process in FIFO order (queue_mcp_message prepends)
+  let mcp_in_order = list.reverse(state.pending.mcp_queue)
+
+  // Dispatch each queued MCP message
+  list.each(mcp_in_order, fn(request) {
+    case request {
+      McpMessage(request_id, server_name, message) -> {
+        // Dispatch synchronously - we're now in Running state
+        case
+          mcp_router.route(
+            state.config.mcp_handlers,
+            request_id,
+            server_name,
+            message,
+          )
+        {
+          mcp_router.Routed(response) -> {
+            send_control_response_sync(state, response)
+          }
+          mcp_router.ServerNotFound(name) -> {
+            io.println_error(
+              "MCP: No handler for server '" <> name <> "', ignoring",
+            )
+          }
+        }
+      }
+      _ -> {
+        // Should not happen - mcp_queue only contains McpMessage
+        Nil
+      }
+    }
+  })
+
+  // Clear the MCP queue
+  SessionState(..state, pending: PendingOps(..state.pending, mcp_queue: []))
+}
+
+/// Send control response synchronously (no actor.continue wrapper).
+/// Used during queue flushing where we're iterating through queued messages.
+fn send_control_response_sync(
+  state: SessionState,
+  response: OutgoingControlResponse,
+) -> Nil {
+  let json = control_encoder.encode_response(response)
+  let write_fn = state.runtime.runner.write
+  let _result = write_fn(json <> "\n")
+  Nil
 }
 
 /// Forward a regular message to the subscriber.
@@ -2925,6 +3043,9 @@ pub const max_pending_requests: Int = 64
 
 /// Maximum number of pending hook callbacks.
 pub const max_pending_hooks: Int = 32
+
+/// Maximum MCP messages queued during InitSent (oldest dropped on overflow).
+pub const max_mcp_queue_size: Int = 100
 
 /// Queue an operation during initialization with backpressure limit.
 ///

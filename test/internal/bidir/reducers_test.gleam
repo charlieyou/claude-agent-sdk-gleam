@@ -49,6 +49,7 @@ fn test_state() -> SessionState {
       pending_requests: dict.new(),
       pending_hooks: dict.new(),
       queued_ops: [],
+      mcp_queue: [],
       next_request_id: 1,
       next_callback_id: 1,
     ),

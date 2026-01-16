@@ -12,14 +12,26 @@
 ///     → send McpResponse to CLI
 /// ```
 ///
-/// ## Future Work (T005/T006)
+/// ## Error Handling
 ///
-/// - State machine for message lifecycle (T005)
+/// Handler crashes/errors return JSON-RPC error response with code -32603
+/// (internal error) per the MCP specification.
+///
+/// ## Future Work (T006)
+///
 /// - Request/response correlation (T006)
 import gleam/dict.{type Dict}
 import gleam/dynamic.{type Dynamic}
 
 import claude_agent_sdk/control.{type OutgoingControlResponse, McpResponse}
+import claude_agent_sdk/internal/port_io
+
+/// JSON-RPC internal error code per specification.
+pub const jsonrpc_internal_error: Int = -32_603
+
+// FFI: Convert any value to Dynamic (identity function at runtime)
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> Dynamic
 
 /// Result of routing an MCP message.
 pub type RouteResult {
@@ -34,6 +46,9 @@ pub type RouteResult {
 /// Looks up the server_name in handlers dict and invokes the handler
 /// with the message. Returns RouteResult indicating success or failure.
 ///
+/// Handler crashes are caught and return JSON-RPC error response with
+/// code -32603 (internal error).
+///
 /// ## Arguments
 ///
 /// - `handlers`: Dict mapping server names to handler functions
@@ -43,7 +58,7 @@ pub type RouteResult {
 ///
 /// ## Returns
 ///
-/// - `Routed(McpResponse(...))` if handler found and invoked
+/// - `Routed(McpResponse(...))` if handler found and invoked (success or error)
 /// - `ServerNotFound(server_name)` if no handler registered
 pub fn route(
   handlers: Dict(String, fn(Dynamic) -> Dynamic),
@@ -53,9 +68,40 @@ pub fn route(
 ) -> RouteResult {
   case dict.get(handlers, server_name) {
     Ok(handler) -> {
-      let response_data = handler(message)
-      Routed(McpResponse(request_id, response_data))
+      // Use rescue to catch handler panics and convert to JSON-RPC error
+      case port_io.rescue(fn() { handler(message) }) {
+        Ok(response_data) -> {
+          Routed(McpResponse(request_id, response_data))
+        }
+        Error(error_msg) -> {
+          // Handler crashed - return JSON-RPC error response
+          let error_response = make_jsonrpc_error(request_id, error_msg)
+          Routed(McpResponse(request_id, error_response))
+        }
+      }
     }
     Error(Nil) -> ServerNotFound(server_name)
   }
+}
+
+/// Create a JSON-RPC error response as Dynamic.
+///
+/// Format: {"jsonrpc": "2.0", "id": "...", "error": {"code": -32603, "message": "..."}}
+/// Uses dict.from_list to create an Erlang map that can be decoded.
+fn make_jsonrpc_error(request_id: String, error_message: String) -> Dynamic {
+  to_dynamic(
+    dict.from_list([
+      #("jsonrpc", to_dynamic("2.0")),
+      #("id", to_dynamic(request_id)),
+      #(
+        "error",
+        to_dynamic(
+          dict.from_list([
+            #("code", to_dynamic(jsonrpc_internal_error)),
+            #("message", to_dynamic(error_message)),
+          ]),
+        ),
+      ),
+    ]),
+  )
 }

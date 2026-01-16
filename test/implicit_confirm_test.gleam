@@ -90,7 +90,12 @@ pub fn can_use_tool_during_init_sent_transitions_to_running_test() {
 // Implicit Confirmation Tests - mcp_message
 // =============================================================================
 
-pub fn mcp_message_during_init_sent_transitions_to_running_test() {
+/// MCP messages during InitSent are QUEUED, not implicit confirmation triggers (T005).
+///
+/// This differs from hook_callback and can_use_tool which DO trigger implicit
+/// confirmation. MCP messages are queued and flushed when session transitions
+/// to Running via other means (init success or hook/permission implicit confirm).
+pub fn mcp_message_during_init_sent_queues_message_test() {
   // Create mock runner
   let mock = mock_bidir_runner.new()
 
@@ -106,7 +111,7 @@ pub fn mcp_message_during_init_sent_transitions_to_running_test() {
   // Should be in InitSent
   should.equal(bidir.get_lifecycle(session, 1000), InitSent)
 
-  // Send mcp_message - should trigger implicit confirmation
+  // Send mcp_message - should be queued, NOT trigger implicit confirmation
   let mcp_message_json =
     "{\"type\":\"control_request\",\"request_id\":\"cli_3\",\"request\":{\"subtype\":\"mcp_message\",\"server_name\":\"git-server\",\"message\":{\"method\":\"list\"}}}"
   bidir.inject_message(session, mcp_message_json)
@@ -114,8 +119,8 @@ pub fn mcp_message_during_init_sent_transitions_to_running_test() {
   // Allow time for message processing
   process.sleep(50)
 
-  // Should transition to Running via implicit confirmation
-  should.equal(bidir.get_lifecycle(session, 1000), Running)
+  // Should STILL be in InitSent - MCP messages are queued, not implicit confirmation
+  should.equal(bidir.get_lifecycle(session, 1000), InitSent)
 
   // Cleanup
   bidir.shutdown(session)
