@@ -109,6 +109,15 @@ pub type CliOptions {
     resume_session_id: Option(String),
     continue_session: Bool,
     cwd: Option(String),
+    // New fields for Python SDK parity
+    cli_path: Option(String),
+    fallback_model: Option(String),
+    betas: Option(List(String)),
+    permission_prompt_tool_name: Option(String),
+    settings: Option(Dict(String, dynamic.Dynamic)),
+    add_dirs: Option(List(String)),
+    env: Option(Dict(String, String)),
+    extra_args: Option(List(String)),
   )
 }
 
@@ -127,6 +136,14 @@ pub fn cli_options() -> CliOptions {
     resume_session_id: None,
     continue_session: False,
     cwd: None,
+    cli_path: None,
+    fallback_model: None,
+    betas: None,
+    permission_prompt_tool_name: None,
+    settings: None,
+    add_dirs: None,
+    env: None,
+    extra_args: None,
   )
 }
 
@@ -293,6 +310,8 @@ pub fn default_options() -> QueryOptions {
 // =============================================================================
 
 /// Extract CliOptions from QueryOptions.
+/// Note: New fields (cli_path, fallback_model, etc.) default to None as
+/// QueryOptions predates their addition to CliOptions.
 pub fn cli_options_from_query(opts: QueryOptions) -> CliOptions {
   CliOptions(
     model: opts.model,
@@ -307,6 +326,15 @@ pub fn cli_options_from_query(opts: QueryOptions) -> CliOptions {
     resume_session_id: opts.resume_session_id,
     continue_session: opts.continue_session,
     cwd: opts.cwd,
+    // New fields default to None (QueryOptions predates these)
+    cli_path: None,
+    fallback_model: None,
+    betas: None,
+    permission_prompt_tool_name: None,
+    settings: None,
+    add_dirs: None,
+    env: None,
+    extra_args: None,
   )
 }
 
@@ -471,6 +499,58 @@ pub fn with_continue(options: CliOptions) -> CliOptions {
 /// Set working directory for the CLI process.
 pub fn with_cwd(options: CliOptions, path: String) -> CliOptions {
   CliOptions(..options, cwd: Some(path))
+}
+
+/// Set custom CLI path override.
+pub fn with_cli_path(options: CliOptions, path: String) -> CliOptions {
+  CliOptions(..options, cli_path: Some(path))
+}
+
+/// Set fallback model to use if primary model fails.
+pub fn with_fallback_model(options: CliOptions, model: String) -> CliOptions {
+  CliOptions(..options, fallback_model: Some(model))
+}
+
+/// Set beta features to enable.
+///
+/// Maps to CLI flag: `--beta` (repeated for each beta)
+pub fn with_betas(options: CliOptions, betas: List(String)) -> CliOptions {
+  CliOptions(..options, betas: Some(betas))
+}
+
+/// Set permission prompt tool name.
+pub fn with_permission_prompt_tool_name(
+  options: CliOptions,
+  name: String,
+) -> CliOptions {
+  CliOptions(..options, permission_prompt_tool_name: Some(name))
+}
+
+/// Set custom settings dictionary.
+pub fn with_settings(
+  options: CliOptions,
+  settings: Dict(String, dynamic.Dynamic),
+) -> CliOptions {
+  CliOptions(..options, settings: Some(settings))
+}
+
+/// Set additional directories for the CLI.
+///
+/// Maps to CLI flag: `--add-dir` (repeated for each directory)
+pub fn with_add_dirs(options: CliOptions, dirs: List(String)) -> CliOptions {
+  CliOptions(..options, add_dirs: Some(dirs))
+}
+
+/// Set environment variables for the CLI process.
+///
+/// Maps to CLI flag: `--env KEY=VALUE` (repeated for each entry)
+pub fn with_env(options: CliOptions, env: Dict(String, String)) -> CliOptions {
+  CliOptions(..options, env: Some(env))
+}
+
+/// Set extra CLI arguments to append at the end.
+pub fn with_extra_args(options: CliOptions, args: List(String)) -> CliOptions {
+  CliOptions(..options, extra_args: Some(args))
 }
 
 // =============================================================================
