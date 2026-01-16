@@ -914,6 +914,7 @@ pub fn start_session_new(
             runner,
             default_timeout,
             bidir_opts,
+            messages,
             events,
             setup_subject,
           )
@@ -942,6 +943,7 @@ fn start_bridge_and_actor(
   runner: bidir_runner.BidirRunner,
   default_timeout: Int,
   bidir_opts: BidirOptions,
+  messages: Subject(message.Message),
   events: Subject(event.SessionEvent),
   setup_subject: Subject(SetupResult),
 ) -> Nil {
@@ -963,7 +965,7 @@ fn start_bridge_and_actor(
       // Report success back to parent
       process.send(setup_subject, SetupOk(actor_subject, subscriber))
       // Now loop forwarding messages
-      subscriber_bridge_loop(subscriber, events)
+      subscriber_bridge_loop(subscriber, messages, events)
     }
     Error(err) -> {
       // Report failure back to parent
@@ -975,14 +977,17 @@ fn start_bridge_and_actor(
 /// Bridge loop: receive SubscriberMessage and forward to appropriate subject.
 fn subscriber_bridge_loop(
   subscriber: Subject(actor.SubscriberMessage),
+  messages: Subject(message.Message),
   events: Subject(event.SessionEvent),
 ) -> Nil {
   // Block waiting for next message from actor's subscriber
   case process.receive_forever(subscriber) {
-    actor.CliMessage(_dynamic) -> {
-      // TODO: Parse and forward to messages subject when Message parsing is implemented
-      // For now, continue looping
-      subscriber_bridge_loop(subscriber, events)
+    actor.CliMessage(payload) -> {
+      // The payload is a Message that was converted to Dynamic via identity.
+      // Cast it back to Message (safe because Gleam types are erased at runtime).
+      let msg: message.Message = unsafe_coerce_dynamic(payload)
+      process.send(messages, msg)
+      subscriber_bridge_loop(subscriber, messages, events)
     }
     actor.SessionEnded(stop_reason) -> {
       // Convert StopReason to SessionEvent and forward to events subject
@@ -999,6 +1004,11 @@ fn subscriber_bridge_loop(
     }
   }
 }
+
+/// FFI: Unsafe coerce Dynamic back to its original type (identity at runtime).
+/// Used to reverse the to_dynamic() call in the actor.
+@external(erlang, "gleam_stdlib", "identity")
+fn unsafe_coerce_dynamic(a: dynamic.Dynamic) -> b
 
 /// Start a bidirectional session with Claude CLI (legacy API).
 ///

@@ -408,3 +408,50 @@ pub fn public_events_api_receives_session_ended_test() {
     }
   }
 }
+
+/// Regression test: Public messages() API receives CliMessage forwarded by bridge.
+/// This test fails if the bridge drops CliMessage instead of forwarding to messages.
+pub fn public_messages_api_receives_cli_message_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure options with mock runner factory
+  let cli_opts = options.cli_options()
+  let sdk_opts = options.sdk_options()
+  let bidir_opts =
+    options.bidir_options()
+    |> options.with_bidir_runner_factory(fn() { runner })
+
+  // Start session through public API
+  let assert Ok(sess) =
+    claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
+
+  // Small delay to ensure bridge is running
+  process.sleep(10)
+
+  // Get the PUBLIC messages subject
+  let messages_subject = claude_agent_sdk.messages(sess)
+
+  // Inject a CliMessage through the actor
+  let actor_subject = session.get_actor(sess)
+  // Send a mock JSON message that the actor will forward to subscriber
+  bidir.inject_message(
+    actor_subject,
+    "{\"type\":\"assistant\",\"message\":{\"id\":\"msg_test\",\"content\":[{\"type\":\"text\",\"text\":\"hello\"}],\"role\":\"assistant\",\"model\":\"test\",\"stop_reason\":null,\"stop_sequence\":null}}",
+  )
+
+  // The public messages subject should receive the message via bridge
+  // If this times out, the bridge is dropping CliMessage
+  case process.receive(messages_subject, 500) {
+    Ok(_msg) -> should.be_true(True)
+    Error(_) -> {
+      // Timeout means bridge is dropping CliMessage
+      should.fail()
+    }
+  }
+
+  // Clean up
+  bidir.shutdown(actor_subject)
+  process.sleep(50)
+}
