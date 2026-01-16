@@ -51,8 +51,8 @@ import claude_agent_sdk/control.{
   type OutgoingControlRequest, type OutgoingControlResponse, type PermissionMode,
   type PermissionResult, Allow, AllowAll, AllowOnce, CanUseTool, ControlRequest,
   ControlResponse, Deny, Edit, Error as ControlError, HookCallback, HookResponse,
-  HookSuccess, Interrupt, McpMessage, PermissionResponse, RegularMessage,
-  SetModel, SetPermissionMode, Success,
+  HookSuccess, Interrupt, McpMessage, McpResponse, PermissionResponse,
+  RegularMessage, SetModel, SetPermissionMode, Success,
 }
 import claude_agent_sdk/error.{
   type SessionError, type StartError, ActorStartFailed, CliExitedDuringInit,
@@ -1952,18 +1952,21 @@ fn queue_mcp_message(
   actor.continue(new_state)
 }
 
-/// Emit a warning via the on_warning callback, or stderr if not configured.
+/// Emit a warning via the on_warning callback (no-op if not configured).
+///
+/// Per the MCP message lifecycle spec, warnings are only emitted through the
+/// callback channel. If no callback is configured, warnings are silently discarded.
 fn emit_warning(state: SessionState, message: String) -> Nil {
   case state.config.on_warning {
     Some(callback) -> callback(message)
-    None -> io.println_error(message)
+    None -> Nil
   }
 }
 
 /// Dispatch an MCP message to the registered server handler.
 ///
 /// Routes the message via mcp_router and sends McpResponse to CLI.
-/// Unknown server names are logged and silently ignored.
+/// Unknown server names return a JSON-RPC error response.
 fn dispatch_mcp_message(
   state: SessionState,
   request_id: String,
@@ -1983,8 +1986,13 @@ fn dispatch_mcp_message(
       actor.continue(state)
     }
     mcp_router.ServerNotFound(name) -> {
-      // Log and ignore - no handler registered for this server
-      io.println_error("MCP: No handler for server '" <> name <> "', ignoring")
+      // Send error response for unknown server (per spec)
+      let error_data =
+        mcp_router.make_jsonrpc_error(
+          request_id,
+          "No handler registered for server: " <> name,
+        )
+      send_control_response(state, McpResponse(request_id, error_data))
       actor.continue(state)
     }
   }
@@ -2566,8 +2574,15 @@ fn flush_mcp_queue(state: SessionState) -> SessionState {
             send_control_response_sync(state, response)
           }
           mcp_router.ServerNotFound(name) -> {
-            io.println_error(
-              "MCP: No handler for server '" <> name <> "', ignoring",
+            // Send error response for unknown server (per spec)
+            let error_data =
+              mcp_router.make_jsonrpc_error(
+                request_id,
+                "No handler registered for server: " <> name,
+              )
+            send_control_response_sync(
+              state,
+              McpResponse(request_id, error_data),
             )
           }
         }

@@ -179,8 +179,8 @@ pub fn mcp_message_routed_to_handler_test() {
   bidir.shutdown(session)
 }
 
-/// Test: MCP message for unknown server is silently ignored.
-pub fn mcp_message_unknown_server_ignored_test() {
+/// Test: MCP message for unknown server returns JSON-RPC error response.
+pub fn mcp_message_unknown_server_returns_error_test() {
   let mock =
     full_mock_runner.new()
     |> full_mock_runner.with_auto_init_ack()
@@ -236,8 +236,12 @@ pub fn mcp_message_unknown_server_ignored_test() {
   // Session should still be running (no crash)
   should.equal(bidir.get_lifecycle(session, 1000), Running)
 
-  // No response should be sent (check that nothing new in writes)
-  // Note: We can't easily assert "nothing received" but session stability proves it
+  // Should receive an error response (not silent ignore)
+  let assert Ok(response_json) = process.receive(adapter.captured_writes, 500)
+  should.be_true(string.contains(response_json, "mcp_unknown"))
+  should.be_true(string.contains(response_json, "error"))
+  should.be_true(string.contains(response_json, "-32603"))
+
   bidir.shutdown(session)
 }
 

@@ -88,7 +88,7 @@ pub fn route(
 ///
 /// Format: {"jsonrpc": "2.0", "id": "...", "error": {"code": -32603, "message": "..."}}
 /// Uses dict.from_list to create an Erlang map that can be decoded.
-fn make_jsonrpc_error(request_id: String, error_message: String) -> Dynamic {
+pub fn make_jsonrpc_error(request_id: String, error_message: String) -> Dynamic {
   to_dynamic(
     dict.from_list([
       #("jsonrpc", to_dynamic("2.0")),
