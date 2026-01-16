@@ -288,7 +288,7 @@ pub fn sdk_24_allowed_tools_test_() {
                       !list.any(allowed_lower, fn(a) { a == t })
                     })
 
-                  case list.length(missing_allowed) == 0 {
+                  case missing_allowed == [] {
                     True -> helpers.log_info(ctx, "allowed_tools_present")
                     False -> {
                       helpers.log_error(
@@ -305,7 +305,7 @@ pub fn sdk_24_allowed_tools_test_() {
                     }
                   }
 
-                  case list.length(extra_tools) == 0 {
+                  case extra_tools == [] {
                     True -> helpers.log_info(ctx, "no_extra_tools")
                     False -> {
                       helpers.log_info_with(ctx, "extra_tools_present", [

@@ -73,7 +73,7 @@ fn run_soak_test() -> Nil {
 
   // Run iterations
   let ctx = helpers.test_step(ctx, "run_iterations")
-  let result = run_iterations(ctx, 1, soak_iterations, baseline, [])
+  let result = run_iterations(ctx, 1, soak_iterations, [])
 
   case result {
     Error(#(ctx, iteration, error_msg)) -> {
@@ -146,7 +146,6 @@ fn run_iterations(
   ctx: helpers.TestContext,
   current: Int,
   total: Int,
-  baseline: ResourceCounts,
   history: List(ResourceCounts),
 ) -> Result(
   #(helpers.TestContext, List(ResourceCounts)),
@@ -178,7 +177,7 @@ fn run_iterations(
           log_resources(ctx, "iteration", current, counts)
 
           // Continue to next iteration
-          run_iterations(ctx, current + 1, total, baseline, [counts, ..history])
+          run_iterations(ctx, current + 1, total, [counts, ..history])
         }
       }
     }

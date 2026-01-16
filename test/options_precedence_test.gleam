@@ -18,7 +18,7 @@
 /// | betas: List(String) | Replace; highest priority source wins entirely |
 /// | agents: List(AgentConfig) | Replace; highest priority source wins entirely |
 import claude_agent_sdk/hook
-import claude_agent_sdk/options.{AgentConfig, CliOptions}
+import claude_agent_sdk/options.{CliOptions}
 import gleam/dict
 import gleam/dynamic
 import gleam/option.{None, Some}

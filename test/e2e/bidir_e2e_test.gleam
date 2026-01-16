@@ -26,8 +26,7 @@ import claude_agent_sdk/internal/bidir.{
   type HookConfig, type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  CliMessage, Failed, HookConfig, RequestError, RequestSessionStopped,
-  RequestSuccess, RequestTimeout, Running, SessionEnded, Starting, Stopped,
+  CliMessage, HookConfig, RequestSuccess, Running, SessionEnded,
 }
 import claude_agent_sdk/internal/bidir_runner
 import gleam/dict

@@ -15,9 +15,9 @@ import gleeunit/should
 
 import claude_agent_sdk/error.{InitQueueOverflow, TooManyPendingRequests}
 import claude_agent_sdk/internal/bidir/actor.{
-  type PendingHook, type PendingRequest, type RequestResult, type SessionState,
+  type PendingHook, type PendingRequest, type SessionState,
   Buffers, HookConfig, HookType, PendingHook, PendingOps, PendingRequest,
-  QueuedRequest, QueuedUserMessage, RuntimeState, SessionConfig, SessionState,
+  QueuedUserMessage, RuntimeState, SessionConfig, SessionState,
   Starting, Timers,
 }
 import claude_agent_sdk/internal/bidir/reducers.{

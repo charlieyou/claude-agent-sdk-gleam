@@ -5,10 +5,7 @@
 /// for existing users.
 import claude_agent_sdk
 import claude_agent_sdk/content.{TextBlock, ToolUseBlock, UnknownBlock}
-import claude_agent_sdk/error
-import claude_agent_sdk/hook
 import claude_agent_sdk/message
-import claude_agent_sdk/options
 import claude_agent_sdk/runner
 import gleam/dynamic
 import gleam/io

@@ -16,8 +16,7 @@ import gleeunit/should
 import claude_agent_sdk/control.{McpResponse}
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir/actor.{
-  type ActorMessage, type SubscriberMessage, InitSent, InjectedMessage, Running,
-  StartConfig,
+  type SubscriberMessage, InitSent, InjectedMessage, Running, StartConfig,
 }
 import claude_agent_sdk/internal/mcp_router
 import support/full_mock_runner

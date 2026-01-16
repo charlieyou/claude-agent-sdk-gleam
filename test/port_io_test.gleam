@@ -15,7 +15,6 @@ pub fn port_message_data_constructor_test() {
   let msg = port_io.Data(<<1, 2, 3>>)
   case msg {
     port_io.Data(bytes) -> bytes |> should.equal(<<1, 2, 3>>)
-    _ -> should.fail()
   }
 }
 
@@ -24,7 +23,6 @@ pub fn port_message_exit_status_constructor_test() {
   let msg = port_io.ExitStatus(0)
   case msg {
     port_io.ExitStatus(code) -> code |> should.equal(0)
-    _ -> should.fail()
   }
 }
 
@@ -33,7 +31,6 @@ pub fn port_message_eof_constructor_test() {
   let msg = port_io.Eof
   case msg {
     port_io.Eof -> should.be_ok(Ok(Nil))
-    _ -> should.fail()
   }
 }
 
@@ -42,7 +39,6 @@ pub fn port_message_timeout_constructor_test() {
   let msg = port_io.Timeout
   case msg {
     port_io.Timeout -> should.be_ok(Ok(Nil))
-    _ -> should.fail()
   }
 }
 
@@ -51,7 +47,6 @@ pub fn write_error_port_closed_constructor_test() {
   let err = port_io.PortClosed
   case err {
     port_io.PortClosed -> should.be_ok(Ok(Nil))
-    _ -> should.fail()
   }
 }
 
@@ -74,7 +69,7 @@ pub fn monotonic_time_ms_returns_integer_test() {
   // Monotonic time should be an integer (can be negative - starts from arbitrary point)
   let time = port_io.monotonic_time_ms()
   // Just verify we can call it and get an integer
-  { time == time } |> should.be_true
+  { time + 1 > time } |> should.be_true
 }
 
 pub fn monotonic_time_ms_is_monotonic_test() {

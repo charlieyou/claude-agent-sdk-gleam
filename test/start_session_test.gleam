@@ -7,7 +7,7 @@ import gleeunit/should
 
 import claude_agent_sdk.{
   type Session, type StartError, default_options, start_error_to_string,
-  start_session, start_session_new,
+  start_session,
 }
 import claude_agent_sdk/error
 import claude_agent_sdk/internal/bidir

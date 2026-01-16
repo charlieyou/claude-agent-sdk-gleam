@@ -24,7 +24,7 @@ import claude_agent_sdk/internal/bidir.{
   type RequestResult, type SubscriberMessage,
 }
 import claude_agent_sdk/internal/bidir/actor.{
-  HookConfig, RequestError, RequestSuccess, StartConfig,
+  HookConfig, RequestSuccess, StartConfig,
 }
 import e2e/helpers
 import support/mock_bidir_runner
