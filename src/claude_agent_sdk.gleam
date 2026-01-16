@@ -34,6 +34,7 @@ import gleam/string
 
 import gleam/erlang/process.{type Subject}
 
+import claude_agent_sdk/control
 import claude_agent_sdk/event
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir/actor
@@ -1035,11 +1036,6 @@ pub fn start_session(
 ///
 /// Blocks up to 5s waiting for CLI acknowledgment.
 ///
-/// ## Current Status: Skeleton (TDD Phase 1)
-///
-/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
-/// The actual implementation will be added in Epic 8.
-///
 /// ## Parameters
 ///
 /// - `session`: The session handle from `start_session()`
@@ -1049,19 +1045,21 @@ pub fn start_session(
 /// - `Ok(Nil)`: Interrupt was acknowledged
 /// - `Error(ControlTimeout)`: CLI did not acknowledge within 5s
 /// - `Error(ControlSessionClosed)`: Session is closed
-/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
-pub fn interrupt(_session: Session) -> Result(Nil, ControlError) {
-  Error(error.ControlNotImplemented)
+/// - `Error(ControlRejected)`: CLI rejected the interrupt request
+pub fn interrupt(sess: Session) -> Result(Nil, ControlError) {
+  let actor_subject = session.get_actor(sess)
+  case bidir.interrupt(actor_subject) {
+    Ok(Nil) -> Ok(Nil)
+    Error(actor.CliError(message)) ->
+      Error(error.ControlRejected("interrupt", message))
+    Error(actor.InterruptTimeout) -> Error(error.ControlTimeout)
+    Error(actor.SessionStopped) -> Error(error.ControlSessionClosed)
+  }
 }
 
 /// Change permission mode during session.
 ///
 /// Blocks up to 5s waiting for CLI acknowledgment.
-///
-/// ## Current Status: Skeleton (TDD Phase 1)
-///
-/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
-/// The actual implementation will be added in Epic 8.
 ///
 /// ## Parameters
 ///
@@ -1073,22 +1071,32 @@ pub fn interrupt(_session: Session) -> Result(Nil, ControlError) {
 /// - `Ok(Nil)`: Permission mode was changed
 /// - `Error(ControlTimeout)`: CLI did not acknowledge within 5s
 /// - `Error(ControlSessionClosed)`: Session is closed
-/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
+/// - `Error(ControlRejected)`: CLI rejected the permission mode change
 pub fn set_permission_mode(
-  _session: Session,
-  _mode: PermissionMode,
+  sess: Session,
+  mode: PermissionMode,
 ) -> Result(Nil, ControlError) {
-  Error(error.ControlNotImplemented)
+  let actor_subject = session.get_actor(sess)
+  // Convert options.PermissionMode to control.PermissionMode
+  let control_mode = case mode {
+    options.Default -> control.Default
+    options.AcceptEdits -> control.AcceptEdits
+    options.BypassPermissions -> control.BypassPermissions
+    options.Plan -> control.Plan
+  }
+  case bidir.set_permission_mode(actor_subject, control_mode) {
+    Ok(Nil) -> Ok(Nil)
+    Error(actor.SetPermissionModeCliError(message)) ->
+      Error(error.ControlRejected("set_permission_mode", message))
+    Error(actor.SetPermissionModeTimeout) -> Error(error.ControlTimeout)
+    Error(actor.SetPermissionModeSessionStopped) ->
+      Error(error.ControlSessionClosed)
+  }
 }
 
 /// Change model during session.
 ///
 /// Blocks up to 5s waiting for CLI acknowledgment.
-///
-/// ## Current Status: Skeleton (TDD Phase 1)
-///
-/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
-/// The actual implementation will be added in Epic 8.
 ///
 /// ## Parameters
 ///
@@ -1100,20 +1108,22 @@ pub fn set_permission_mode(
 /// - `Ok(Nil)`: Model was changed
 /// - `Error(ControlTimeout)`: CLI did not acknowledge within 5s
 /// - `Error(ControlSessionClosed)`: Session is closed
-/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
-pub fn set_model(_session: Session, _model: String) -> Result(Nil, ControlError) {
-  Error(error.ControlNotImplemented)
+/// - `Error(ControlRejected)`: CLI rejected the model change
+pub fn set_model(sess: Session, model: String) -> Result(Nil, ControlError) {
+  let actor_subject = session.get_actor(sess)
+  case bidir.set_model(actor_subject, model) {
+    Ok(Nil) -> Ok(Nil)
+    Error(actor.SetModelCliError(message)) ->
+      Error(error.ControlRejected("set_model", message))
+    Error(actor.SetModelTimeout) -> Error(error.ControlTimeout)
+    Error(actor.SetModelSessionStopped) -> Error(error.ControlSessionClosed)
+  }
 }
 
 /// Rewind files to checkpoint at specified message.
 ///
 /// Requires `enable_file_checkpointing` option to be set when starting the session.
 /// Blocks up to 30s waiting for CLI acknowledgment.
-///
-/// ## Current Status: Skeleton (TDD Phase 1)
-///
-/// This function currently returns `Error(ControlNotImplemented)` as a placeholder.
-/// The actual implementation will be added in Epic 8.
 ///
 /// ## Parameters
 ///
@@ -1125,12 +1135,23 @@ pub fn set_model(_session: Session, _model: String) -> Result(Nil, ControlError)
 /// - `Ok(Nil)`: Files were rewound to checkpoint
 /// - `Error(ControlTimeout)`: CLI did not acknowledge within 30s
 /// - `Error(ControlSessionClosed)`: Session is closed
-/// - `Error(ControlNotImplemented)`: Not yet implemented (current)
+/// - `Error(ControlCheckpointingNotEnabled)`: File checkpointing was not enabled
+/// - `Error(ControlRejected)`: CLI rejected the rewind request
 pub fn rewind_files(
-  _session: Session,
-  _user_message_id: String,
+  sess: Session,
+  user_message_id: String,
 ) -> Result(Nil, ControlError) {
-  Error(error.ControlNotImplemented)
+  let actor_subject = session.get_actor(sess)
+  // Use default timeout (30s) for rewind_files
+  case bidir.rewind_files(actor_subject, user_message_id, 30_000) {
+    Ok(Nil) -> Ok(Nil)
+    Error(actor.CheckpointingNotEnabled) ->
+      Error(error.ControlCheckpointingNotEnabled)
+    Error(actor.RewindFilesCliError(message)) ->
+      Error(error.ControlRejected("rewind_files", message))
+    Error(actor.RewindFilesTimeout) -> Error(error.ControlTimeout)
+    Error(actor.RewindFilesSessionStopped) -> Error(error.ControlSessionClosed)
+  }
 }
 
 /// Gracefully stop the session.

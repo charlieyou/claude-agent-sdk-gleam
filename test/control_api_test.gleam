@@ -30,12 +30,14 @@ pub fn control_error_type_accessible_test() {
   // Verify ControlError variants are accessible and can be constructed
   let timeout_err: ControlError = error.ControlTimeout
   let closed_err: ControlError = error.ControlSessionClosed
-  let not_impl_err: ControlError = error.ControlNotImplemented
+  let rejected_err: ControlError = error.ControlRejected("test", "message")
+  let checkpoint_err: ControlError = error.ControlCheckpointingNotEnabled
 
   // Use should.equal to verify values directly
   should.equal(timeout_err, error.ControlTimeout)
   should.equal(closed_err, error.ControlSessionClosed)
-  should.equal(not_impl_err, error.ControlNotImplemented)
+  should.equal(rejected_err, error.ControlRejected("test", "message"))
+  should.equal(checkpoint_err, error.ControlCheckpointingNotEnabled)
 }
 
 /// Test that StopError type is accessible via main module.
@@ -57,8 +59,13 @@ pub fn control_error_to_string_test() {
   control_error_to_string(error.ControlSessionClosed)
   |> should.equal("Session is closed")
 
-  control_error_to_string(error.ControlNotImplemented)
-  |> should.equal("Control operation is not yet implemented")
+  control_error_to_string(error.ControlRejected("interrupt", "nothing to stop"))
+  |> should.equal("interrupt rejected by CLI: nothing to stop")
+
+  control_error_to_string(error.ControlCheckpointingNotEnabled)
+  |> should.equal(
+    "File checkpointing is not enabled (required for rewind_files)",
+  )
 }
 
 /// Test that stop_error_to_string works for all variants.
@@ -71,11 +78,13 @@ pub fn stop_error_to_string_test() {
 }
 
 // =============================================================================
-// API Surface Tests - Stub Returns NotImplemented (Pass in Phase 1)
+// API Wiring Tests - Control ops are now wired to actor
 // =============================================================================
+// Note: Full integration tests using mock runners are in control_integration_test.gleam.
+// These tests verify basic wiring with a dummy session (no real actor).
 
 /// Helper to create a dummy Session for testing.
-/// Uses session.new directly to bypass start_session which returns NotImplemented.
+/// Uses session.new directly. Since there's no real actor, control ops will timeout.
 fn get_test_session() -> Session {
   let actor: process.Subject(ActorMessage) = process.new_subject()
   let messages: process.Subject(Message) = process.new_subject()
@@ -84,42 +93,55 @@ fn get_test_session() -> Session {
   session.new(actor, messages, events, subscriber)
 }
 
-/// Test that interrupt compiles and returns ControlNotImplemented.
-pub fn interrupt_returns_not_implemented_test() {
-  let session = get_test_session()
-  case interrupt(session) {
-    Error(error.ControlNotImplemented) -> should.be_true(True)
-    Error(_other) -> should.fail()
+/// Test that interrupt times out when actor doesn't respond.
+/// With dummy session (no actor), the function should timeout.
+pub fn interrupt_timeout_with_dummy_session_test() {
+  let sess = get_test_session()
+  case interrupt(sess) {
+    // With no actor to respond, we expect timeout
+    Error(error.ControlTimeout) -> should.be_true(True)
+    Error(error.ControlSessionClosed) -> should.be_true(True)
+    Error(error.ControlRejected(_, _)) -> should.fail()
+    Error(error.ControlCheckpointingNotEnabled) -> should.fail()
     Ok(_) -> should.fail()
   }
 }
 
-/// Test that set_permission_mode compiles and returns ControlNotImplemented.
-pub fn set_permission_mode_returns_not_implemented_test() {
-  let session = get_test_session()
-  case set_permission_mode(session, options.Default) {
-    Error(error.ControlNotImplemented) -> should.be_true(True)
-    Error(_other) -> should.fail()
+/// Test that set_permission_mode times out when actor doesn't respond.
+pub fn set_permission_mode_timeout_with_dummy_session_test() {
+  let sess = get_test_session()
+  case set_permission_mode(sess, options.Default) {
+    Error(error.ControlTimeout) -> should.be_true(True)
+    Error(error.ControlSessionClosed) -> should.be_true(True)
+    Error(error.ControlRejected(_, _)) -> should.fail()
+    Error(error.ControlCheckpointingNotEnabled) -> should.fail()
     Ok(_) -> should.fail()
   }
 }
 
-/// Test that set_model compiles and returns ControlNotImplemented.
-pub fn set_model_returns_not_implemented_test() {
-  let session = get_test_session()
-  case set_model(session, "claude-sonnet-4-20250514") {
-    Error(error.ControlNotImplemented) -> should.be_true(True)
-    Error(_other) -> should.fail()
+/// Test that set_model returns session closed for dead actor.
+/// set_model checks if actor is alive before sending, so returns immediately.
+pub fn set_model_session_closed_with_dummy_session_test() {
+  let sess = get_test_session()
+  case set_model(sess, "claude-sonnet-4-20250514") {
+    // set_model has early actor-alive check, returns SessionStopped
+    Error(error.ControlSessionClosed) -> should.be_true(True)
+    Error(error.ControlTimeout) -> should.be_true(True)
+    Error(error.ControlRejected(_, _)) -> should.fail()
+    Error(error.ControlCheckpointingNotEnabled) -> should.fail()
     Ok(_) -> should.fail()
   }
 }
 
-/// Test that rewind_files compiles and returns ControlNotImplemented.
-pub fn rewind_files_returns_not_implemented_test() {
-  let session = get_test_session()
-  case rewind_files(session, "user-msg-123") {
-    Error(error.ControlNotImplemented) -> should.be_true(True)
-    Error(_other) -> should.fail()
+/// Test that rewind_files times out when actor doesn't respond.
+pub fn rewind_files_timeout_with_dummy_session_test() {
+  let sess = get_test_session()
+  case rewind_files(sess, "user-msg-123") {
+    // Actor doesn't respond to checkpointing query, times out internally
+    Error(error.ControlTimeout) -> should.be_true(True)
+    Error(error.ControlSessionClosed) -> should.be_true(True)
+    Error(error.ControlCheckpointingNotEnabled) -> should.fail()
+    Error(error.ControlRejected(_, _)) -> should.fail()
     Ok(_) -> should.fail()
   }
 }

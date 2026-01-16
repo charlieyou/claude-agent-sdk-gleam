@@ -20,15 +20,18 @@ import gleam/erlang/process
 import gleam/string
 import gleeunit/should
 
+import claude_agent_sdk
 import claude_agent_sdk/control.{
   AcceptEdits, BypassPermissions, Default, Interrupt, Plan, RewindFiles,
   SetModel, SetPermissionMode,
 }
+import claude_agent_sdk/error
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir/actor.{
   type RequestResult, type SubscriberMessage, CheckpointingNotEnabled,
   RequestError, RequestSuccess, RewindFilesSessionStopped, Running,
 }
+import claude_agent_sdk/session
 import support/full_mock_runner
 
 // =============================================================================
@@ -452,4 +455,85 @@ pub fn test_control_error_response_test() {
   }
 
   bidir.shutdown(session)
+}
+
+// =============================================================================
+// Test: Public API Wiring (claude_agent_sdk.interrupt, etc.)
+// =============================================================================
+// Type signature tests verify the public API functions compile with correct types.
+// Integration tests for success/error paths use the bidir-level send_control_request
+// API (tested extensively above), which the public API wraps.
+
+/// Helper to create a Session wrapper from a bidir session Subject.
+fn wrap_session(
+  actor_subject: process.Subject(actor.ActorMessage),
+) -> claude_agent_sdk.Session {
+  let messages = process.new_subject()
+  let events = process.new_subject()
+  let subscriber = process.new_subject()
+  session.new(actor_subject, messages, events, subscriber)
+}
+
+/// Test: public interrupt() type signature is correct
+pub fn public_api_interrupt_type_test() {
+  let _fn_ref: fn(claude_agent_sdk.Session) ->
+    Result(Nil, claude_agent_sdk.ControlError) = claude_agent_sdk.interrupt
+  should.be_true(True)
+}
+
+/// Test: public set_permission_mode() type signature is correct
+pub fn public_api_set_permission_mode_type_test() {
+  let _fn_ref: fn(claude_agent_sdk.Session, claude_agent_sdk.PermissionMode) ->
+    Result(Nil, claude_agent_sdk.ControlError) =
+    claude_agent_sdk.set_permission_mode
+  should.be_true(True)
+}
+
+/// Test: public set_model() type signature is correct
+pub fn public_api_set_model_type_test() {
+  let _fn_ref: fn(claude_agent_sdk.Session, String) ->
+    Result(Nil, claude_agent_sdk.ControlError) = claude_agent_sdk.set_model
+  should.be_true(True)
+}
+
+/// Test: public rewind_files() type signature is correct
+pub fn public_api_rewind_files_type_test() {
+  let _fn_ref: fn(claude_agent_sdk.Session, String) ->
+    Result(Nil, claude_agent_sdk.ControlError) = claude_agent_sdk.rewind_files
+  should.be_true(True)
+}
+
+/// Test: public rewind_files() API checkpointing not enabled
+///
+/// Verifies rewind_files returns ControlCheckpointingNotEnabled
+/// when checkpointing was not enabled at session start.
+/// This tests the error mapping from actor.CheckpointingNotEnabled
+/// to error.ControlCheckpointingNotEnabled.
+pub fn public_api_rewind_files_checkpointing_not_enabled_test() {
+  let mock =
+    full_mock_runner.new()
+    |> full_mock_runner.with_auto_init_ack()
+
+  let adapter = full_mock_runner.start(mock)
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  // Default config has checkpointing disabled
+  let config = bidir.default_config(subscriber)
+
+  let assert Ok(actor_session) = bidir.start(adapter.bidir_runner, config)
+  let adapter = full_mock_runner.set_session(adapter, actor_session)
+
+  let assert Ok(_init) = process.receive(adapter.captured_writes, 500)
+  let _adapter = full_mock_runner.process_init(adapter)
+  process.sleep(50)
+  should.equal(bidir.get_lifecycle(actor_session, 1000), Running)
+
+  let sess = wrap_session(actor_session)
+
+  // Act: call rewind_files without checkpointing enabled
+  let result = claude_agent_sdk.rewind_files(sess, "msg_123")
+
+  // Assert: returns ControlCheckpointingNotEnabled
+  should.equal(result, Error(error.ControlCheckpointingNotEnabled))
+
+  bidir.shutdown(actor_session)
 }

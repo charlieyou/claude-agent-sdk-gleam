@@ -403,9 +403,10 @@ pub type ControlError {
   ControlTimeout
   /// Session is closed and cannot accept control operations.
   ControlSessionClosed
-  /// Placeholder for TDD: control operation is not yet implemented.
-  /// This variant will be removed once the actual implementation is complete.
-  ControlNotImplemented
+  /// CLI rejected the control operation with an error message.
+  ControlRejected(operation: String, message: String)
+  /// File checkpointing is not enabled (required for rewind_files).
+  ControlCheckpointingNotEnabled
 }
 
 /// Convert a ControlError to a human-readable string.
@@ -415,7 +416,10 @@ pub fn control_error_to_string(error: ControlError) -> String {
   case error {
     ControlTimeout -> "Control operation timed out"
     ControlSessionClosed -> "Session is closed"
-    ControlNotImplemented -> "Control operation is not yet implemented"
+    ControlRejected(operation, message) ->
+      operation <> " rejected by CLI: " <> message
+    ControlCheckpointingNotEnabled ->
+      "File checkpointing is not enabled (required for rewind_files)"
   }
 }
 
