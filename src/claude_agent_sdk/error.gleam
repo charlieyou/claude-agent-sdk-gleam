@@ -434,9 +434,6 @@ pub fn control_error_to_string(error: ControlError) -> String {
 pub type StopError {
   /// Session is already closed.
   StopSessionClosed
-  /// Placeholder for TDD: stop is not yet implemented.
-  /// This variant will be removed once the actual implementation is complete.
-  StopNotImplemented
 }
 
 /// Convert a StopError to a human-readable string.
@@ -445,6 +442,5 @@ pub type StopError {
 pub fn stop_error_to_string(error: StopError) -> String {
   case error {
     StopSessionClosed -> "Session is already closed"
-    StopNotImplemented -> "stop is not yet implemented"
   }
 }

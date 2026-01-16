@@ -44,11 +44,9 @@ pub fn control_error_type_accessible_test() {
 pub fn stop_error_type_accessible_test() {
   // Verify StopError variants are accessible and can be constructed
   let closed_err: StopError = error.StopSessionClosed
-  let not_impl_err: StopError = error.StopNotImplemented
 
   // Use should.equal to verify values directly
   should.equal(closed_err, error.StopSessionClosed)
-  should.equal(not_impl_err, error.StopNotImplemented)
 }
 
 /// Test that control_error_to_string works for all variants.
@@ -72,9 +70,6 @@ pub fn control_error_to_string_test() {
 pub fn stop_error_to_string_test() {
   stop_error_to_string(error.StopSessionClosed)
   |> should.equal("Session is already closed")
-
-  stop_error_to_string(error.StopNotImplemented)
-  |> should.equal("stop is not yet implemented")
 }
 
 // =============================================================================
