@@ -1887,7 +1887,7 @@ fn dispatch_mcp_message(
     }
     mcp_router.ServerNotFound(name) -> {
       // Log and ignore - no handler registered for this server
-      io.println("MCP: No handler for server '" <> name <> "', ignoring")
+      io.println_error("MCP: No handler for server '" <> name <> "', ignoring")
       actor.continue(state)
     }
   }

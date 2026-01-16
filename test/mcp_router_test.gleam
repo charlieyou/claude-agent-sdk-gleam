@@ -165,7 +165,8 @@ pub fn mcp_message_routed_to_handler_test() {
   // Verify response was sent to CLI
   let assert Ok(response_json) = process.receive(adapter.captured_writes, 500)
 
-  // Response should be control_response with mcp_response subtype
+  // Response should be control_response with success subtype and mcp_response key
+  // Format: {"type":"control_response","response":{"subtype":"success","request_id":"...","response":{"mcp_response":...}}}
   should.be_true(string.contains(response_json, "control_response"))
   should.be_true(string.contains(response_json, "mcp_123"))
   should.be_true(string.contains(response_json, "mcp_response"))
