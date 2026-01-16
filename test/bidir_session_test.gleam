@@ -8,6 +8,7 @@ import gleam/erlang/process
 import gleeunit/should
 
 import claude_agent_sdk/error.{RuntimeError}
+import claude_agent_sdk/event
 import claude_agent_sdk/internal/bidir
 import claude_agent_sdk/internal/bidir/actor.{
   type RequestResult, type SessionLifecycle, type SubscriberMessage, Failed,
@@ -300,8 +301,8 @@ pub fn start_session_new_with_mock_runner_test() {
   // Get the session and verify it's usable
   let assert Ok(sess) = result
 
-  // Verify we can access the subscriber for events
-  let subscriber = session.get_subscriber(sess)
+  // Get the PUBLIC events subject for lifecycle events
+  let events_subject = claude_agent_sdk.events(sess)
 
   // Shutdown via the actor subject
   let actor_subject = session.get_actor(sess)
@@ -310,9 +311,9 @@ pub fn start_session_new_with_mock_runner_test() {
   // Give it time to shutdown
   process.sleep(50)
 
-  // Verify subscriber received SessionEnded
-  case process.receive(subscriber, 100) {
-    Ok(SessionEnded(UserRequested)) -> should.be_true(True)
+  // Verify events subject received SessionStopped (forwarded from bridge)
+  case process.receive(events_subject, 200) {
+    Ok(event.SessionStopped) -> should.be_true(True)
     Ok(_other) -> should.fail()
     Error(_) -> should.fail()
   }
@@ -365,4 +366,45 @@ pub fn start_session_legacy_works_with_query_options_test() {
   let actor_subject = session.get_actor(sess)
   bidir.shutdown(actor_subject)
   process.sleep(50)
+}
+
+/// Regression test: Public events() API receives SessionEnded on shutdown.
+/// This test fails if the bridge process is not spawned to forward
+/// SubscriberMessage to the public events subject.
+pub fn public_events_api_receives_session_ended_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure options with mock runner factory
+  let cli_opts = options.cli_options()
+  let sdk_opts = options.sdk_options()
+  let bidir_opts =
+    options.bidir_options()
+    |> options.with_bidir_runner_factory(fn() { runner })
+
+  // Start session through public API
+  let assert Ok(sess) =
+    claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
+
+  // Small delay to ensure bridge process has started and is receiving
+  process.sleep(10)
+
+  // Get the PUBLIC events subject (not internal subscriber)
+  let events_subject = claude_agent_sdk.events(sess)
+
+  // Shutdown the actor - this should send SessionEnded to subscriber,
+  // which should be bridged to the public events subject
+  let actor_subject = session.get_actor(sess)
+  bidir.shutdown(actor_subject)
+
+  // The public events subject should receive SessionEnded via bridge
+  // If this times out, the bridge is not working
+  case process.receive(events_subject, 500) {
+    Ok(_event) -> should.be_true(True)
+    Error(_) -> {
+      // Timeout means bridge is broken - events never forwarded
+      should.fail()
+    }
+  }
 }

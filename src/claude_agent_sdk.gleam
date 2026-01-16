@@ -489,10 +489,19 @@ fn query_new_with_cli_path(
   sdk_opts: SdkOptions,
   cli_path: String,
 ) -> Result(QueryStream, QueryError) {
+  // Determine cwd for version check - empty string means inherit
+  let cwd = case cli_opts.cwd {
+    None -> ""
+    Some(path) ->
+      case string.is_empty(path) {
+        True -> ""
+        False -> path
+      }
+  }
   case sdk_opts.skip_version_check {
     True -> spawn_query_new_cli(prompt, cli_opts, sdk_opts, cli_path, [])
     False -> {
-      case cli.detect_cli_version(cli_path) {
+      case cli.detect_cli_version(cli_path, cwd) {
         Error(cli.VersionCheckTimeout) ->
           Error(error.VersionDetectionError("Timeout waiting for CLI response"))
         Error(cli.SpawnFailed(reason)) ->
@@ -658,11 +667,20 @@ fn query_with_cli_path(
   options: QueryOptions,
   cli_path: String,
 ) -> Result(QueryStream, QueryError) {
+  // Determine cwd for version check - empty string means inherit
+  let cwd = case options.cwd {
+    None -> ""
+    Some(path) ->
+      case string.is_empty(path) {
+        True -> ""
+        False -> path
+      }
+  }
   // Step 2: Version check (unless skipped)
   case options.skip_version_check {
     True -> spawn_query(prompt, options, cli_path)
     False -> {
-      case cli.detect_cli_version(cli_path) {
+      case cli.detect_cli_version(cli_path, cwd) {
         Error(cli.VersionCheckTimeout) ->
           Error(error.VersionDetectionError("Timeout waiting for CLI response"))
         Error(cli.SpawnFailed(reason)) ->
@@ -825,11 +843,6 @@ fn spawn_query_with_warnings(
 /// Takes separate CliOptions, SdkOptions, and BidirOptions for clear separation
 /// of concerns. Use this for hooks, MCP servers, and control operations.
 ///
-/// ## Current Status: Skeleton (TDD Phase 1)
-///
-/// This function currently returns `Error(SpawnFailed)` as a placeholder.
-/// The actual implementation will be added in future work.
-///
 /// ## Parameters
 ///
 /// - `cli_opts`: CLI-specific options (model, tools, etc.)
@@ -862,10 +875,12 @@ pub fn start_session_new(
   _sdk_opts: SdkOptions,
   bidir_opts: BidirOptions,
 ) -> Result(Session, StartError) {
-  // Create subjects for message flow
-  let subscriber = process.new_subject()
+  // Create subjects for public API - these will receive forwarded messages
   let messages = process.new_subject()
   let events = process.new_subject()
+
+  // Create a subject for setup coordination
+  let setup_subject: Subject(SetupResult) = process.new_subject()
 
   // Get or create runner
   let runner_result = case bidir_opts.bidir_runner_factory {
@@ -888,22 +903,99 @@ pub fn start_session_new(
         Some(ms) -> ms
         None -> 60_000
       }
-      let config =
-        actor.StartConfig(
-          ..bidir.default_config(subscriber),
-          default_timeout_ms: default_timeout,
-          hook_timeouts: bidir_opts.hook_timeouts,
-          enable_file_checkpointing: bidir_opts.file_checkpointing_enabled,
-          mcp_servers: bidir_opts.mcp_servers,
-        )
 
-      // Start the actor
-      case bidir.start(runner, config) {
-        Ok(actor_subject) -> {
+      // Spawn the bridge process which will:
+      // 1. Create its own subscriber subject (which it owns)
+      // 2. Start the actor with that subscriber
+      // 3. Forward messages to the public subjects
+      let _ =
+        process.spawn_unlinked(fn() {
+          start_bridge_and_actor(
+            runner,
+            default_timeout,
+            bidir_opts,
+            events,
+            setup_subject,
+          )
+        })
+
+      // Wait for the bridge to report back with the actor subject
+      case process.receive(setup_subject, 5000) {
+        Ok(SetupOk(actor_subject, subscriber)) -> {
           Ok(session.new(actor_subject, messages, events, subscriber))
         }
-        Error(err) -> Error(err)
+        Ok(SetupFailed(err)) -> Error(err)
+        Error(Nil) -> Error(error.Timeout)
       }
+    }
+  }
+}
+
+/// Internal type for bridge setup coordination.
+type SetupResult {
+  SetupOk(Subject(actor.ActorMessage), Subject(actor.SubscriberMessage))
+  SetupFailed(StartError)
+}
+
+/// Bridge process entry point: creates subscriber, starts actor, then loops.
+fn start_bridge_and_actor(
+  runner: bidir_runner.BidirRunner,
+  default_timeout: Int,
+  bidir_opts: BidirOptions,
+  events: Subject(event.SessionEvent),
+  setup_subject: Subject(SetupResult),
+) -> Nil {
+  // Create subscriber subject - this process owns it and can receive from it
+  let subscriber = process.new_subject()
+
+  let config =
+    actor.StartConfig(
+      ..bidir.default_config(subscriber),
+      default_timeout_ms: default_timeout,
+      hook_timeouts: bidir_opts.hook_timeouts,
+      enable_file_checkpointing: bidir_opts.file_checkpointing_enabled,
+      mcp_servers: bidir_opts.mcp_servers,
+    )
+
+  // Start the actor
+  case bidir.start(runner, config) {
+    Ok(actor_subject) -> {
+      // Report success back to parent
+      process.send(setup_subject, SetupOk(actor_subject, subscriber))
+      // Now loop forwarding messages
+      subscriber_bridge_loop(subscriber, events)
+    }
+    Error(err) -> {
+      // Report failure back to parent
+      process.send(setup_subject, SetupFailed(err))
+    }
+  }
+}
+
+/// Bridge loop: receive SubscriberMessage and forward to appropriate subject.
+fn subscriber_bridge_loop(
+  subscriber: Subject(actor.SubscriberMessage),
+  events: Subject(event.SessionEvent),
+) -> Nil {
+  // Block waiting for next message from actor's subscriber
+  case process.receive_forever(subscriber) {
+    actor.CliMessage(_dynamic) -> {
+      // TODO: Parse and forward to messages subject when Message parsing is implemented
+      // For now, continue looping
+      subscriber_bridge_loop(subscriber, events)
+    }
+    actor.SessionEnded(stop_reason) -> {
+      // Convert StopReason to SessionEvent and forward to events subject
+      let session_event = case stop_reason {
+        actor.UserRequested -> event.SessionStopped
+        actor.CliExited(code) ->
+          event.SessionFailed("CLI exited with code " <> string.inspect(code))
+        actor.InitFailed(err) ->
+          event.SessionFailed("Init failed: " <> string.inspect(err))
+      }
+      process.send(events, session_event)
+      // SessionEnded is terminal - stop the bridge
+      Nil
     }
   }
 }

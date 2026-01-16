@@ -22,7 +22,7 @@ import support/mock_bidir_runner
 /// Test that start_session with mock runner succeeds.
 ///
 /// Uses a mock runner factory to avoid needing real CLI.
-pub fn start_session_returns_error_test() {
+pub fn start_session_with_mock_runner_succeeds_test() {
   // Create mock runner factory
   let mock = mock_bidir_runner.new()
   let runner = mock.runner
