@@ -35,7 +35,6 @@ import gleam/erlang/process
 import gleam/int
 import gleam/io
 import gleam/json
-import gleam/option.{None}
 import gleeunit/should
 
 // FFI for creating Dynamic values
@@ -46,12 +45,12 @@ fn to_dynamic(a: a) -> Dynamic
 // Constants
 // ============================================================================
 
-/// Hook timeout for this test (5 seconds).
+/// Hook timeout for this test (1 second).
 /// Shorter than default 30s to make test faster while still testing timeout behavior.
-const test_hook_timeout_ms: Int = 5000
+const test_hook_timeout_ms: Int = 1000
 
 /// How long the slow hook sleeps (2x the timeout to ensure timeout fires).
-const slow_hook_sleep_ms: Int = 10_000
+const slow_hook_sleep_ms: Int = 2000
 
 // ============================================================================
 // Helper Functions
