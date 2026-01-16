@@ -25,6 +25,39 @@ import support/mock_bidir_runner
 // Session Stop Cancels Pending Requests Test
 // =============================================================================
 
+/// Test: stop_session uses SIGTERM/SIGKILL flow on running session
+///
+/// Verifies the active shutdown path:
+/// 1. Start session and complete init handshake (Running state)
+/// 2. Call stop_session() which attempts SIGTERM/SIGKILL on mock port
+/// 3. Session stops cleanly (mock runner has no real OS process, but flow executes)
+/// 4. Returns Ok(Nil) indicating successful stop
+pub fn stop_session_on_running_session_test() {
+  // Arrange: start session with mock runner
+  let mock = mock_bidir_runner.new()
+  let subscriber: process.Subject(SubscriberMessage) = process.new_subject()
+  let config = bidir.default_config(subscriber)
+
+  let assert Ok(session) = bidir.start(mock.runner, config)
+
+  // Complete init handshake to reach Running state
+  let assert Ok(_init_request) = process.receive(mock.writes, 500)
+  let init_success =
+    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
+  bidir.inject_message(session, init_success)
+  process.sleep(50)
+
+  // Verify we're in Running state
+  should.equal(bidir.get_lifecycle(session, 1000), bidir.running())
+
+  // Act: call stop_session (exercises SIGTERM/SIGKILL path)
+  // Mock runner port has no real OS process, so signal calls fail gracefully
+  let result = bidir.stop_session(session)
+
+  // Assert: stop completed successfully
+  should.equal(result, Ok(Nil))
+}
+
 /// Test: session stop cancels pending requests and returns SessionStopped
 ///
 /// Verifies cleanup_session behavior:
