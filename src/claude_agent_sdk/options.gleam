@@ -175,6 +175,42 @@ pub fn sdk_options() -> SdkOptions {
 }
 
 // =============================================================================
+// AgentConfig - Configuration for custom agents
+// =============================================================================
+
+/// Configuration for a custom agent (subagent).
+///
+/// Custom agents can be defined with a description and prompt that determines
+/// their behavior when invoked via the Task tool.
+pub type AgentConfig {
+  AgentConfig(
+    /// Name identifier for the agent
+    name: String,
+    /// Brief description of the agent's purpose
+    description: String,
+    /// System prompt defining the agent's behavior
+    prompt: String,
+  )
+}
+
+// =============================================================================
+// SandboxConfig - Sandbox environment configuration
+// =============================================================================
+
+/// Configuration for sandbox execution environment.
+///
+/// Sandboxes provide isolated execution environments for code execution
+/// and tool use, enhancing security for untrusted operations.
+pub type SandboxConfig {
+  SandboxConfig(
+    /// Type of sandbox (e.g., "docker", "container", "none")
+    sandbox_type: String,
+    /// Additional sandbox-specific configuration as key-value pairs
+    config: Dict(String, dynamic.Dynamic),
+  )
+}
+
+// =============================================================================
 // BidirOptions - Options for bidirectional session mode
 // =============================================================================
 
@@ -198,6 +234,15 @@ pub type BidirOptions {
     timeout_ms: Option(Int),
     hook_timeouts: Dict(HookEvent, Int),
     bidir_runner_factory: Option(fn() -> BidirRunner),
+    // New fields for Python SDK parity
+    include_partial_messages: Bool,
+    fork_session: Option(String),
+    agents: Option(List(AgentConfig)),
+    setting_sources: Option(List(String)),
+    sandbox: Option(SandboxConfig),
+    plugins: Option(List(String)),
+    max_thinking_tokens: Option(Int),
+    output_format: Option(String),
   )
 }
 
@@ -216,6 +261,14 @@ pub fn bidir_options() -> BidirOptions {
     timeout_ms: None,
     hook_timeouts: dict.new(),
     bidir_runner_factory: None,
+    include_partial_messages: False,
+    fork_session: None,
+    agents: None,
+    setting_sources: None,
+    sandbox: None,
+    plugins: None,
+    max_thinking_tokens: None,
+    output_format: None,
   )
 }
 
@@ -350,6 +403,8 @@ pub fn sdk_options_from_query(opts: QueryOptions) -> SdkOptions {
 
 /// Extract BidirOptions from QueryOptions.
 pub fn bidir_options_from_query(opts: QueryOptions) -> BidirOptions {
+  // Note: QueryOptions doesn't have the new bidir-specific fields,
+  // so we use defaults for the Python SDK parity fields.
   BidirOptions(
     on_pre_tool_use: opts.on_pre_tool_use,
     on_post_tool_use: opts.on_post_tool_use,
@@ -363,6 +418,14 @@ pub fn bidir_options_from_query(opts: QueryOptions) -> BidirOptions {
     timeout_ms: opts.timeout_ms,
     hook_timeouts: opts.hook_timeouts,
     bidir_runner_factory: opts.bidir_runner_factory,
+    include_partial_messages: False,
+    fork_session: None,
+    agents: None,
+    setting_sources: None,
+    sandbox: None,
+    plugins: None,
+    max_thinking_tokens: None,
+    output_format: None,
   )
 }
 
@@ -668,6 +731,135 @@ pub fn with_bidir_runner_factory(
   factory: fn() -> BidirRunner,
 ) -> BidirOptions {
   BidirOptions(..options, bidir_runner_factory: Some(factory))
+}
+
+/// Enable including partial messages in the response stream.
+///
+/// When enabled, partial message content is streamed as it is generated,
+/// rather than waiting for complete messages. This is useful for real-time
+/// display of AI responses.
+pub fn with_partial_messages(options: BidirOptions) -> BidirOptions {
+  BidirOptions(..options, include_partial_messages: True)
+}
+
+/// Set a session ID to fork from.
+///
+/// This creates a new session starting from the state of an existing session,
+/// allowing branching of conversations.
+pub fn with_fork_session(
+  options: BidirOptions,
+  session_id: String,
+) -> BidirOptions {
+  BidirOptions(..options, fork_session: Some(session_id))
+}
+
+/// Set custom agent configurations.
+///
+/// Custom agents can be invoked via the Task tool and have their own
+/// descriptions and system prompts.
+pub fn with_agents(
+  options: BidirOptions,
+  agents: List(AgentConfig),
+) -> BidirOptions {
+  BidirOptions(..options, agents: Some(agents))
+}
+
+/// Add a single agent configuration.
+pub fn with_agent(options: BidirOptions, agent: AgentConfig) -> BidirOptions {
+  let new_agents = case options.agents {
+    Some(existing) -> Some(list.append(existing, [agent]))
+    None -> Some([agent])
+  }
+  BidirOptions(..options, agents: new_agents)
+}
+
+/// Set the setting sources for configuration resolution.
+///
+/// Setting sources define where configuration values are read from
+/// and their precedence order.
+pub fn with_setting_sources(
+  options: BidirOptions,
+  sources: List(String),
+) -> BidirOptions {
+  BidirOptions(..options, setting_sources: Some(sources))
+}
+
+/// Set sandbox configuration for isolated code execution.
+///
+/// Sandboxes provide security isolation for code execution and tool use.
+pub fn with_sandbox(
+  options: BidirOptions,
+  sandbox: SandboxConfig,
+) -> BidirOptions {
+  BidirOptions(..options, sandbox: Some(sandbox))
+}
+
+/// Set the list of plugins to enable.
+///
+/// Plugins extend Claude's capabilities with additional tools and features.
+pub fn with_plugins(
+  options: BidirOptions,
+  plugins: List(String),
+) -> BidirOptions {
+  BidirOptions(..options, plugins: Some(plugins))
+}
+
+/// Add a single plugin.
+pub fn with_plugin(options: BidirOptions, plugin: String) -> BidirOptions {
+  let new_plugins = case options.plugins {
+    Some(existing) -> Some(list.append(existing, [plugin]))
+    None -> Some([plugin])
+  }
+  BidirOptions(..options, plugins: new_plugins)
+}
+
+/// Set maximum thinking tokens for extended thinking mode.
+///
+/// Extended thinking allows the model to use additional tokens for
+/// internal reasoning before producing a response.
+pub fn with_max_thinking_tokens(
+  options: BidirOptions,
+  tokens: Int,
+) -> BidirOptions {
+  BidirOptions(..options, max_thinking_tokens: Some(tokens))
+}
+
+/// Set the output format.
+///
+/// Controls the format of the response output (e.g., "text", "json", "stream-json").
+pub fn with_output_format(options: BidirOptions, format: String) -> BidirOptions {
+  BidirOptions(..options, output_format: Some(format))
+}
+
+// =============================================================================
+// AgentConfig Builder
+// =============================================================================
+
+/// Create a new agent configuration.
+pub fn agent_config(
+  name: String,
+  description: String,
+  prompt: String,
+) -> AgentConfig {
+  AgentConfig(name:, description:, prompt:)
+}
+
+// =============================================================================
+// SandboxConfig Builder
+// =============================================================================
+
+/// Create a new sandbox configuration.
+pub fn sandbox_config(sandbox_type: String) -> SandboxConfig {
+  SandboxConfig(sandbox_type:, config: dict.new())
+}
+
+/// Add a configuration option to a sandbox configuration.
+pub fn with_sandbox_config(
+  sandbox: SandboxConfig,
+  key: String,
+  value: dynamic.Dynamic,
+) -> SandboxConfig {
+  SandboxConfig(..sandbox, config: dict.insert(sandbox.config, key, value))
 }
 
 // =============================================================================
