@@ -1070,6 +1070,7 @@ pub fn with_bidir_runner_factory_query(
 
 /// Check if BidirOptions contain any bidirectional features.
 pub fn has_bidir_features_bidir(options: BidirOptions) -> Bool {
+  // Check hook callbacks
   option.is_some(options.on_pre_tool_use)
   || option.is_some(options.on_post_tool_use)
   || option.is_some(options.on_user_prompt_submit)
@@ -1077,7 +1078,20 @@ pub fn has_bidir_features_bidir(options: BidirOptions) -> Bool {
   || option.is_some(options.on_subagent_stop)
   || option.is_some(options.on_pre_compact)
   || option.is_some(options.on_can_use_tool)
+  // Check MCP and timeout configuration
   || !list.is_empty(options.mcp_servers)
   || option.is_some(options.timeout_ms)
+  || !dict.is_empty(options.hook_timeouts)
+  // Check file checkpointing and runner factory
   || options.file_checkpointing_enabled
+  || option.is_some(options.bidir_runner_factory)
+  // Check new Python SDK parity fields
+  || options.include_partial_messages
+  || option.is_some(options.fork_session)
+  || option.is_some(options.agents)
+  || option.is_some(options.setting_sources)
+  || option.is_some(options.sandbox)
+  || option.is_some(options.plugins)
+  || option.is_some(options.max_thinking_tokens)
+  || option.is_some(options.output_format)
 }
