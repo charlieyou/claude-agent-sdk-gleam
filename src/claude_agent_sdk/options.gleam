@@ -1114,10 +1114,13 @@ pub fn merge_cli_options(base: CliOptions, override: CliOptions) -> CliOptions {
     // List fields - append
     add_dirs: append_list_option(base.add_dirs, override.add_dirs),
     extra_args: append_list_option(base.extra_args, override.extra_args),
-    // List fields - replace (override wins if Some)
-    betas: merge_option(base.betas, override.betas),
-    allowed_tools: merge_option(base.allowed_tools, override.allowed_tools),
-    disallowed_tools: merge_option(
+    // List fields - replace (override wins if non-empty)
+    betas: merge_replace_list_option(base.betas, override.betas),
+    allowed_tools: merge_replace_list_option(
+      base.allowed_tools,
+      override.allowed_tools,
+    ),
+    disallowed_tools: merge_replace_list_option(
       base.disallowed_tools,
       override.disallowed_tools,
     ),
@@ -1185,9 +1188,9 @@ pub fn merge_bidir_options(
     hook_timeouts: dict.merge(base.hook_timeouts, override.hook_timeouts),
     // List fields - append
     plugins: append_list_option(base.plugins, override.plugins),
-    // List fields - replace (override wins if Some)
-    agents: merge_option(base.agents, override.agents),
-    setting_sources: merge_option(
+    // List fields - replace (override wins if non-empty)
+    agents: merge_replace_list_option(base.agents, override.agents),
+    setting_sources: merge_replace_list_option(
       base.setting_sources,
       override.setting_sources,
     ),
@@ -1225,6 +1228,18 @@ fn append_list_option(
     Some(b), None -> Some(b)
     None, Some(o) -> Some(o)
     None, None -> None
+  }
+}
+
+/// Helper: replace Option(List) only if override is non-empty.
+/// Per spec: "Replace; highest priority source wins entirely" but only when non-empty.
+fn merge_replace_list_option(
+  base: Option(List(a)),
+  override: Option(List(a)),
+) -> Option(List(a)) {
+  case override {
+    Some([_, ..]) -> override
+    _ -> base
   }
 }
 

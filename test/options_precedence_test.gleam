@@ -293,6 +293,24 @@ pub fn merge_betas_base_when_override_none_test() {
   }
 }
 
+/// Regression test: Some([]) should NOT replace base (spec says "non-empty wins")
+pub fn merge_betas_base_when_override_empty_list_test() {
+  let base =
+    options.cli_options()
+    |> options.with_betas(["beta1", "beta2"])
+  let override =
+    options.cli_options()
+    |> options.with_betas([])
+
+  let result = options.merge_cli_options(base, override)
+
+  // Empty list override should NOT replace base
+  case result.betas {
+    Some(betas) -> betas |> should.equal(["beta1", "beta2"])
+    None -> should.fail()
+  }
+}
+
 // =============================================================================
 // BidirOptions Merge Tests (agents - replace behavior)
 // =============================================================================
@@ -331,6 +349,31 @@ pub fn merge_bidir_agents_base_when_override_none_test() {
 
   let result = options.merge_bidir_options(base, override)
 
+  case result.agents {
+    Some(agents) -> {
+      case agents {
+        [agent] -> agent.name |> should.equal("agent1")
+        _ -> should.fail()
+      }
+    }
+    None -> should.fail()
+  }
+}
+
+/// Regression test: Some([]) should NOT replace base for agents
+pub fn merge_bidir_agents_base_when_override_empty_list_test() {
+  let agent1 = options.agent_config("agent1", "desc1", "prompt1")
+
+  let base =
+    options.bidir_options()
+    |> options.with_agents([agent1])
+  let override =
+    options.bidir_options()
+    |> options.with_agents([])
+
+  let result = options.merge_bidir_options(base, override)
+
+  // Empty list override should NOT replace base
   case result.agents {
     Some(agents) -> {
       case agents {
