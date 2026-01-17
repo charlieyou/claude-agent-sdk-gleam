@@ -1093,19 +1093,21 @@ fn build_hook_config_from_options(opts: BidirOptions) -> actor.HookConfig {
     )
     |> add_hook_handler("PreCompact", opts.on_pre_compact, wrap_pre_compact)
 
-  // Build permission handlers dict: tool_name -> wrapped handler
-  // For can_use_tool, we register a single handler for all tools
-  // The actor's PreToolUse hook mechanism handles tool-specific routing
-  let permission_handlers = case opts.on_can_use_tool {
-    Some(callback) -> {
-      // Register a catch-all permission handler
-      // The actor will call this for any tool permission check
-      dict.from_list([#("*", wrap_can_use_tool(callback))])
-    }
-    None -> dict.new()
-  }
+  // NOTE: on_can_use_tool is NOT wired here because the actor requires
+  // per-tool handler registration (exact tool_name lookup). Registering with
+  // "*" would silently fail-open (handler ignored, tools allowed).
+  //
+  // Users needing permission hooks must either:
+  // 1. Use HookConfig directly with per-tool handlers
+  // 2. Use PreToolUse hook to check permissions manually
+  //
+  // This is a deliberate design choice to avoid fail-open security issues.
+  // The on_can_use_tool field in BidirOptions is reserved for future use
+  // when wildcard support is added to the actor.
+  let _ = opts.on_can_use_tool
+  // Silence unused warning - field is intentionally not wired yet
 
-  actor.HookConfig(handlers: handlers, permission_handlers: permission_handlers)
+  actor.HookConfig(handlers: handlers, permission_handlers: dict.new())
 }
 
 /// Add a hook handler to the dict if the callback is present.
@@ -1189,18 +1191,6 @@ fn wrap_pre_compact(
     case decode_pre_compact_context(input) {
       Ok(ctx) -> encode_hook_execution_result(callback(ctx))
       Error(_) -> encode_hook_continue()
-    }
-  }
-}
-
-/// Wrap can_use_tool callback.
-fn wrap_can_use_tool(
-  callback: fn(hook.CanUseToolContext) -> hook.PermissionCheckResult,
-) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
-  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
-    case decode_can_use_tool_context(input) {
-      Ok(ctx) -> encode_permission_check_result(callback(ctx))
-      Error(_) -> encode_permission_deny("Failed to decode permission context")
     }
   }
 }
@@ -1309,37 +1299,6 @@ fn decode_pre_compact_context(
   }
 }
 
-fn decode_can_use_tool_context(
-  input: dynamic.Dynamic,
-) -> Result(hook.CanUseToolContext, Nil) {
-  let decoder = {
-    use tool_name <- decode.field("tool_name", decode.string)
-    use tool_input <- decode.field("tool_input", decode.dynamic)
-    use session_id <- decode.optional_field("session_id", "", decode.string)
-    use permission_suggestions <- decode.optional_field(
-      "permission_suggestions",
-      [],
-      decode.list(decode.string),
-    )
-    use blocked_path <- decode.optional_field(
-      "blocked_path",
-      None,
-      decode.optional(decode.string),
-    )
-    decode.success(hook.CanUseToolContext(
-      tool_name:,
-      tool_input:,
-      session_id:,
-      permission_suggestions:,
-      blocked_path:,
-    ))
-  }
-  case decode.run(input, decoder) {
-    Ok(ctx) -> Ok(ctx)
-    Error(_) -> Error(Nil)
-  }
-}
-
 // =============================================================================
 // Result Encoders
 // =============================================================================
@@ -1370,33 +1329,6 @@ fn encode_hook_execution_result(
 /// Encode a continue response for hooks.
 fn encode_hook_continue() -> dynamic.Dynamic {
   to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
-}
-
-/// Encode PermissionCheckResult to Dynamic for actor response.
-fn encode_permission_check_result(
-  result: hook.PermissionCheckResult,
-) -> dynamic.Dynamic {
-  case result {
-    hook.Allow ->
-      to_dynamic(dict.from_list([#("behavior", to_dynamic("allow"))]))
-    hook.Deny(reason) ->
-      to_dynamic(
-        dict.from_list([
-          #("behavior", to_dynamic("deny")),
-          #("message", to_dynamic(reason)),
-        ]),
-      )
-  }
-}
-
-/// Encode a deny response for permission failures.
-fn encode_permission_deny(reason: String) -> dynamic.Dynamic {
-  to_dynamic(
-    dict.from_list([
-      #("behavior", to_dynamic("deny")),
-      #("message", to_dynamic(reason)),
-    ]),
-  )
 }
 
 /// Start a bidirectional session with Claude CLI (legacy API).
