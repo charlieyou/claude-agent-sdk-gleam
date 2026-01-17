@@ -56,7 +56,8 @@ pub fn sdk_15_simple_structured_output_test_() {
 
       let cli_opts =
         options.cli_options()
-        |> options.with_max_turns(1)
+        // Structured output uses a tool call and needs >= 2 turns to complete.
+        |> options.with_max_turns(2)
         |> options.with_json_schema(schema)
 
       let sdk_opts = options.sdk_options()
@@ -125,13 +126,17 @@ pub fn sdk_15_simple_structured_output_test_() {
               }
             }
             None -> {
-              helpers.log_info(ctx, "no_structured_output_acceptable")
-              // structured_output may not be present in all CLI versions
+              helpers.log_error(
+                ctx,
+                "missing_structured_output",
+                "Result message missing structured_output for JSON schema",
+              )
               helpers.log_test_complete(
                 ctx,
-                True,
-                "No structured output (acceptable)",
+                False,
+                "Structured output missing for schema",
               )
+              should.fail()
             }
           }
         }
@@ -194,7 +199,8 @@ pub fn sdk_16_nested_structured_output_test_() {
 
       let cli_opts =
         options.cli_options()
-        |> options.with_max_turns(1)
+        // Structured output uses a tool call and needs >= 2 turns to complete.
+        |> options.with_max_turns(2)
         |> options.with_json_schema(schema)
 
       let sdk_opts = options.sdk_options()
@@ -268,12 +274,17 @@ pub fn sdk_16_nested_structured_output_test_() {
               }
             }
             None -> {
-              helpers.log_info(ctx, "no_structured_output_acceptable")
+              helpers.log_error(
+                ctx,
+                "missing_structured_output",
+                "Result message missing structured_output for JSON schema",
+              )
               helpers.log_test_complete(
                 ctx,
-                True,
-                "No structured output (acceptable)",
+                False,
+                "Structured output missing for schema",
               )
+              should.fail()
             }
           }
         }
@@ -322,7 +333,8 @@ pub fn sdk_17_enum_structured_output_test_() {
 
       let cli_opts =
         options.cli_options()
-        |> options.with_max_turns(1)
+        // Structured output uses a tool call and needs >= 2 turns to complete.
+        |> options.with_max_turns(2)
         |> options.with_json_schema(schema)
 
       let sdk_opts = options.sdk_options()
@@ -391,12 +403,17 @@ pub fn sdk_17_enum_structured_output_test_() {
               }
             }
             None -> {
-              helpers.log_info(ctx, "no_structured_output_acceptable")
+              helpers.log_error(
+                ctx,
+                "missing_structured_output",
+                "Result message missing structured_output for JSON schema",
+              )
               helpers.log_test_complete(
                 ctx,
-                True,
-                "No structured output (acceptable)",
+                False,
+                "Structured output missing for schema",
               )
+              should.fail()
             }
           }
         }
@@ -440,7 +457,8 @@ pub fn sdk_18_structured_output_with_tools_test_() {
 
       let cli_opts =
         options.cli_options()
-        |> options.with_max_turns(2)
+        // Read + structured output commonly needs 3 turns.
+        |> options.with_max_turns(3)
         |> options.with_permission_mode(options.BypassPermissions)
         |> options.with_json_schema(schema)
 
@@ -515,14 +533,17 @@ pub fn sdk_18_structured_output_with_tools_test_() {
               }
             }
             None -> {
-              helpers.log_info(ctx, "no_structured_output_acceptable")
-              // structured_output may not be present in all CLI versions
-              // or when tool use is involved
+              helpers.log_error(
+                ctx,
+                "missing_structured_output",
+                "Result message missing structured_output for JSON schema",
+              )
               helpers.log_test_complete(
                 ctx,
-                True,
-                "No structured output (acceptable)",
+                False,
+                "Structured output missing for schema",
               )
+              should.fail()
             }
           }
         }
