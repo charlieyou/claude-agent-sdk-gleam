@@ -664,13 +664,12 @@ pub fn session_without_hooks_works_normally_test() {
   bidir.shutdown(actor_subject)
   process.sleep(50)
 }
-// NOTE: Permission hook testing via on_can_use_tool requires per-tool handler
-// registration in the actor, which doesn't support wildcards. The actor uses
-// exact tool_name lookup in permission_handlers dict. To properly test this,
-// either:
-// 1. Modify the actor to support a "*" wildcard fallback
-// 2. Register handlers per-tool at session start time
+// NOTE: Permission hook testing via on_can_use_tool is not currently possible.
+// The build_hook_config_from_options function deliberately does NOT wire
+// opts.on_can_use_tool - it always sets permission_handlers to dict.new().
+// This is a deliberate design choice to avoid fail-open security issues
+// (see src/claude_agent_sdk.gleam build_hook_config_from_options).
 //
-// For now, the on_can_use_tool callback in BidirOptions is registered with "*"
-// as a catch-all, but the actor's dispatch_permission_callback doesn't find it.
-// This is a known limitation tracked for future enhancement.
+// To test permission hooks, users must either:
+// 1. Use HookConfig directly with per-tool handlers
+// 2. Use PreToolUse hook to check permissions manually
