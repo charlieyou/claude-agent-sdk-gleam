@@ -75,6 +75,42 @@ fn is_empty_bullet_point(line: String) -> Bool {
   trimmed == "-" || trimmed == "- "
 }
 
+/// Check if a line looks like a version header but has malformed format.
+/// Returns True for lines that:
+/// - Start with "##" (with or without space) followed by something version-like
+/// - But fail to parse as valid X.Y.Z semver
+fn is_malformed_version_header(line: String) -> Bool {
+  // Skip valid headers
+  case extract_version_from_line(line) {
+    Ok(_) -> False
+    Error(_) -> {
+      // Check if it looks like it's trying to be a version header
+      let trimmed = string.trim(line)
+      case string.starts_with(trimmed, "##") {
+        False -> False
+        True -> {
+          // Get text after "##" (with or without space)
+          let after_hashes =
+            trimmed
+            |> string.drop_start(2)
+            |> string.trim_start()
+          // Check if it looks version-like (starts with digit)
+          case string.to_graphemes(after_hashes) {
+            [] -> False
+            [first, ..] -> {
+              // If first char is a digit, this looks like a version header
+              case int.parse(first) {
+                Ok(_) -> True
+                Error(_) -> False
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 // ============================================================================
 // Tests
 // ============================================================================
@@ -186,4 +222,18 @@ pub fn changelog_no_empty_bullet_points_test() {
   lines
   |> list.any(is_empty_bullet_point)
   |> should.be_false()
+}
+
+pub fn changelog_no_malformed_version_headers_test() {
+  let assert Ok(content) = simplifile.read(changelog_path)
+  let lines = string.split(content, "\n")
+
+  // Find any malformed version headers (e.g., "## 0.1", "##0.1.0", "## 1.0.0-rc1")
+  let malformed =
+    lines
+    |> list.filter(is_malformed_version_header)
+
+  // Should have no malformed headers
+  malformed
+  |> should.equal([])
 }
