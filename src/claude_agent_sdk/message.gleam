@@ -142,6 +142,10 @@ pub type AssistantMessage {
     parent_tool_use_id: Option(String),
     /// The message content with text and/or tool use blocks.
     message: Option(AssistantMessageContent),
+    /// Whether this is a partial (streaming) message.
+    /// When `True`, the message content may be incomplete.
+    /// Defaults to `False` when missing from JSON.
+    is_partial: Bool,
   )
 }
 

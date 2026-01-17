@@ -439,6 +439,7 @@ fn make_minimal_assistant() -> AssistantMessage {
     session_id: None,
     parent_tool_use_id: None,
     message: None,
+    is_partial: False,
   )
 }
 

@@ -285,6 +285,7 @@ pub fn assistant_message_importable_test() {
       session_id: Some("session-123"),
       parent_tool_use_id: None,
       message: None,
+      is_partial: False,
     )
 
   msg.uuid

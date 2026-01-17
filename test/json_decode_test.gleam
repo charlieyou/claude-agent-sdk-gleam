@@ -58,6 +58,44 @@ pub fn decode_assistant_unknown_block_test() {
   Nil
 }
 
+pub fn decode_assistant_is_partial_true_test() {
+  let json = load_fixture("assistant_partial_true.json")
+  let result = decoder.decode_message(json)
+  let assert Ok(message.Assistant(msg)) = result
+  msg.is_partial
+  |> should.be_true
+  Nil
+}
+
+pub fn decode_assistant_is_partial_false_test() {
+  let json = load_fixture("assistant_partial_false.json")
+  let result = decoder.decode_message(json)
+  let assert Ok(message.Assistant(msg)) = result
+  msg.is_partial
+  |> should.be_false
+  Nil
+}
+
+pub fn decode_assistant_is_partial_missing_test() {
+  // Existing fixture has no is_partial field - should default to False
+  let json = load_fixture("assistant_message.json")
+  let result = decoder.decode_message(json)
+  let assert Ok(message.Assistant(msg)) = result
+  msg.is_partial
+  |> should.be_false
+  Nil
+}
+
+pub fn decode_assistant_partial_empty_content_test() {
+  // Partial message with empty content is valid
+  let json = load_fixture("assistant_partial_empty.json")
+  let result = decoder.decode_message(json)
+  let assert Ok(message.Assistant(msg)) = result
+  msg.is_partial
+  |> should.be_true
+  Nil
+}
+
 // =============================================================================
 // User Message Tests
 // =============================================================================

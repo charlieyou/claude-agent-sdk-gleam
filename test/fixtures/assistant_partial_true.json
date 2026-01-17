@@ -1,0 +1,20 @@
+{
+  "type": "assistant",
+  "is_partial": true,
+  "message": {
+    "model": "claude-opus-4-5-20251101",
+    "id": "msg_partial",
+    "type": "message",
+    "role": "assistant",
+    "content": [
+      {
+        "type": "text",
+        "text": "In progress..."
+      }
+    ],
+    "stop_reason": null,
+    "usage": null
+  },
+  "session_id": "session-123",
+  "uuid": "uuid-partial"
+}

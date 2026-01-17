@@ -222,11 +222,13 @@ pub fn decode_assistant_message(raw: Dynamic) -> Result(Message, DecodeError) {
       None,
       decode.optional(assistant_message_content_decoder()),
     )
+    use is_partial <- decode.optional_field("is_partial", False, decode.bool)
     decode.success(AssistantMessage(
       uuid:,
       session_id:,
       parent_tool_use_id:,
       message:,
+      is_partial:,
     ))
   }
   case decode_with_error_wrap(raw, decoder) {
