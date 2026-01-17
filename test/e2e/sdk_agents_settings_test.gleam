@@ -785,6 +785,7 @@ pub fn sdk_ast_09_filesystem_agent_loading_test_() {
                   ])
                 }
                 None -> {
+                  cleanup_agents_file(cleanup_file)
                   helpers.log_error(
                     ctx,
                     "no_agents_value",
@@ -805,6 +806,7 @@ pub fn sdk_ast_09_filesystem_agent_loading_test_() {
                   helpers.log_info(ctx, "temp_file_content_verified")
                 }
                 Error(_) -> {
+                  cleanup_agents_file(cleanup_file)
                   helpers.log_error(
                     ctx,
                     "temp_file_read_failed",
