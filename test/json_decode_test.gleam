@@ -195,25 +195,41 @@ pub fn decode_thinking_block_without_signature_test() {
 }
 
 pub fn decode_thinking_block_missing_thinking_field_test() {
-  // ThinkingBlock missing required "thinking" field must error
+  // ThinkingBlock missing required "thinking" field falls back to UnknownBlock
+  // per forward compatibility requirements
   let json = "{\"type\": \"thinking\", \"signature\": \"sig\"}"
   let dynamic = parse_json_to_dynamic(json)
   case decoder.decode_content_block(dynamic) {
-    Error(decoder.JsonDecodeError(msg)) -> {
-      let has_thinkingblock = string.contains(msg, "ThinkingBlock")
-      let has_missing = string.contains(msg, "missing")
-      case has_thinkingblock && has_missing {
-        True -> Nil
-        False ->
-          panic as {
-            "Expected error mentioning ThinkingBlock missing field, got: "
-            <> msg
+    Ok(content.UnknownBlock(_)) -> Nil
+    Ok(_) ->
+      panic as "Expected UnknownBlock fallback for malformed thinking block"
+    Error(_) -> panic as "Expected UnknownBlock fallback, got error"
+  }
+}
+
+pub fn decode_thinking_block_via_message_path_test() {
+  // Verify thinking blocks are decoded correctly via decode_message path
+  // This tests the content_block_decoder used by assistant message decoding
+  let json =
+    "{\"type\": \"assistant\", \"message\": {\"content\": [{\"type\": \"thinking\", \"thinking\": \"Deep thought here\", \"signature\": \"sig123\"}]}}"
+  case decoder.decode_message(json) {
+    Ok(message.Assistant(msg)) -> {
+      case msg.message {
+        Some(inner) -> {
+          case inner.content {
+            Some([content.ThinkingBlock(thinking:, signature:)]) -> {
+              should.equal(thinking, "Deep thought here")
+              should.equal(signature, Some("sig123"))
+            }
+            Some(_) -> panic as "Expected single ThinkingBlock in content"
+            None -> panic as "Expected content in assistant message"
           }
+        }
+        None -> panic as "Expected inner message in assistant message"
       }
     }
-    Ok(_) -> panic as "Expected error for thinking block missing thinking field"
-    Error(_) ->
-      panic as "Expected JsonDecodeError for missing field, got different error type"
+    Ok(_) -> panic as "Expected Assistant message type"
+    Error(e) -> panic as { "Decode failed: " <> string.inspect(e) }
   }
 }
 

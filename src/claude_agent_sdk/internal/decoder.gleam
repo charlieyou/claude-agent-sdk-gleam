@@ -506,6 +506,7 @@ fn content_block_decoder() -> decode.Decoder(ContentBlock) {
       case block_type {
         "text" -> text_block_inner_decoder(type_result)
         "tool_use" -> tool_use_block_inner_decoder(type_result)
+        "thinking" -> thinking_block_inner_decoder(type_result)
         _ -> decode.success(UnknownBlock(type_result))
       }
     }
@@ -546,6 +547,25 @@ fn tool_use_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
         ToolUseBlock(id: "", name: "", input: dynamic.nil()),
         "ToolUseBlock missing required field: " <> format_decode_errors(errors),
       )
+  }
+}
+
+/// Decoder for ThinkingBlock (inner)
+/// Returns UnknownBlock for malformed thinking blocks (forward compatibility).
+fn thinking_block_inner_decoder(raw: Dynamic) -> decode.Decoder(ContentBlock) {
+  let decoder = {
+    use thinking <- decode.field("thinking", decode.string)
+    use signature <- decode.optional_field(
+      "signature",
+      None,
+      decode.optional(decode.string),
+    )
+    decode.success(ThinkingBlock(thinking:, signature:))
+  }
+  case decode.run(raw, decoder) {
+    Ok(block) -> decode.success(block)
+    // Malformed thinking blocks fall back to UnknownBlock for forward compatibility
+    Error(_) -> decode.success(UnknownBlock(raw))
   }
 }
 
@@ -657,7 +677,7 @@ fn decode_tool_use_block_inner(
 }
 
 /// Decode a ThinkingBlock from Dynamic (internal helper).
-/// Returns Error if required "thinking" field is missing.
+/// Returns UnknownBlock for malformed thinking blocks (forward compatibility).
 fn decode_thinking_block_inner(
   raw: Dynamic,
 ) -> Result(ContentBlock, DecodeError) {
@@ -672,10 +692,37 @@ fn decode_thinking_block_inner(
   }
   case decode.run(raw, decoder) {
     Ok(#(thinking, signature)) -> Ok(ThinkingBlock(thinking:, signature:))
-    Error(errors) ->
-      Error(JsonDecodeError(
-        "ThinkingBlock missing required field: " <> format_decode_errors(errors),
-      ))
+    // Malformed thinking blocks fall back to UnknownBlock for forward compatibility
+    Error(_) -> Ok(UnknownBlock(raw))
+  }
+}
+
+/// Decode a ThinkingBlock, returning a Result for explicit error handling.
+/// Returns Error if type is not "thinking" or required "thinking" field is missing.
+pub fn decode_thinking_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) {
+  let type_decoder = {
+    use block_type <- decode.field("type", decode.string)
+    decode.success(block_type)
+  }
+  case decode_with_error_wrap(raw, type_decoder) {
+    Ok("thinking") -> {
+      let thinking_decoder = {
+        use thinking <- decode.field("thinking", decode.string)
+        use signature <- decode.optional_field(
+          "signature",
+          None,
+          decode.optional(decode.string),
+        )
+        decode.success(#(thinking, signature))
+      }
+      case decode_with_error_wrap(raw, thinking_decoder) {
+        Ok(#(thinking, signature)) -> Ok(ThinkingBlock(thinking:, signature:))
+        Error(e) -> Error(e)
+      }
+    }
+    Ok(other) ->
+      Error(JsonDecodeError("Expected type 'thinking', got '" <> other <> "'"))
+    Error(e) -> Error(e)
   }
 }
 
