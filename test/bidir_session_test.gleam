@@ -455,3 +455,69 @@ pub fn public_messages_api_receives_cli_message_test() {
   bidir.shutdown(actor_subject)
   process.sleep(50)
 }
+
+// =============================================================================
+// send_user_message Integration Tests
+// =============================================================================
+
+/// Integration test: send_user_message via public API.
+/// Verifies the full path: start_session_new() → Session → send_user_message()
+pub fn send_user_message_via_public_api_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure options with mock runner factory
+  let cli_opts = options.cli_options()
+  let sdk_opts = options.sdk_options()
+  let bidir_opts =
+    options.bidir_options()
+    |> options.with_bidir_runner_factory(fn() { runner })
+
+  // Start session through public API
+  let assert Ok(sess) =
+    claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
+
+  // Small delay to ensure actor is ready
+  process.sleep(10)
+
+  // Send a user message through the public API
+  let result = claude_agent_sdk.send_user_message(sess, "Hello from test")
+
+  // Should succeed (fire-and-forget, but returns Ok on valid session)
+  should.be_ok(result)
+
+  // Clean up
+  let actor_subject = session.get_actor(sess)
+  bidir.shutdown(actor_subject)
+  process.sleep(50)
+}
+
+/// Test that send_user_message returns error for stopped session.
+pub fn send_user_message_on_stopped_session_returns_error_test() {
+  // Create a mock runner factory
+  let mock = mock_bidir_runner.new()
+  let runner = mock.runner
+
+  // Configure options with mock runner factory
+  let cli_opts = options.cli_options()
+  let sdk_opts = options.sdk_options()
+  let bidir_opts =
+    options.bidir_options()
+    |> options.with_bidir_runner_factory(fn() { runner })
+
+  // Start session through public API
+  let assert Ok(sess) =
+    claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
+
+  // Stop the session
+  let actor_subject = session.get_actor(sess)
+  bidir.shutdown(actor_subject)
+  process.sleep(50)
+
+  // Try to send a message after shutdown
+  let result = claude_agent_sdk.send_user_message(sess, "Should fail")
+
+  // Should return error (session closed)
+  should.be_error(result)
+}

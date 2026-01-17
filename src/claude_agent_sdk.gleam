@@ -1181,6 +1181,46 @@ pub fn stop(sess: Session) -> Result(Nil, StopError) {
   }
 }
 
+/// Send a user message to an active session.
+///
+/// This is the primary way to send follow-up prompts in bidirectional mode.
+/// Messages are queued if initialization is still in progress.
+///
+/// ## Parameters
+///
+/// - `sess`: The session handle from `start_session_new()`
+/// - `prompt`: The user message to send
+///
+/// ## Returns
+///
+/// - `Ok(Nil)`: Message was sent successfully
+/// - `Error(ControlSessionClosed)`: Session is stopped or failed
+pub fn send_user_message(
+  sess: Session,
+  prompt: String,
+) -> Result(Nil, ControlError) {
+  let actor_subject = session.get_actor(sess)
+  // Check if actor process is alive before checking lifecycle
+  case process.subject_owner(actor_subject) {
+    Error(Nil) -> Error(error.ControlSessionClosed)
+    Ok(pid) ->
+      case process.is_alive(pid) {
+        False -> Error(error.ControlSessionClosed)
+        True ->
+          // Check lifecycle state before sending
+          case bidir.get_lifecycle(actor_subject, 1000) {
+            actor.Stopped -> Error(error.ControlSessionClosed)
+            actor.Failed(_) -> Error(error.ControlSessionClosed)
+            _ -> {
+              // Session is in valid state, send the message
+              bidir.send_user_message(actor_subject, prompt)
+              Ok(Nil)
+            }
+          }
+      }
+  }
+}
+
 // =============================================================================
 // Session Subscriptions (Bidirectional Mode)
 // =============================================================================
