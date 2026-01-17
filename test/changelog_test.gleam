@@ -94,13 +94,14 @@ fn is_malformed_version_header(line: String) -> Bool {
             trimmed
             |> string.drop_start(2)
             |> string.trim_start()
-          // Check if it looks version-like (starts with digit)
+          // Check if it looks version-like (starts with digit AND contains a dot)
+          // This avoids false positives like "## 2026 roadmap" or "## 2024 highlights"
           case string.to_graphemes(after_hashes) {
             [] -> False
             [first, ..] -> {
-              // If first char is a digit, this looks like a version header
+              // If first char is a digit AND there's a dot, this looks like a version header
               case int.parse(first) {
-                Ok(_) -> True
+                Ok(_) -> string.contains(after_hashes, ".")
                 Error(_) -> False
               }
             }
