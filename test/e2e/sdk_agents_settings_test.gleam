@@ -772,20 +772,47 @@ pub fn sdk_ast_09_filesystem_agent_loading_test_() {
           let ctx = helpers.test_step(ctx, "verify_temp_file")
           case cleanup_file {
             Some(path) -> {
-              // Verify value uses @path syntax
+              // Collect all validation results before cleanup to ensure cleanup
+              // always runs, even if assertions fail
               let args_value = find_value_after_flag(args, "--agents")
-              case args_value {
-                Some(value) -> {
-                  // Value should start with @ for file-based agents
-                  string.starts_with(value, "@") |> should.be_true
-                  // Path in value should match cleanup_file
-                  string.contains(value, path) |> should.be_true
-                  helpers.log_info_with(ctx, "file_path_verified", [
-                    #("path", json.string(path)),
-                  ])
-                }
-                None -> {
-                  cleanup_agents_file(cleanup_file)
+              let #(value_ok, starts_with_at, contains_path) = case args_value {
+                Some(value) -> #(
+                  True,
+                  string.starts_with(value, "@"),
+                  string.contains(value, path),
+                )
+                None -> #(False, False, False)
+              }
+
+              let #(
+                file_read_ok,
+                has_agent1,
+                has_agent2,
+                has_agent3,
+                has_agent4,
+              ) = case simplifile.read(path) {
+                Ok(content) -> #(
+                  True,
+                  string.contains(content, "agent1"),
+                  string.contains(content, "agent2"),
+                  string.contains(content, "agent3"),
+                  string.contains(content, "agent4"),
+                )
+                Error(_) -> #(False, False, False, False, False)
+              }
+
+              // Clean up temp file BEFORE any assertions that can abort
+              cleanup_agents_file(cleanup_file)
+
+              // Verify cleanup worked
+              let cleanup_ok = case simplifile.is_file(path) {
+                Ok(True) -> False
+                _ -> True
+              }
+
+              // Now run assertions - cleanup has already happened
+              case value_ok {
+                False -> {
                   helpers.log_error(
                     ctx,
                     "no_agents_value",
@@ -793,20 +820,19 @@ pub fn sdk_ast_09_filesystem_agent_loading_test_() {
                   )
                   should.fail()
                 }
+                True -> {
+                  // Value should start with @ for file-based agents
+                  starts_with_at |> should.be_true
+                  // Path in value should match cleanup_file
+                  contains_path |> should.be_true
+                  helpers.log_info_with(ctx, "file_path_verified", [
+                    #("path", json.string(path)),
+                  ])
+                }
               }
 
-              // Verify temp file exists and contains agent data
-              case simplifile.read(path) {
-                Ok(content) -> {
-                  // Verify file contains all 4 agents
-                  string.contains(content, "agent1") |> should.be_true
-                  string.contains(content, "agent2") |> should.be_true
-                  string.contains(content, "agent3") |> should.be_true
-                  string.contains(content, "agent4") |> should.be_true
-                  helpers.log_info(ctx, "temp_file_content_verified")
-                }
-                Error(_) -> {
-                  cleanup_agents_file(cleanup_file)
+              case file_read_ok {
+                False -> {
                   helpers.log_error(
                     ctx,
                     "temp_file_read_failed",
@@ -814,14 +840,18 @@ pub fn sdk_ast_09_filesystem_agent_loading_test_() {
                   )
                   should.fail()
                 }
+                True -> {
+                  // Verify file contains all 4 agents
+                  has_agent1 |> should.be_true
+                  has_agent2 |> should.be_true
+                  has_agent3 |> should.be_true
+                  has_agent4 |> should.be_true
+                  helpers.log_info(ctx, "temp_file_content_verified")
+                }
               }
 
-              // Clean up temp file
-              cleanup_agents_file(cleanup_file)
-
-              // Verify cleanup worked
-              case simplifile.is_file(path) {
-                Ok(True) -> {
+              case cleanup_ok {
+                False -> {
                   helpers.log_error(
                     ctx,
                     "cleanup_failed",
@@ -829,7 +859,7 @@ pub fn sdk_ast_09_filesystem_agent_loading_test_() {
                   )
                   should.fail()
                 }
-                _ -> {
+                True -> {
                   helpers.log_info(ctx, "cleanup_verified")
                 }
               }
