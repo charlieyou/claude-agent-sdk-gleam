@@ -588,3 +588,35 @@ pub fn bidir_agents_cleanup_idempotent_test() {
   // If we get here without exception, the test passes
   True |> should.be_true
 }
+
+/// Temp file paths are unique (cryptographically random)
+pub fn bidir_agents_unique_paths_test() {
+  let agents = [
+    test_agent("alpha"),
+    test_agent("beta"),
+    test_agent("gamma"),
+    test_agent("delta"),
+  ]
+  let opts = BidirOptions(..bidir_options(), agents: Some(agents))
+
+  // Generate two temp files
+  let result1 = build_bidir_args_result(opts)
+  let result2 = build_bidir_args_result(opts)
+
+  result1 |> should.be_ok
+  result2 |> should.be_ok
+
+  let r1 = result1 |> result.unwrap(cli.BidirArgsResult([], None))
+  let r2 = result2 |> result.unwrap(cli.BidirArgsResult([], None))
+
+  // Paths should be different
+  case r1.cleanup_file, r2.cleanup_file {
+    Some(path1), Some(path2) -> {
+      path1 |> should.not_equal(path2)
+      // Clean up both
+      cli.cleanup_agents_file(path1)
+      cli.cleanup_agents_file(path2)
+    }
+    _, _ -> should.fail()
+  }
+}

@@ -1,5 +1,5 @@
 -module(claude_agent_sdk_ffi).
--export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, port_connect/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, otp_version/0, check_stderr_support/0, exact_equals/2, port_os_pid/1, os_kill/2]).
+-export([open_port/3, open_port_safe/3, open_port_bidir/2, receive_port_msg_blocking/1, receive_port_msg_timeout/2, close_port/1, port_write/2, port_connect/2, find_cli_path/1, rescue/1, monotonic_time_ms/0, unique_integer/0, crypto_random_hex/1, otp_version/0, check_stderr_support/0, exact_equals/2, port_os_pid/1, os_kill/2]).
 
 %% Opens a port to spawn an executable with given args and working directory.
 %% Returns the port reference.
@@ -231,6 +231,13 @@ monotonic_time_ms() ->
 %% Returns a unique positive integer for run IDs.
 unique_integer() ->
     erlang:unique_integer([positive]).
+
+%% Generate cryptographically secure random hex string of given byte length.
+%% Uses crypto:strong_rand_bytes which is suitable for security-sensitive applications.
+%% Returns a hex-encoded binary string (2 hex chars per byte).
+crypto_random_hex(NumBytes) ->
+    Bytes = crypto:strong_rand_bytes(NumBytes),
+    list_to_binary(lists:flatten([io_lib:format("~2.16.0b", [B]) || <<B>> <= Bytes])).
 
 %% Returns OTP major version as {<<"ok">>, Version} or {<<"error">>, Reason}.
 %% Uses erlang:system_info(otp_release) which returns a string like "27".

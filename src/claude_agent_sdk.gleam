@@ -29,7 +29,7 @@
 
 import gleam/dynamic
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 import simplifile
 
