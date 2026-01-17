@@ -75,76 +75,63 @@ pub fn sdk_15_simple_structured_output_test_() {
           should.fail()
         }
         Ok(stream) -> {
-          case
-            helpers.query_and_consume_with_timeout(
-              "Return a JSON object with a name field set to 'Alice'",
-              claude_agent_sdk.default_options()
-                |> claude_agent_sdk.with_max_turns(1),
-              30_000,
-            )
-          {
-            // Use consume with proper options instead
-            _ -> {
-              let result = helpers.consume_stream(stream)
+          let result = helpers.consume_stream(stream)
 
-              let ctx = helpers.test_step(ctx, "find_result_message")
-              let result_msg =
-                find_result_with_structured_output(result.messages)
+          let ctx = helpers.test_step(ctx, "find_result_message")
+          let result_msg = find_result_with_structured_output(result.messages)
 
-              case result_msg {
-                Some(output) -> {
-                  let ctx = helpers.test_step(ctx, "validate_schema_adherence")
-                  // Validate the output is a dynamic value (parsed JSON)
-                  // The key assertion: structured_output is present
-                  helpers.log_info_with(ctx, "structured_output_present", [
-                    #("has_output", json.bool(True)),
+          case result_msg {
+            Some(output) -> {
+              let ctx = helpers.test_step(ctx, "validate_schema_adherence")
+              // Validate the output is a dynamic value (parsed JSON)
+              // The key assertion: structured_output is present
+              helpers.log_info_with(ctx, "structured_output_present", [
+                #("has_output", json.bool(True)),
+              ])
+
+              // Try to decode as object with name field
+              let name_decoder = {
+                use name <- decode.field("name", decode.string)
+                decode.success(name)
+              }
+
+              case decode.run(output, name_decoder) {
+                Ok(name) -> {
+                  // Verify name is non-empty string
+                  { name != "" }
+                  |> should.be_true
+                  helpers.log_info_with(ctx, "name_field_valid", [
+                    #("name", json.string(name)),
                   ])
-
-                  // Try to decode as object with name field
-                  let name_decoder = {
-                    use name <- decode.field("name", decode.string)
-                    decode.success(name)
-                  }
-
-                  case decode.run(output, name_decoder) {
-                    Ok(name) -> {
-                      // Verify name is non-empty string
-                      { name != "" }
-                      |> should.be_true
-                      helpers.log_info_with(ctx, "name_field_valid", [
-                        #("name", json.string(name)),
-                      ])
-                      helpers.log_test_complete(
-                        ctx,
-                        True,
-                        "Simple structured output validated",
-                      )
-                    }
-                    Error(_) -> {
-                      helpers.log_error(
-                        ctx,
-                        "decode_failed",
-                        "Could not decode name field",
-                      )
-                      helpers.log_test_complete(
-                        ctx,
-                        False,
-                        "Schema validation failed",
-                      )
-                      should.fail()
-                    }
-                  }
-                }
-                None -> {
-                  helpers.log_info(ctx, "no_structured_output_acceptable")
-                  // structured_output may not be present in all CLI versions
                   helpers.log_test_complete(
                     ctx,
                     True,
-                    "No structured output (acceptable)",
+                    "Simple structured output validated",
                   )
                 }
+                Error(_) -> {
+                  helpers.log_error(
+                    ctx,
+                    "decode_failed",
+                    "Could not decode name field",
+                  )
+                  helpers.log_test_complete(
+                    ctx,
+                    False,
+                    "Schema validation failed",
+                  )
+                  should.fail()
+                }
               }
+            }
+            None -> {
+              helpers.log_info(ctx, "no_structured_output_acceptable")
+              // structured_output may not be present in all CLI versions
+              helpers.log_test_complete(
+                ctx,
+                True,
+                "No structured output (acceptable)",
+              )
             }
           }
         }
