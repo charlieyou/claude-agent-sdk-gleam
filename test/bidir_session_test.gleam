@@ -460,8 +460,10 @@ pub fn public_messages_api_receives_cli_message_test() {
 // send_user_message Integration Tests
 // =============================================================================
 
+import gleam/string
+
 /// Integration test: send_user_message via public API.
-/// Verifies the full path: start_session_new() → Session → send_user_message()
+/// Verifies the full path: start_session_new() → Session → send_user_message() → actor write
 pub fn send_user_message_via_public_api_test() {
   // Create a mock runner factory
   let mock = mock_bidir_runner.new()
@@ -478,17 +480,29 @@ pub fn send_user_message_via_public_api_test() {
   let assert Ok(sess) =
     claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts)
 
-  // Small delay to ensure actor is ready
-  process.sleep(10)
+  // Wait for init request to be written
+  let assert Ok(_init_msg) = process.receive(mock.writes, 500)
+
+  // Inject init success to transition to Running state
+  let actor_subject = session.get_actor(sess)
+  let init_success =
+    "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{\"supported_commands\":[\"initialize\"],\"hooks_supported\":true,\"permissions_supported\":true,\"mcp_sdk_servers_supported\":true}}}}"
+  bidir.inject_message(actor_subject, init_success)
+  process.sleep(50)
 
   // Send a user message through the public API
   let result = claude_agent_sdk.send_user_message(sess, "Hello from test")
 
-  // Should succeed (fire-and-forget, but returns Ok on valid session)
+  // Should succeed
   should.be_ok(result)
 
+  // Verify message was actually written to the runner (not just returned Ok)
+  let assert Ok(written_msg) = process.receive(mock.writes, 500)
+  // User message format: {"type":"user","message":{"role":"user","content":"..."}}
+  should.be_true(string.contains(written_msg, "\"type\":\"user\""))
+  should.be_true(string.contains(written_msg, "Hello from test"))
+
   // Clean up
-  let actor_subject = session.get_actor(sess)
   bidir.shutdown(actor_subject)
   process.sleep(50)
 }

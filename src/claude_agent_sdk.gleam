@@ -1210,7 +1210,12 @@ pub fn stop(sess: Session) -> Result(Nil, StopError) {
 /// Send a user message to an active session.
 ///
 /// This is the primary way to send follow-up prompts in bidirectional mode.
-/// Messages are queued if initialization is still in progress.
+/// Messages are queued by the actor if initialization is still in progress.
+///
+/// Note: This is a non-blocking, best-effort send. If the session closes
+/// between the alive check and the send, the message is silently dropped
+/// (standard Erlang actor semantics). For guaranteed delivery confirmation,
+/// wait for assistant response via the messages() stream.
 ///
 /// ## Parameters
 ///
@@ -1219,30 +1224,26 @@ pub fn stop(sess: Session) -> Result(Nil, StopError) {
 ///
 /// ## Returns
 ///
-/// - `Ok(Nil)`: Message was sent successfully
-/// - `Error(ControlSessionClosed)`: Session is stopped or failed
+/// - `Ok(Nil)`: Message was accepted for delivery (actor was alive)
+/// - `Error(ControlSessionClosed)`: Session actor is not running
 pub fn send_user_message(
   sess: Session,
   prompt: String,
 ) -> Result(Nil, ControlError) {
   let actor_subject = session.get_actor(sess)
-  // Check if actor process is alive before checking lifecycle
+  // Non-blocking check: is actor process alive?
+  // We don't use get_lifecycle (synchronous call) to avoid blocking.
+  // The actor internally handles queuing based on its lifecycle state.
   case process.subject_owner(actor_subject) {
     Error(Nil) -> Error(error.ControlSessionClosed)
     Ok(pid) ->
       case process.is_alive(pid) {
         False -> Error(error.ControlSessionClosed)
-        True ->
-          // Check lifecycle state before sending
-          case bidir.get_lifecycle(actor_subject, 1000) {
-            actor.Stopped -> Error(error.ControlSessionClosed)
-            actor.Failed(_) -> Error(error.ControlSessionClosed)
-            _ -> {
-              // Session is in valid state, send the message
-              bidir.send_user_message(actor_subject, prompt)
-              Ok(Nil)
-            }
-          }
+        True -> {
+          // Actor is alive; send message (fire-and-forget, actor queues/handles)
+          bidir.send_user_message(actor_subject, prompt)
+          Ok(Nil)
+        }
       }
   }
 }
