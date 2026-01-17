@@ -8,8 +8,7 @@ import claude_agent_sdk/internal/port_io.{
 }
 import claude_agent_sdk/options.{
   type AgentConfig, type BidirOptions, type CliOptions, type PermissionMode,
-  type QueryOptions, type SandboxConfig, AcceptEdits, AgentConfig,
-  BypassPermissions, Plan, SandboxConfig,
+  type QueryOptions, type SandboxConfig, AcceptEdits, BypassPermissions, Plan,
 }
 import gleam/bit_array
 import gleam/dict
@@ -745,7 +744,7 @@ fn remove_flag_helper(
 ) -> List(String) {
   case args {
     [] -> list.reverse(acc)
-    [arg, value, ..rest] if arg == flag ->
+    [arg, _value, ..rest] if arg == flag ->
       // Skip this flag and its value
       remove_flag_helper(rest, flag, acc)
     [arg, ..rest] -> remove_flag_helper(rest, flag, [arg, ..acc])

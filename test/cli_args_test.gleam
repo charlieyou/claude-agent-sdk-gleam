@@ -1,9 +1,9 @@
 /// Tests for CLI argument building from QueryOptions.
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/options.{
-  type AgentConfig, type BidirOptions, type CliOptions, type SandboxConfig,
-  AcceptEdits, AgentConfig, BidirOptions, BypassPermissions, CliOptions, Plan,
-  SandboxConfig, bidir_options, cli_options, default_options, sandbox_config,
+  type AgentConfig, type BidirOptions, type CliOptions, AcceptEdits, AgentConfig,
+  BidirOptions, BypassPermissions, CliOptions, Plan, bidir_options, cli_options,
+  default_options, sandbox_config,
   with_allowed_tools_query as with_allowed_tools,
   with_append_system_prompt_query as with_append_system_prompt,
   with_continue_query as with_continue,
