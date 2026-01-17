@@ -646,9 +646,9 @@ fn sandbox_config_to_json(sandbox: SandboxConfig) -> Json {
   json.object(list.append(base_pairs, config_pairs))
 }
 
-/// Merge sandbox config into CLI args, combining with ALL existing --settings.
-/// This extracts any --settings JSON from args (including from extra_args),
-/// merges them with sandbox, removes all --settings flags, and adds one merged --settings.
+/// Merge sandbox config into CLI args, combining with object-type --settings.
+/// Only merges settings that parse as JSON objects; non-object settings are preserved.
+/// This prevents data loss when users pass non-object JSON like [] or "x".
 fn merge_sandbox_into_args(
   args: List(String),
   sandbox: SandboxConfig,
@@ -659,25 +659,33 @@ fn merge_sandbox_into_args(
   // Build the sandbox JSON
   let sandbox_json = sandbox_config_to_json(sandbox)
 
-  // Parse and merge all existing settings into a single list of key-value pairs
-  let merged_pairs =
-    list.fold(existing_settings_jsons, [], fn(acc, json_str) {
-      // Parse JSON and extract key-value pairs
+  // Separate object settings (can merge) from non-object settings (preserve as-is)
+  let #(object_pairs, non_object_jsons) =
+    list.fold(existing_settings_jsons, #([], []), fn(acc, json_str) {
+      let #(pairs_acc, non_obj_acc) = acc
       case parse_json_object_keys(json_str) {
-        Ok(pairs) -> list.append(acc, pairs)
-        Error(_) -> acc
+        Ok(pairs) -> #(list.append(pairs_acc, pairs), non_obj_acc)
+        Error(_) -> #(pairs_acc, [json_str, ..non_obj_acc])
       }
     })
 
-  // Add sandbox to the merged settings
-  let final_pairs = list.append(merged_pairs, [#("sandbox", sandbox_json)])
+  // Add sandbox to the merged object settings
+  let final_pairs = list.append(object_pairs, [#("sandbox", sandbox_json)])
   let merged_json = json.object(final_pairs) |> json.to_string
 
   // Remove all existing --settings flags and their values from args
   let args_without_settings = remove_flag_with_value(args, "--settings")
 
-  // Add the merged --settings flag
-  list.append(args_without_settings, ["--settings", merged_json])
+  // Add back non-object settings first (preserve order: non-objects, then merged object)
+  let args_with_preserved =
+    list.fold(
+      list.reverse(non_object_jsons),
+      args_without_settings,
+      fn(acc, json_str) { list.append(acc, ["--settings", json_str]) },
+    )
+
+  // Add the merged --settings flag with sandbox
+  list.append(args_with_preserved, ["--settings", merged_json])
 }
 
 /// Extract all values that follow --settings flags in the args list.

@@ -841,3 +841,28 @@ pub fn bidir_sandbox_with_extra_args_settings_test() {
   // Note: foo from extra_args should be merged in
   string.contains(args_str, "\"foo\":1") |> should.be_true
 }
+
+/// Regression test: non-object --settings JSON must be preserved when sandbox present
+pub fn bidir_sandbox_preserves_non_object_settings_test() {
+  // Create CLI options with extra_args that includes non-object --settings
+  let cli_opts =
+    CliOptions(..cli_options(), extra_args: Some(["--settings", "[]"]))
+
+  // Create bidir options with sandbox
+  let sandbox = sandbox_config("docker")
+  let bidir_opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+
+  let args = build_bidir_args_with_cli(cli_opts, bidir_opts)
+
+  // Should have TWO --settings flags: original non-object preserved + sandbox
+  let settings_count =
+    list.filter(args, fn(a) { a == "--settings" }) |> list.length
+  settings_count |> should.equal(2)
+
+  // Both settings values should be present
+  let args_str = string.join(args, " ")
+  // Original non-object preserved
+  string.contains(args_str, "--settings []") |> should.be_true
+  // Sandbox added separately
+  string.contains(args_str, "\"sandbox\"") |> should.be_true
+}
