@@ -343,7 +343,7 @@ pub fn sdk_stderr_verbose_session_test_() {
 ///
 /// NOTE: This test uses query_and_consume_with_timeout which does NOT track
 /// non-JSON lines or stderr pollution. For detailed stderr/non-JSON validation
-/// including OTP-dependent behavior, see verbose_stderr_capture_test_.
+/// including OTP-dependent behavior, see sdk_stderr_verbose_session_test_.
 ///
 /// When on_stderr callback is added to BidirOptions, this test should
 /// be updated to exercise that callback.
