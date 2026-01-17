@@ -620,9 +620,10 @@ fn dynamic_to_json(value: Dynamic) -> Json
 /// Agents ≤ this count are serialized inline; more are written to a temp file.
 const agents_inline_threshold = 3
 
-/// Generate a unique integer for temp file naming.
-@external(erlang, "claude_agent_sdk_ffi", "unique_integer")
-fn unique_integer() -> Int
+/// Generate cryptographically secure random hex string for temp file naming.
+/// Uses crypto:strong_rand_bytes to prevent predictable filename attacks.
+@external(erlang, "claude_agent_sdk_ffi", "crypto_random_hex")
+fn crypto_random_hex(num_bytes: Int) -> String
 
 /// Convert an AgentConfig to JSON.
 fn agent_config_to_json(agent: AgentConfig) -> Json {
@@ -680,8 +681,9 @@ fn serialize_agents_for_cli(
         }
         False -> {
           // Write to temp file for large lists
-          let id = unique_integer()
-          let path = "/tmp/agents-" <> int.to_string(id) <> ".json"
+          // Use 16 bytes (128 bits) of crypto randomness for unpredictable filename
+          let random_id = crypto_random_hex(16)
+          let path = "/tmp/agents-" <> random_id <> ".json"
           let json_str = agents_to_json_string(agent_list)
           case simplifile.write(path, json_str) {
             Ok(Nil) -> Ok(#(["--agents", "@" <> path], Some(path)))

@@ -910,16 +910,18 @@ pub fn start_session_new(
               bidir_runner.start_with_path(custom_path, args_result.args)
             None -> bidir_runner.start(args_result.args)
           }
-          // Clean up temp file immediately after runner starts
-          // (file is read by CLI on spawn, safe to delete now)
-          case args_result.cleanup_file {
-            Some(path) -> cli.cleanup_agents_file(path)
-            None -> Nil
-          }
-          // Return runner with no cleanup (already cleaned)
+          // Pass cleanup_file to bridge for cleanup on session end
+          // (NOT immediately - CLI reads @file async after spawn)
           case runner_result {
-            Ok(runner) -> Ok(#(runner, None))
-            Error(err) -> Error(err)
+            Ok(runner) -> Ok(#(runner, args_result.cleanup_file))
+            Error(err) -> {
+              // Spawn failed - clean up temp file now
+              case args_result.cleanup_file {
+                Some(path) -> cli.cleanup_agents_file(path)
+                None -> Nil
+              }
+              Error(err)
+            }
           }
         }
       }
@@ -928,7 +930,7 @@ pub fn start_session_new(
 
   case runner_result {
     Error(err) -> Error(err)
-    Ok(#(runner, _cleanup)) -> {
+    Ok(#(runner, cleanup_file)) -> {
       // Build StartConfig from BidirOptions using default_config + record update
       let default_timeout = case bidir_opts.timeout_ms {
         Some(ms) -> ms
@@ -939,6 +941,7 @@ pub fn start_session_new(
       // 1. Create its own subscriber subject (which it owns)
       // 2. Start the actor with that subscriber
       // 3. Forward messages to the public subjects
+      // 4. Clean up agents temp file on session end
       let _ =
         process.spawn_unlinked(fn() {
           start_bridge_and_actor(
@@ -948,6 +951,7 @@ pub fn start_session_new(
             messages,
             events,
             setup_subject,
+            cleanup_file,
           )
         })
 
@@ -971,6 +975,7 @@ type SetupResult {
 }
 
 /// Bridge process entry point: creates subscriber, starts actor, then loops.
+/// cleanup_file is an optional temp file path to delete when the session ends.
 fn start_bridge_and_actor(
   runner: bidir_runner.BidirRunner,
   default_timeout: Int,
@@ -978,6 +983,7 @@ fn start_bridge_and_actor(
   messages: Subject(message.Message),
   events: Subject(event.SessionEvent),
   setup_subject: Subject(SetupResult),
+  cleanup_file: Option(String),
 ) -> Nil {
   // Create subscriber subject - this process owns it and can receive from it
   let subscriber = process.new_subject()
@@ -1001,10 +1007,20 @@ fn start_bridge_and_actor(
       process.send(setup_subject, SetupOk(actor_subject, subscriber))
       // Now loop forwarding messages
       subscriber_bridge_loop(subscriber, messages, events)
+      // Session ended - clean up agents temp file if present
+      case cleanup_file {
+        Some(path) -> cli.cleanup_agents_file(path)
+        None -> Nil
+      }
     }
     Error(err) -> {
       // Report failure back to parent
       process.send(setup_subject, SetupFailed(err))
+      // Actor failed to start - clean up temp file
+      case cleanup_file {
+        Some(path) -> cli.cleanup_agents_file(path)
+        None -> Nil
+      }
     }
   }
 }
