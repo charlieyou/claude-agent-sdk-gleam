@@ -7,8 +7,8 @@
 ///
 /// ## What's Being Tested
 /// - Stderr support detection based on OTP version
-/// - Debug flag affects whether debug output is captured
-/// - On OTP >= 25, stderr is captured with stdout
+/// - Sessions complete successfully regardless of stderr capture mode
+/// - On OTP >= 25, stderr is captured with stdout (no terminal pollution)
 /// - On OTP < 25, stderr goes to terminal (not captured)
 ///
 /// ## Running Tests
@@ -17,10 +17,14 @@
 /// # Ensure the Claude CLI is authenticated (e.g., `claude auth login`)
 /// gleam test -- --only sdk_stderr
 /// ```
+import claude_agent_sdk
+import claude_agent_sdk/error.{error_to_string}
 import claude_agent_sdk/internal/port_ffi
 import e2e/helpers
+import gleam/int
 import gleam/io
 import gleam/json
+import gleam/list
 import gleeunit/should
 
 // ============================================================================
@@ -46,18 +50,21 @@ pub fn otp_version_detection_test() {
 }
 
 // ============================================================================
-// E2E: Debug Output Capture with --verbose
+// E2E: Session Completes with Stderr Capture (OTP-dependent)
 // ============================================================================
 
-/// Test that with --verbose flag, the session starts successfully.
-/// On OTP >= 25, debug stderr is mixed into stdout and captured.
-/// On OTP < 25, debug stderr goes to terminal (not captured in stream).
+/// Test that sessions complete successfully with --verbose flag.
+/// The bidir_runner uses --verbose by default, and on OTP >= 25 this
+/// means stderr is captured via stderr_to_stdout port option.
 ///
 /// This test verifies:
-/// 1. Session can start with --verbose flag (bidir mode)
-/// 2. Session completes without hanging
-/// 3. Behavior differs based on OTP version (documented, not asserted)
-pub fn sdk_stderr_verbose_flag_test_() {
+/// 1. Session can start and complete with stderr capture enabled
+/// 2. Stream produces expected protocol messages
+/// 3. No hangs or crashes due to stderr handling
+///
+/// On OTP >= 25: stderr is mixed with stdout (debug logs in stream)
+/// On OTP < 25: stderr goes to terminal (debug logs not captured)
+pub fn sdk_stderr_verbose_session_test_() {
   use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
@@ -65,7 +72,7 @@ pub fn sdk_stderr_verbose_flag_test_() {
       Nil
     }
     Ok(Nil) -> {
-      let ctx = helpers.new_test_context("sdk_stderr_verbose_flag")
+      let ctx = helpers.new_test_context("sdk_stderr_verbose_session")
 
       // Log OTP version and stderr support for diagnostics
       let otp_version = port_ffi.get_otp_version()
@@ -77,49 +84,88 @@ pub fn sdk_stderr_verbose_flag_test_() {
           #("supports_stderr", json.bool(supports_stderr)),
         ])
 
-      // Document expected behavior based on OTP version
-      let expected_behavior = case supports_stderr {
-        True -> "OTP >= 25: stderr captured with stdout (debug logs in stream)"
-        False -> "OTP < 25: stderr goes to terminal (debug logs not in stream)"
+      let ctx = helpers.test_step(ctx, "configure_options")
+
+      // Use default options with max_turns=1 for fast test
+      // The bidir_runner always passes --verbose, so stderr capture is active
+      let opts =
+        claude_agent_sdk.default_options()
+        |> claude_agent_sdk.with_max_turns(1)
+
+      let ctx = helpers.test_step(ctx, "execute_query_with_stderr_capture")
+
+      case helpers.query_and_consume_with_timeout("Say hi", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_error_summary(ctx, "QueryFailure", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "query() failed")
+          should.fail()
+        }
+        helpers.QueryTimedOut -> {
+          // Timeout is acceptable for E2E - don't fail, just skip
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "skipped due to timeout")
+          Nil
+        }
+        helpers.QuerySuccess(result) -> {
+          let ctx = helpers.test_step(ctx, "validate_session_completed")
+          helpers.log_stream_transcript(ctx, result.messages)
+
+          // Protocol invariant: session must produce messages
+          list.length(result.messages)
+          |> should.not_equal(0)
+
+          // Protocol invariant: stream should terminate normally
+          result.terminated_normally
+          |> should.be_true
+
+          // Protocol invariant: should have a result message
+          helpers.has_result_message(result.messages)
+          |> should.be_true
+
+          let counts = helpers.count_message_types(result.messages)
+
+          helpers.log_info_with(ctx, "session_completed", [
+            #("otp_version", json.int(otp_version)),
+            #("stderr_to_stdout", json.bool(supports_stderr)),
+            #("message_count", json.int(list.length(result.messages))),
+            #("system_count", json.int(counts.system)),
+            #("result_count", json.int(counts.result)),
+          ])
+
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Session completed with stderr capture (OTP "
+              <> int.to_string(otp_version)
+              <> ", stderr_to_stdout="
+              <> case supports_stderr {
+              True -> "true"
+              False -> "false"
+            }
+              <> ")",
+          )
+        }
       }
-
-      helpers.log_info_with(ctx, "expected_behavior", [
-        #("description", json.string(expected_behavior)),
-      ])
-
-      // The bidir_runner already uses --verbose flag (see start_with_path)
-      // So we just need to verify sessions work correctly
-      helpers.log_test_complete(
-        ctx,
-        True,
-        "Stderr support detection: OTP "
-          <> int_to_string(otp_version)
-          <> ", supports_stderr="
-          <> bool_to_string(supports_stderr),
-      )
     }
   }
 }
 
 // ============================================================================
-// E2E: Debug Callback Presence/Absence
+// E2E: Stderr Callback Parity Gap Documentation
 // ============================================================================
 
-/// Test that stderr behavior depends on the debug flag.
+/// Test documenting current SDK state regarding stderr callback.
+/// The Python SDK has an explicit stderr callback; Gleam SDK does not yet.
 ///
-/// In the Python SDK, there are two ways to enable debug output:
-/// 1. stderr callback: invoked for each line of stderr
-/// 2. debug-to-stderr extra_arg: writes debug output to stderr
+/// This test:
+/// 1. Runs a real session to verify basic functionality works
+/// 2. Documents the parity gap with Python SDK
+/// 3. Verifies OTP-dependent behavior is correctly detected
 ///
-/// In the Gleam SDK:
-/// - No explicit stderr callback exists yet (would be BidirOptions.on_stderr)
-/// - --verbose flag is always passed by bidir_runner.start_with_path
-/// - On OTP >= 25, stderr is mixed with stdout via stderr_to_stdout port option
-///
-/// This test verifies the current behavior matches expectations:
-/// - Without debug-to-stderr: no explicit debug output routing
-/// - With stderr_to_stdout support: stderr captured in port
-pub fn sdk_stderr_callback_behavior_test_() {
+/// When on_stderr callback is added to BidirOptions, this test should
+/// be updated to exercise that callback.
+pub fn sdk_stderr_callback_parity_test_() {
   use <- helpers.with_e2e_timeout()
   case helpers.skip_if_no_e2e() {
     Error(msg) -> {
@@ -127,98 +173,64 @@ pub fn sdk_stderr_callback_behavior_test_() {
       Nil
     }
     Ok(Nil) -> {
-      let ctx = helpers.new_test_context("sdk_stderr_callback_behavior")
-      let ctx = helpers.test_step(ctx, "check_callback_support")
-
-      // Document current SDK state regarding stderr callback
-      // Currently, the Gleam SDK does NOT have an on_stderr callback in BidirOptions
-      // This is a parity gap with Python SDK that has:
-      // - stderr: Callable[[str], None] | None
-      // - debug_stderr: Any (deprecated, file-like object)
+      let ctx = helpers.new_test_context("sdk_stderr_callback_parity")
 
       let supports_stderr = port_ffi.supports_stderr_to_stdout()
+      let otp_version = port_ffi.get_otp_version()
 
-      helpers.log_info_with(ctx, "sdk_state", [
-        #("has_on_stderr_callback", json.bool(False)),
-        #(
-          "note",
-          json.string(
-            "BidirOptions lacks on_stderr field - parity gap with Python SDK",
-          ),
-        ),
-        #("stderr_to_stdout_support", json.bool(supports_stderr)),
-      ])
-
-      // Assert the OTP-dependent behavior
+      // Document current SDK state
       let ctx =
-        helpers.test_step_with(ctx, "verify_stderr_support", [
-          #("supports_stderr_to_stdout", json.bool(supports_stderr)),
+        helpers.test_step_with(ctx, "document_parity_gap", [
+          #("has_on_stderr_callback", json.bool(False)),
+          #(
+            "note",
+            json.string(
+              "BidirOptions lacks on_stderr field - parity gap with Python SDK",
+            ),
+          ),
+          #("stderr_to_stdout_support", json.bool(supports_stderr)),
         ])
 
-      case supports_stderr {
-        True -> {
-          helpers.log_info(
-            ctx,
-            "stderr_captured: OTP >= 25, stderr mixed with stdout",
-          )
-          helpers.log_test_complete(
-            ctx,
-            True,
-            "Stderr captured via port (OTP 25+ behavior confirmed)",
-          )
+      let ctx = helpers.test_step(ctx, "run_session_to_verify_behavior")
+
+      // Run a minimal session to verify stderr handling doesn't break anything
+      let opts =
+        claude_agent_sdk.default_options()
+        |> claude_agent_sdk.with_max_turns(1)
+
+      case helpers.query_and_consume_with_timeout("Hello", opts, 30_000) {
+        helpers.QueryFailure(err) -> {
+          helpers.log_error(ctx, "query_failed", error_to_string(err))
+          helpers.log_test_complete(ctx, False, "Session failed")
+          should.fail()
         }
-        False -> {
-          helpers.log_info(
-            ctx,
-            "stderr_terminal: OTP < 25, stderr goes to terminal",
-          )
+        helpers.QueryTimedOut -> {
+          helpers.log_info(ctx, "query_timeout_skip")
+          helpers.log_test_complete(ctx, True, "skipped due to timeout")
+          Nil
+        }
+        helpers.QuerySuccess(result) -> {
+          // Verify session completed
+          result.terminated_normally
+          |> should.be_true
+
+          helpers.has_result_message(result.messages)
+          |> should.be_true
+
+          helpers.log_info_with(ctx, "session_verified", [
+            #("message_count", json.int(list.length(result.messages))),
+            #("terminated_normally", json.bool(result.terminated_normally)),
+          ])
+
           helpers.log_test_complete(
             ctx,
             True,
-            "Stderr goes to terminal (OTP 24- behavior confirmed)",
+            "Session works correctly (OTP "
+              <> int.to_string(otp_version)
+              <> ") - on_stderr callback not yet implemented",
           )
         }
       }
     }
-  }
-}
-
-// ============================================================================
-// Helper Functions
-// ============================================================================
-
-fn int_to_string(n: Int) -> String {
-  case n {
-    0 -> "0"
-    _ -> int_to_string_impl(n, "")
-  }
-}
-
-fn int_to_string_impl(n: Int, acc: String) -> String {
-  case n {
-    0 -> acc
-    _ -> {
-      let digit = n % 10
-      let char = case digit {
-        0 -> "0"
-        1 -> "1"
-        2 -> "2"
-        3 -> "3"
-        4 -> "4"
-        5 -> "5"
-        6 -> "6"
-        7 -> "7"
-        8 -> "8"
-        _ -> "9"
-      }
-      int_to_string_impl(n / 10, char <> acc)
-    }
-  }
-}
-
-fn bool_to_string(b: Bool) -> String {
-  case b {
-    True -> "true"
-    False -> "false"
   }
 }
