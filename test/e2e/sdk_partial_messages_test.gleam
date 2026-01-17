@@ -30,18 +30,13 @@ import support/mock_bidir_runner
 // SDK-55: Default Disabled - Partials Not Delivered
 // ============================================================================
 
-/// SDK-55: With default options (include_partial_messages=false), partial
-/// messages should not appear in the messages subject.
+/// SDK-55: Verify default options have include_partial_messages=false
+/// and that non-partial messages decode correctly with is_partial=false.
 ///
-/// Note: This tests SDK behavior with mock. In real CLI usage, the CLI
-/// won't emit partials unless --include-partial-messages is passed.
-/// The SDK passes through what CLI sends, so with real CLI this works.
-/// With mock, we inject a partial and verify SDK still delivers it (since
-/// SDK doesn't filter - CLI does). This confirms the decoding path works
-/// but the filtering is CLI-side.
-///
-/// This test documents that the SDK default is include_partial_messages=false
-/// and verifies the options are correctly initialized.
+/// Note: The SDK passes through what CLI sends - filtering is CLI-side.
+/// This test verifies:
+/// 1. Default BidirOptions has include_partial_messages=false
+/// 2. A non-partial message (without is_partial field) decodes with is_partial=false
 pub fn sdk_55_default_partial_messages_disabled_test_() {
   use <- helpers.with_e2e_timeout()
   case skip_if_no_e2e() {
@@ -278,20 +273,30 @@ pub fn sdk_56_partial_messages_optin_test_() {
                       }
                     }
                     Ok(_) -> {
-                      helpers.log_info(ctx, "non_assistant_final")
+                      helpers.log_error(
+                        ctx,
+                        "wrong_message_type",
+                        "Expected Assistant message for final",
+                      )
                       helpers.log_test_complete(
                         ctx,
-                        True,
-                        "Partial received, non-assistant final",
+                        False,
+                        "Final should be Assistant message",
                       )
+                      should.fail()
                     }
                     Error(Nil) -> {
-                      helpers.log_info(ctx, "final_timeout")
+                      helpers.log_error(
+                        ctx,
+                        "final_timeout",
+                        "Final message not received",
+                      )
                       helpers.log_test_complete(
                         ctx,
-                        True,
-                        "Partial received (final timed out)",
+                        False,
+                        "Final message timed out",
                       )
+                      should.fail()
                     }
                   }
                 }
@@ -441,34 +446,58 @@ pub fn sdk_57_multiple_partials_sequence_test_() {
                       )
                     }
                     Ok(_) -> {
+                      helpers.log_error(
+                        ctx,
+                        "wrong_message_type",
+                        "Expected Assistant message for final",
+                      )
                       helpers.log_test_complete(
                         ctx,
-                        True,
-                        "2 partials received, final was non-assistant",
+                        False,
+                        "Final should be Assistant message",
                       )
+                      should.fail()
                     }
                     Error(Nil) -> {
+                      helpers.log_error(
+                        ctx,
+                        "final_timeout",
+                        "Final message not received",
+                      )
                       helpers.log_test_complete(
                         ctx,
-                        True,
-                        "2 partials received (final timed out)",
+                        False,
+                        "Final message timed out",
                       )
+                      should.fail()
                     }
                   }
                 }
                 Ok(_) -> {
+                  helpers.log_error(
+                    ctx,
+                    "wrong_message_type",
+                    "Expected Assistant message for second partial",
+                  )
                   helpers.log_test_complete(
                     ctx,
-                    True,
-                    "First partial received, second was non-assistant",
+                    False,
+                    "Second partial should be Assistant message",
                   )
+                  should.fail()
                 }
                 Error(Nil) -> {
+                  helpers.log_error(
+                    ctx,
+                    "second_partial_timeout",
+                    "Second partial not received",
+                  )
                   helpers.log_test_complete(
                     ctx,
-                    True,
-                    "First partial received (second timed out)",
+                    False,
+                    "Second partial timed out",
                   )
+                  should.fail()
                 }
               }
             }
