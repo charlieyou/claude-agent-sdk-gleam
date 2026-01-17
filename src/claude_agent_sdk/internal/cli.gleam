@@ -660,18 +660,26 @@ fn merge_sandbox_into_args(
   let sandbox_json = sandbox_config_to_json(sandbox)
 
   // Separate object settings (can merge) from non-object settings (preserve as-is)
-  let #(object_pairs, non_object_jsons) =
-    list.fold(existing_settings_jsons, #([], []), fn(acc, json_str) {
-      let #(pairs_acc, non_obj_acc) = acc
+  // Use dict to merge so later flags override earlier ones (last-wins semantics)
+  let #(merged_dict, non_object_jsons) =
+    list.fold(existing_settings_jsons, #(dict.new(), []), fn(acc, json_str) {
+      let #(dict_acc, non_obj_acc) = acc
       case parse_json_object_keys(json_str) {
-        Ok(pairs) -> #(list.append(pairs_acc, pairs), non_obj_acc)
-        Error(_) -> #(pairs_acc, [json_str, ..non_obj_acc])
+        Ok(pairs) -> {
+          // Insert each pair; later values override earlier (last-wins)
+          let updated_dict =
+            list.fold(pairs, dict_acc, fn(d, pair) {
+              dict.insert(d, pair.0, pair.1)
+            })
+          #(updated_dict, non_obj_acc)
+        }
+        Error(_) -> #(dict_acc, [json_str, ..non_obj_acc])
       }
     })
 
-  // Add sandbox to the merged object settings
-  let final_pairs = list.append(object_pairs, [#("sandbox", sandbox_json)])
-  let merged_json = json.object(final_pairs) |> json.to_string
+  // Add sandbox to merged settings (always overrides any user-provided "sandbox" key)
+  let final_dict = dict.insert(merged_dict, "sandbox", sandbox_json)
+  let merged_json = json.object(dict.to_list(final_dict)) |> json.to_string
 
   // Remove all existing --settings flags and their values from args
   let args_without_settings = remove_flag_with_value(args, "--settings")

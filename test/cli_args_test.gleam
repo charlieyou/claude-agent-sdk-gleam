@@ -866,3 +866,89 @@ pub fn bidir_sandbox_preserves_non_object_settings_test() {
   // Sandbox added separately
   string.contains(args_str, "\"sandbox\"") |> should.be_true
 }
+
+/// Regression test: duplicate keys in multiple --settings flags are merged with last-wins
+/// This prevents emitting JSON with duplicate keys (parser-dependent behavior).
+pub fn bidir_sandbox_deduplicates_settings_keys_test() {
+  // Create CLI options with extra_args that have two --settings with overlapping "foo" key
+  let cli_opts =
+    CliOptions(
+      ..cli_options(),
+      extra_args: Some([
+        "--settings",
+        "{\"foo\":1,\"bar\":10}",
+        "--settings",
+        "{\"foo\":2,\"baz\":20}",
+      ]),
+    )
+
+  // Create bidir options with sandbox
+  let sandbox = sandbox_config("docker")
+  let bidir_opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+
+  let args = build_bidir_args_with_cli(cli_opts, bidir_opts)
+
+  // Should only have ONE --settings flag (all objects merged)
+  let settings_count =
+    list.filter(args, fn(a) { a == "--settings" }) |> list.length
+  settings_count |> should.equal(1)
+
+  // The merged JSON must have unique keys (no duplicate "foo")
+  // Find the settings value (the string after "--settings")
+  let settings_value = find_settings_value(args)
+
+  // Verify we got exactly one "foo" occurrence (not duplicates)
+  let foo_count = string.split(settings_value, "\"foo\"") |> list.length
+  // split produces N+1 parts for N occurrences
+  foo_count |> should.equal(2)
+
+  // Last-wins: foo should be 2, not 1
+  string.contains(settings_value, "\"foo\":2") |> should.be_true
+  // First foo value should NOT be present
+  string.contains(settings_value, "\"foo\":1") |> should.be_false
+
+  // Other keys should be present
+  string.contains(settings_value, "\"bar\":10") |> should.be_true
+  string.contains(settings_value, "\"baz\":20") |> should.be_true
+  string.contains(settings_value, "\"sandbox\"") |> should.be_true
+}
+
+/// Regression test: user-provided "sandbox" key is overridden by SDK sandbox config
+pub fn bidir_sandbox_overrides_user_sandbox_key_test() {
+  // Create CLI options with extra_args that have a user-provided "sandbox" key
+  let cli_opts =
+    CliOptions(
+      ..cli_options(),
+      extra_args: Some(["--settings", "{\"sandbox\":\"user-value\",\"foo\":1}"]),
+    )
+
+  // Create bidir options with SDK sandbox config
+  let sandbox = sandbox_config("docker")
+  let bidir_opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+
+  let args = build_bidir_args_with_cli(cli_opts, bidir_opts)
+
+  // Should only have ONE --settings flag
+  let settings_count =
+    list.filter(args, fn(a) { a == "--settings" }) |> list.length
+  settings_count |> should.equal(1)
+
+  // Find the settings value
+  let settings_value = find_settings_value(args)
+
+  // SDK sandbox must override user "sandbox" (should have type, not string "user-value")
+  string.contains(settings_value, "\"type\":\"docker\"") |> should.be_true
+  string.contains(settings_value, "\"user-value\"") |> should.be_false
+
+  // Other user keys should be preserved
+  string.contains(settings_value, "\"foo\":1") |> should.be_true
+}
+
+/// Helper to find the value following --settings in args
+fn find_settings_value(args: List(String)) -> String {
+  case args {
+    [] -> ""
+    ["--settings", value, ..] -> value
+    [_, ..rest] -> find_settings_value(rest)
+  }
+}
