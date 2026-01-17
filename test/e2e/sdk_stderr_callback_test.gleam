@@ -286,8 +286,10 @@ pub fn sdk_stderr_verbose_session_test_() {
             }
             False -> {
               // OTP < 25: stderr goes to terminal, not captured.
-              // We should see zero non-JSON lines in the stream.
-              // If we see any, it's either a protocol violation or stdout pollution.
+              // Assert zero non-JSON lines - any would indicate protocol violation
+              // or unexpected stdout pollution from the CLI.
+              non_json_count
+              |> should.equal(0)
               helpers.log_info_with(ctx, "stderr_not_captured", [
                 #("non_json_lines_captured", json.int(non_json_count)),
               ])
