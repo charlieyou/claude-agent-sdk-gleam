@@ -22,7 +22,6 @@ import gleam/option.{type Option, None, Some}
 import gleam/string
 import gleeunit/should
 
-
 // ============================================================================
 // FFI Bindings for Environment Manipulation
 // ============================================================================
