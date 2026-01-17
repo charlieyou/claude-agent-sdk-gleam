@@ -131,11 +131,13 @@ pub type StderrQueryOutcome {
 }
 
 /// Run query with stderr tracking and timeout.
+/// Acquires global query lock to prevent concurrent E2E test contention.
 fn query_with_stderr_tracking(
   prompt: String,
   options: claude_agent_sdk.QueryOptions,
   timeout_ms: Int,
 ) -> StderrQueryOutcome {
+  let _ = helpers.acquire_query_lock()
   let subject: process.Subject(StderrQueryOutcome) = process.new_subject()
   let pid =
     process.spawn_unlinked(fn() {
@@ -147,13 +149,15 @@ fn query_with_stderr_tracking(
       process.send(subject, outcome)
     })
 
-  case process.receive(subject, timeout_ms) {
+  let outcome = case process.receive(subject, timeout_ms) {
     Ok(outcome) -> outcome
     Error(Nil) -> {
       helpers.kill_pid(pid)
       StderrQueryTimedOut
     }
   }
+  let _ = helpers.release_query_lock()
+  outcome
 }
 
 // ============================================================================
@@ -336,6 +340,10 @@ pub fn sdk_stderr_verbose_session_test_() {
 /// 1. Runs a real session to verify basic functionality works
 /// 2. Documents the parity gap with Python SDK
 /// 3. Verifies OTP-dependent behavior is correctly detected
+///
+/// NOTE: This test uses query_and_consume_with_timeout which does NOT track
+/// non-JSON lines or stderr pollution. For detailed stderr/non-JSON validation
+/// including OTP-dependent behavior, see verbose_stderr_capture_test_.
 ///
 /// When on_stderr callback is added to BidirOptions, this test should
 /// be updated to exercise that callback.
