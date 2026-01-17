@@ -226,135 +226,151 @@ pub fn sdk_52_mcp_failure_test_() {
 /// Uses mock runner to verify ThinkingBlock variant is decoded properly.
 pub fn sdk_53_thinking_block_decoded_test_() {
   use <- helpers.with_e2e_timeout()
-  let ctx = helpers.new_test_context("sdk_53_thinking_block_decoded")
-  let ctx = helpers.test_step(ctx, "setup_mock_runner")
-
-  // Create mock runner
-  let mock = mock_bidir_runner.new()
-  let runner = mock.runner
-
-  let base_opts = options.bidir_options()
-  let bidir_opts =
-    options.BidirOptions(
-      ..base_opts,
-      bidir_runner_factory: option.Some(fn() { runner }),
-    )
-
-  let ctx = helpers.test_step(ctx, "start_session_new")
-  let cli_opts = options.cli_options()
-  let sdk_opts = options.sdk_options()
-
-  case claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts) {
-    Error(err) -> {
-      helpers.log_error(
-        ctx,
-        "session_start_failed",
-        claude_agent_sdk.start_error_to_string(err),
-      )
-      helpers.log_test_complete(ctx, False, "Failed to start session")
-      should.fail()
+  case skip_if_no_e2e() {
+    Error(msg) -> {
+      io.println(msg)
+      Nil
     }
-    Ok(sess) -> {
-      let ctx = helpers.test_step(ctx, "complete_init_handshake")
-      let actor = session.get_actor(sess)
+    Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_53_thinking_block_decoded")
+      let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
-      // Complete init
-      let assert Ok(_init_msg) = process.receive(mock.writes, 500)
-      let init_response =
-        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
-      bidir.inject_message(actor, init_response)
-      process.sleep(50)
+      // Create mock runner
+      let mock = mock_bidir_runner.new()
+      let runner = mock.runner
 
-      let ctx = helpers.test_step(ctx, "inject_thinking_block_response")
-      // Inject assistant response with ThinkingBlock
-      let thinking_response =
-        "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-sonnet-4\",\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Let me analyze this carefully...\",\"signature\":\"sig123\"},{\"type\":\"text\",\"text\":\"Based on my analysis...\"}],\"stop_reason\":\"end_turn\"},\"session_id\":\"sess_1\"}"
-      bidir.inject_message(actor, thinking_response)
+      let base_opts = options.bidir_options()
+      let bidir_opts =
+        options.BidirOptions(
+          ..base_opts,
+          bidir_runner_factory: option.Some(fn() { runner }),
+        )
 
-      // Get messages and verify ThinkingBlock is present
-      let ctx = helpers.test_step(ctx, "verify_thinking_block")
-      let messages_subject = claude_agent_sdk.messages(sess)
-      case process.receive(messages_subject, 1000) {
-        Ok(message.Assistant(msg)) -> {
-          case msg.message {
-            option.Some(inner_msg) -> {
-              case inner_msg.content {
-                option.Some(content_blocks) -> {
-                  // Check for ThinkingBlock in content
-                  let has_thinking =
-                    list.any(content_blocks, fn(block) {
-                      case block {
-                        content.ThinkingBlock(thinking:, signature:) -> {
-                          thinking == "Let me analyze this carefully..."
-                          && signature == option.Some("sig123")
+      let ctx = helpers.test_step(ctx, "start_session_new")
+      let cli_opts = options.cli_options()
+      let sdk_opts = options.sdk_options()
+
+      case claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts) {
+        Error(err) -> {
+          helpers.log_error(
+            ctx,
+            "session_start_failed",
+            claude_agent_sdk.start_error_to_string(err),
+          )
+          helpers.log_test_complete(ctx, False, "Failed to start session")
+          should.fail()
+        }
+        Ok(sess) -> {
+          let ctx = helpers.test_step(ctx, "complete_init_handshake")
+          let actor = session.get_actor(sess)
+
+          // Complete init
+          let assert Ok(_init_msg) = process.receive(mock.writes, 500)
+          let init_response =
+            "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
+          bidir.inject_message(actor, init_response)
+          process.sleep(50)
+
+          let ctx = helpers.test_step(ctx, "inject_thinking_block_response")
+          // Inject assistant response with ThinkingBlock
+          let thinking_response =
+            "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-sonnet-4\",\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"thinking\",\"thinking\":\"Let me analyze this carefully...\",\"signature\":\"sig123\"},{\"type\":\"text\",\"text\":\"Based on my analysis...\"}],\"stop_reason\":\"end_turn\"},\"session_id\":\"sess_1\"}"
+          bidir.inject_message(actor, thinking_response)
+
+          // Get messages and verify ThinkingBlock is present
+          let ctx = helpers.test_step(ctx, "verify_thinking_block")
+          let messages_subject = claude_agent_sdk.messages(sess)
+          case process.receive(messages_subject, 1000) {
+            Ok(message.Assistant(msg)) -> {
+              case msg.message {
+                option.Some(inner_msg) -> {
+                  case inner_msg.content {
+                    option.Some(content_blocks) -> {
+                      // Check for ThinkingBlock in content
+                      let has_thinking =
+                        list.any(content_blocks, fn(block) {
+                          case block {
+                            content.ThinkingBlock(thinking:, signature:) -> {
+                              thinking == "Let me analyze this carefully..."
+                              && signature == option.Some("sig123")
+                            }
+                            _ -> False
+                          }
+                        })
+
+                      case has_thinking {
+                        True -> {
+                          helpers.log_info(ctx, "thinking_block_decoded")
+                          helpers.log_test_complete(
+                            ctx,
+                            True,
+                            "ThinkingBlock decoded correctly with signature",
+                          )
                         }
-                        _ -> False
+                        False -> {
+                          helpers.log_error(
+                            ctx,
+                            "thinking_block_missing",
+                            "ThinkingBlock not found in content",
+                          )
+                          helpers.log_test_complete(
+                            ctx,
+                            False,
+                            "ThinkingBlock not found",
+                          )
+                          should.fail()
+                        }
                       }
-                    })
-
-                  case has_thinking {
-                    True -> {
-                      helpers.log_info(ctx, "thinking_block_decoded")
-                      helpers.log_test_complete(
-                        ctx,
-                        True,
-                        "ThinkingBlock decoded correctly with signature",
-                      )
                     }
-                    False -> {
+                    option.None -> {
                       helpers.log_error(
                         ctx,
-                        "thinking_block_missing",
-                        "ThinkingBlock not found in content",
+                        "no_content",
+                        "Message has no content",
                       )
                       helpers.log_test_complete(
                         ctx,
                         False,
-                        "ThinkingBlock not found",
+                        "Message has no content",
                       )
                       should.fail()
                     }
                   }
                 }
                 option.None -> {
-                  helpers.log_error(ctx, "no_content", "Message has no content")
-                  helpers.log_test_complete(
+                  helpers.log_error(
                     ctx,
-                    False,
-                    "Message has no content",
+                    "no_message",
+                    "Assistant has no inner message",
                   )
+                  helpers.log_test_complete(ctx, False, "No inner message")
                   should.fail()
                 }
               }
             }
-            option.None -> {
+            Ok(_) -> {
               helpers.log_error(
                 ctx,
-                "no_message",
-                "Assistant has no inner message",
+                "wrong_message_type",
+                "Expected Assistant message",
               )
-              helpers.log_test_complete(ctx, False, "No inner message")
+              helpers.log_test_complete(
+                ctx,
+                False,
+                "Expected Assistant message",
+              )
+              should.fail()
+            }
+            Error(Nil) -> {
+              helpers.log_error(ctx, "response_timeout", "No response received")
+              helpers.log_test_complete(ctx, False, "No response received")
               should.fail()
             }
           }
-        }
-        Ok(_) -> {
-          helpers.log_error(
-            ctx,
-            "wrong_message_type",
-            "Expected Assistant message",
-          )
-          helpers.log_test_complete(ctx, False, "Expected Assistant message")
-          should.fail()
-        }
-        Error(Nil) -> {
-          helpers.log_error(ctx, "response_timeout", "No response received")
-          helpers.log_test_complete(ctx, False, "No response received")
-          should.fail()
+
+          bidir.shutdown(actor)
         }
       }
-
-      bidir.shutdown(actor)
     }
   }
 }
@@ -367,146 +383,158 @@ pub fn sdk_53_thinking_block_decoded_test_() {
 /// Uses mock runner to verify partial message flow.
 pub fn sdk_54_partial_messages_flow_test_() {
   use <- helpers.with_e2e_timeout()
-  let ctx = helpers.new_test_context("sdk_54_partial_messages_flow")
-  let ctx = helpers.test_step(ctx, "setup_mock_runner")
-
-  // Create mock runner
-  let mock = mock_bidir_runner.new()
-  let runner = mock.runner
-
-  let base_opts = options.bidir_options()
-  let bidir_opts =
-    options.BidirOptions(
-      ..base_opts,
-      bidir_runner_factory: option.Some(fn() { runner }),
-      include_partial_messages: True,
-    )
-
-  let ctx = helpers.test_step(ctx, "start_session_new")
-  let cli_opts = options.cli_options()
-  let sdk_opts = options.sdk_options()
-
-  case claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts) {
-    Error(err) -> {
-      helpers.log_error(
-        ctx,
-        "session_start_failed",
-        claude_agent_sdk.start_error_to_string(err),
-      )
-      helpers.log_test_complete(ctx, False, "Failed to start session")
-      should.fail()
+  case skip_if_no_e2e() {
+    Error(msg) -> {
+      io.println(msg)
+      Nil
     }
-    Ok(sess) -> {
-      let ctx = helpers.test_step(ctx, "complete_init_handshake")
-      let actor = session.get_actor(sess)
+    Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_54_partial_messages_flow")
+      let ctx = helpers.test_step(ctx, "setup_mock_runner")
 
-      // Complete init
-      let assert Ok(_init_msg) = process.receive(mock.writes, 500)
-      let init_response =
-        "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
-      bidir.inject_message(actor, init_response)
-      process.sleep(50)
+      // Create mock runner
+      let mock = mock_bidir_runner.new()
+      let runner = mock.runner
 
-      let ctx = helpers.test_step(ctx, "inject_partial_messages")
-      // Inject partial message (is_partial: true)
-      let partial_msg =
-        "{\"type\":\"assistant\",\"is_partial\":true,\"message\":{\"model\":\"claude-sonnet-4\",\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"In progress...\"}],\"stop_reason\":null},\"session_id\":\"sess_1\"}"
-      bidir.inject_message(actor, partial_msg)
+      let base_opts = options.bidir_options()
+      let bidir_opts =
+        options.BidirOptions(
+          ..base_opts,
+          bidir_runner_factory: option.Some(fn() { runner }),
+          include_partial_messages: True,
+        )
 
-      // Get messages and verify is_partial=true
-      let ctx = helpers.test_step(ctx, "verify_partial_true")
-      let messages_subject = claude_agent_sdk.messages(sess)
-      case process.receive(messages_subject, 1000) {
-        Ok(message.Assistant(msg)) -> {
-          case msg.is_partial {
-            True -> {
-              helpers.log_info(ctx, "partial_message_received")
+      let ctx = helpers.test_step(ctx, "start_session_new")
+      let cli_opts = options.cli_options()
+      let sdk_opts = options.sdk_options()
 
-              // Inject final message (is_partial: false or missing)
-              let ctx = helpers.test_step(ctx, "inject_final_message")
-              let final_msg =
-                "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-sonnet-4\",\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Complete response.\"}],\"stop_reason\":\"end_turn\"},\"session_id\":\"sess_1\"}"
-              bidir.inject_message(actor, final_msg)
+      case claude_agent_sdk.start_session_new(cli_opts, sdk_opts, bidir_opts) {
+        Error(err) -> {
+          helpers.log_error(
+            ctx,
+            "session_start_failed",
+            claude_agent_sdk.start_error_to_string(err),
+          )
+          helpers.log_test_complete(ctx, False, "Failed to start session")
+          should.fail()
+        }
+        Ok(sess) -> {
+          let ctx = helpers.test_step(ctx, "complete_init_handshake")
+          let actor = session.get_actor(sess)
 
-              // Verify final message has is_partial=false
-              let ctx = helpers.test_step(ctx, "verify_partial_false")
-              case process.receive(messages_subject, 1000) {
-                Ok(message.Assistant(final)) -> {
-                  case final.is_partial {
-                    False -> {
-                      helpers.log_info(ctx, "final_message_received")
+          // Complete init
+          let assert Ok(_init_msg) = process.receive(mock.writes, 500)
+          let init_response =
+            "{\"type\":\"control_response\",\"response\":{\"subtype\":\"success\",\"request_id\":\"req_0\",\"response\":{\"capabilities\":{}}}}"
+          bidir.inject_message(actor, init_response)
+          process.sleep(50)
+
+          let ctx = helpers.test_step(ctx, "inject_partial_messages")
+          // Inject partial message (is_partial: true)
+          let partial_msg =
+            "{\"type\":\"assistant\",\"is_partial\":true,\"message\":{\"model\":\"claude-sonnet-4\",\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"In progress...\"}],\"stop_reason\":null},\"session_id\":\"sess_1\"}"
+          bidir.inject_message(actor, partial_msg)
+
+          // Get messages and verify is_partial=true
+          let ctx = helpers.test_step(ctx, "verify_partial_true")
+          let messages_subject = claude_agent_sdk.messages(sess)
+          case process.receive(messages_subject, 1000) {
+            Ok(message.Assistant(msg)) -> {
+              case msg.is_partial {
+                True -> {
+                  helpers.log_info(ctx, "partial_message_received")
+
+                  // Inject final message (is_partial: false or missing)
+                  let ctx = helpers.test_step(ctx, "inject_final_message")
+                  let final_msg =
+                    "{\"type\":\"assistant\",\"message\":{\"model\":\"claude-sonnet-4\",\"id\":\"msg_1\",\"type\":\"message\",\"role\":\"assistant\",\"content\":[{\"type\":\"text\",\"text\":\"Complete response.\"}],\"stop_reason\":\"end_turn\"},\"session_id\":\"sess_1\"}"
+                  bidir.inject_message(actor, final_msg)
+
+                  // Verify final message has is_partial=false
+                  let ctx = helpers.test_step(ctx, "verify_partial_false")
+                  case process.receive(messages_subject, 1000) {
+                    Ok(message.Assistant(final)) -> {
+                      case final.is_partial {
+                        False -> {
+                          helpers.log_info(ctx, "final_message_received")
+                          helpers.log_test_complete(
+                            ctx,
+                            True,
+                            "Partial message flow verified: partial->final",
+                          )
+                        }
+                        True -> {
+                          helpers.log_error(
+                            ctx,
+                            "final_still_partial",
+                            "Final message has is_partial=true",
+                          )
+                          helpers.log_test_complete(
+                            ctx,
+                            False,
+                            "Final message should have is_partial=false",
+                          )
+                          should.fail()
+                        }
+                      }
+                    }
+                    Ok(_) -> {
+                      helpers.log_info(ctx, "received_non_assistant_final")
                       helpers.log_test_complete(
                         ctx,
                         True,
-                        "Partial message flow verified: partial->final",
+                        "Partial flow partial: first message received",
                       )
                     }
-                    True -> {
-                      helpers.log_error(
-                        ctx,
-                        "final_still_partial",
-                        "Final message has is_partial=true",
-                      )
+                    Error(Nil) -> {
+                      // Final message timeout - partial at least worked
+                      helpers.log_info(ctx, "final_timeout_but_partial_worked")
                       helpers.log_test_complete(
                         ctx,
-                        False,
-                        "Final message should have is_partial=false",
+                        True,
+                        "Partial message received (final timed out)",
                       )
-                      should.fail()
                     }
                   }
                 }
-                Ok(_) -> {
-                  helpers.log_info(ctx, "received_non_assistant_final")
+                False -> {
+                  helpers.log_error(
+                    ctx,
+                    "partial_not_set",
+                    "First message should have is_partial=true",
+                  )
                   helpers.log_test_complete(
                     ctx,
-                    True,
-                    "Partial flow partial: first message received",
+                    False,
+                    "Expected is_partial=true on first message",
                   )
-                }
-                Error(Nil) -> {
-                  // Final message timeout - partial at least worked
-                  helpers.log_info(ctx, "final_timeout_but_partial_worked")
-                  helpers.log_test_complete(
-                    ctx,
-                    True,
-                    "Partial message received (final timed out)",
-                  )
+                  should.fail()
                 }
               }
             }
-            False -> {
+            Ok(_) -> {
               helpers.log_error(
                 ctx,
-                "partial_not_set",
-                "First message should have is_partial=true",
+                "wrong_message_type",
+                "Expected Assistant message",
               )
               helpers.log_test_complete(
                 ctx,
                 False,
-                "Expected is_partial=true on first message",
+                "Expected Assistant message",
               )
               should.fail()
             }
+            Error(Nil) -> {
+              helpers.log_error(ctx, "response_timeout", "No response received")
+              helpers.log_test_complete(ctx, False, "No response received")
+              should.fail()
+            }
           }
-        }
-        Ok(_) -> {
-          helpers.log_error(
-            ctx,
-            "wrong_message_type",
-            "Expected Assistant message",
-          )
-          helpers.log_test_complete(ctx, False, "Expected Assistant message")
-          should.fail()
-        }
-        Error(Nil) -> {
-          helpers.log_error(ctx, "response_timeout", "No response received")
-          helpers.log_test_complete(ctx, False, "No response received")
-          should.fail()
+
+          bidir.shutdown(actor)
         }
       }
-
-      bidir.shutdown(actor)
     }
   }
 }
