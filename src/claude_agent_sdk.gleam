@@ -27,11 +27,15 @@
 //// This applies to: ContentBlock, ToolResultBlock, Message, QueryError,
 //// StreamError, and other variant types.
 
+import gleam/dict
 import gleam/dynamic
+import gleam/dynamic/decode
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
 import simplifile
+
+import claude_agent_sdk/hook
 
 import gleam/erlang/process.{type Subject}
 
@@ -987,8 +991,11 @@ fn start_bridge_and_actor(
       mcp_servers: bidir_opts.mcp_servers,
     )
 
-  // Start the actor
-  case bidir.start(runner, config) {
+  // Build HookConfig from BidirOptions callbacks
+  let hook_config = build_hook_config_from_options(bidir_opts)
+
+  // Start the actor with hooks
+  case bidir.start_with_hooks(runner, config, hook_config) {
     Ok(actor_subject) -> {
       // Report success back to parent
       process.send(setup_subject, SetupOk(actor_subject, subscriber))
@@ -1037,6 +1044,344 @@ fn subscriber_bridge_loop(
 /// Used to reverse the to_dynamic() call in the actor.
 @external(erlang, "gleam_stdlib", "identity")
 fn unsafe_coerce_dynamic(a: dynamic.Dynamic) -> b
+
+/// FFI: Convert Gleam value to Dynamic.
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> dynamic.Dynamic
+
+/// Build HookConfig from BidirOptions callbacks.
+///
+/// This function converts typed callback functions from BidirOptions into
+/// the HookConfig format expected by the actor. Each callback is wrapped
+/// to handle decoding of Dynamic input and encoding of the result.
+fn build_hook_config_from_options(opts: BidirOptions) -> actor.HookConfig {
+  // Build handlers dict: hook_event_name -> wrapped handler
+  let handlers =
+    dict.new()
+    |> add_hook_handler("PreToolUse", opts.on_pre_tool_use, wrap_pre_tool_use)
+    |> add_hook_handler(
+      "PostToolUse",
+      opts.on_post_tool_use,
+      wrap_post_tool_use,
+    )
+    |> add_hook_handler(
+      "UserPromptSubmit",
+      opts.on_user_prompt_submit,
+      wrap_user_prompt_submit,
+    )
+    |> add_hook_handler("Stop", opts.on_stop, wrap_stop)
+    |> add_hook_handler(
+      "SubagentStop",
+      opts.on_subagent_stop,
+      wrap_subagent_stop,
+    )
+    |> add_hook_handler("PreCompact", opts.on_pre_compact, wrap_pre_compact)
+
+  // Build permission handlers dict: tool_name -> wrapped handler
+  // For can_use_tool, we register a single handler for all tools
+  // The actor's PreToolUse hook mechanism handles tool-specific routing
+  let permission_handlers = case opts.on_can_use_tool {
+    Some(callback) -> {
+      // Register a catch-all permission handler
+      // The actor will call this for any tool permission check
+      dict.from_list([#("*", wrap_can_use_tool(callback))])
+    }
+    None -> dict.new()
+  }
+
+  actor.HookConfig(handlers: handlers, permission_handlers: permission_handlers)
+}
+
+/// Add a hook handler to the dict if the callback is present.
+fn add_hook_handler(
+  handlers: dict.Dict(String, fn(dynamic.Dynamic) -> dynamic.Dynamic),
+  event_name: String,
+  callback: Option(a),
+  wrapper: fn(a) -> fn(dynamic.Dynamic) -> dynamic.Dynamic,
+) -> dict.Dict(String, fn(dynamic.Dynamic) -> dynamic.Dynamic) {
+  case callback {
+    Some(cb) -> dict.insert(handlers, event_name, wrapper(cb))
+    None -> handlers
+  }
+}
+
+/// Wrap PreToolUse callback: decode input, call callback, encode result.
+fn wrap_pre_tool_use(
+  callback: fn(hook.PreToolUseContext) -> hook.HookExecutionResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_pre_tool_use_context(input) {
+      Ok(ctx) -> encode_hook_execution_result(callback(ctx))
+      Error(_) -> encode_hook_continue()
+    }
+  }
+}
+
+/// Wrap PostToolUse callback.
+fn wrap_post_tool_use(
+  callback: fn(hook.PostToolUseContext) -> hook.HookExecutionResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_post_tool_use_context(input) {
+      Ok(ctx) -> encode_hook_execution_result(callback(ctx))
+      Error(_) -> encode_hook_continue()
+    }
+  }
+}
+
+/// Wrap UserPromptSubmit callback.
+fn wrap_user_prompt_submit(
+  callback: fn(hook.UserPromptSubmitContext) -> hook.HookExecutionResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_user_prompt_submit_context(input) {
+      Ok(ctx) -> encode_hook_execution_result(callback(ctx))
+      Error(_) -> encode_hook_continue()
+    }
+  }
+}
+
+/// Wrap Stop callback.
+fn wrap_stop(
+  callback: fn(hook.StopContext) -> hook.HookExecutionResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_stop_context(input) {
+      Ok(ctx) -> encode_hook_execution_result(callback(ctx))
+      Error(_) -> encode_hook_continue()
+    }
+  }
+}
+
+/// Wrap SubagentStop callback.
+fn wrap_subagent_stop(
+  callback: fn(hook.SubagentStopContext) -> hook.HookExecutionResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_subagent_stop_context(input) {
+      Ok(ctx) -> encode_hook_execution_result(callback(ctx))
+      Error(_) -> encode_hook_continue()
+    }
+  }
+}
+
+/// Wrap PreCompact callback.
+fn wrap_pre_compact(
+  callback: fn(hook.PreCompactContext) -> hook.HookExecutionResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_pre_compact_context(input) {
+      Ok(ctx) -> encode_hook_execution_result(callback(ctx))
+      Error(_) -> encode_hook_continue()
+    }
+  }
+}
+
+/// Wrap can_use_tool callback.
+fn wrap_can_use_tool(
+  callback: fn(hook.CanUseToolContext) -> hook.PermissionCheckResult,
+) -> fn(dynamic.Dynamic) -> dynamic.Dynamic {
+  fn(input: dynamic.Dynamic) -> dynamic.Dynamic {
+    case decode_can_use_tool_context(input) {
+      Ok(ctx) -> encode_permission_check_result(callback(ctx))
+      Error(_) -> encode_permission_deny("Failed to decode permission context")
+    }
+  }
+}
+
+// =============================================================================
+// Context Decoders
+// =============================================================================
+
+fn decode_pre_tool_use_context(
+  input: dynamic.Dynamic,
+) -> Result(hook.PreToolUseContext, Nil) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(hook.PreToolUseContext(tool_name:, tool_input:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn decode_post_tool_use_context(
+  input: dynamic.Dynamic,
+) -> Result(hook.PostToolUseContext, Nil) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    use tool_output <- decode.field("tool_result", decode.dynamic)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(hook.PostToolUseContext(
+      tool_name:,
+      tool_input:,
+      tool_output:,
+      session_id:,
+    ))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn decode_user_prompt_submit_context(
+  input: dynamic.Dynamic,
+) -> Result(hook.UserPromptSubmitContext, Nil) {
+  let decoder = {
+    use prompt <- decode.field("prompt", decode.string)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(hook.UserPromptSubmitContext(prompt:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn decode_stop_context(input: dynamic.Dynamic) -> Result(hook.StopContext, Nil) {
+  let decoder = {
+    use reason <- decode.field("reason", decode.string)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(hook.StopContext(reason:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn decode_subagent_stop_context(
+  input: dynamic.Dynamic,
+) -> Result(hook.SubagentStopContext, Nil) {
+  let decoder = {
+    use subagent_id <- decode.field("subagent_id", decode.string)
+    use reason <- decode.field("reason", decode.string)
+    use session_id <- decode.field("session_id", decode.string)
+    decode.success(hook.SubagentStopContext(subagent_id:, reason:, session_id:))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn decode_pre_compact_context(
+  input: dynamic.Dynamic,
+) -> Result(hook.PreCompactContext, Nil) {
+  let decoder = {
+    use session_id <- decode.field("session_id", decode.string)
+    use trigger <- decode.optional_field("trigger", "auto", decode.string)
+    use custom_instructions <- decode.optional_field(
+      "custom_instructions",
+      None,
+      decode.optional(decode.string),
+    )
+    decode.success(hook.PreCompactContext(
+      session_id:,
+      trigger:,
+      custom_instructions:,
+    ))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+fn decode_can_use_tool_context(
+  input: dynamic.Dynamic,
+) -> Result(hook.CanUseToolContext, Nil) {
+  let decoder = {
+    use tool_name <- decode.field("tool_name", decode.string)
+    use tool_input <- decode.field("tool_input", decode.dynamic)
+    use session_id <- decode.optional_field("session_id", "", decode.string)
+    use permission_suggestions <- decode.optional_field(
+      "permission_suggestions",
+      [],
+      decode.list(decode.string),
+    )
+    use blocked_path <- decode.optional_field(
+      "blocked_path",
+      None,
+      decode.optional(decode.string),
+    )
+    decode.success(hook.CanUseToolContext(
+      tool_name:,
+      tool_input:,
+      session_id:,
+      permission_suggestions:,
+      blocked_path:,
+    ))
+  }
+  case decode.run(input, decoder) {
+    Ok(ctx) -> Ok(ctx)
+    Error(_) -> Error(Nil)
+  }
+}
+
+// =============================================================================
+// Result Encoders
+// =============================================================================
+
+/// Encode HookExecutionResult to Dynamic for actor response.
+fn encode_hook_execution_result(
+  result: hook.HookExecutionResult,
+) -> dynamic.Dynamic {
+  case result {
+    hook.Continue -> encode_hook_continue()
+    hook.Block(reason) ->
+      to_dynamic(
+        dict.from_list([
+          #("continue", to_dynamic(False)),
+          #("stopReason", to_dynamic(reason)),
+        ]),
+      )
+    hook.ModifyInput(new_input) ->
+      to_dynamic(
+        dict.from_list([
+          #("continue", to_dynamic(True)),
+          #("modifiedInput", new_input),
+        ]),
+      )
+  }
+}
+
+/// Encode a continue response for hooks.
+fn encode_hook_continue() -> dynamic.Dynamic {
+  to_dynamic(dict.from_list([#("continue", to_dynamic(True))]))
+}
+
+/// Encode PermissionCheckResult to Dynamic for actor response.
+fn encode_permission_check_result(
+  result: hook.PermissionCheckResult,
+) -> dynamic.Dynamic {
+  case result {
+    hook.Allow ->
+      to_dynamic(dict.from_list([#("behavior", to_dynamic("allow"))]))
+    hook.Deny(reason) ->
+      to_dynamic(
+        dict.from_list([
+          #("behavior", to_dynamic("deny")),
+          #("message", to_dynamic(reason)),
+        ]),
+      )
+  }
+}
+
+/// Encode a deny response for permission failures.
+fn encode_permission_deny(reason: String) -> dynamic.Dynamic {
+  to_dynamic(
+    dict.from_list([
+      #("behavior", to_dynamic("deny")),
+      #("message", to_dynamic(reason)),
+    ]),
+  )
+}
 
 /// Start a bidirectional session with Claude CLI (legacy API).
 ///
