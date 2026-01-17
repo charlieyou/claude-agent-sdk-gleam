@@ -1,8 +1,9 @@
 /// Tests for CLI argument building from QueryOptions.
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/options.{
-  type AgentConfig, type BidirOptions, AcceptEdits, AgentConfig, BidirOptions,
-  BypassPermissions, Plan, bidir_options, cli_options, default_options,
+  type AgentConfig, type BidirOptions, type CliOptions, type SandboxConfig,
+  AcceptEdits, AgentConfig, BidirOptions, BypassPermissions, CliOptions, Plan,
+  SandboxConfig, bidir_options, cli_options, default_options, sandbox_config,
   with_allowed_tools_query as with_allowed_tools,
   with_append_system_prompt_query as with_append_system_prompt,
   with_continue_query as with_continue,
@@ -11,15 +12,21 @@ import claude_agent_sdk/options.{
   with_max_turns_query as with_max_turns,
   with_mcp_config_query as with_mcp_config, with_model_query as with_model,
   with_permission_mode_query as with_permission_mode,
-  with_resume_query as with_resume,
+  with_resume_query as with_resume, with_sandbox_config,
   with_system_prompt_query as with_system_prompt,
 }
+import gleam/dict
+import gleam/dynamic
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/result
 import gleam/string
 import gleeunit/should
 import simplifile
+
+/// Convert any value to Dynamic using Erlang identity function.
+@external(erlang, "gleam_stdlib", "identity")
+fn to_dynamic(a: a) -> dynamic.Dynamic
 
 // =============================================================================
 // Helper functions
@@ -619,4 +626,193 @@ pub fn bidir_agents_unique_paths_test() {
     }
     _, _ -> should.fail()
   }
+}
+
+// =============================================================================
+// Tests for plugins (repeated --plugin flag)
+// =============================================================================
+
+/// plugins=None produces no --plugin flag
+pub fn bidir_plugins_none_test() {
+  let opts = BidirOptions(..bidir_options(), plugins: None)
+  let args = build_bidir_args(opts)
+
+  assert_not_contains(args, "--plugin")
+}
+
+/// plugins=Some([]) produces no --plugin flags
+pub fn bidir_plugins_empty_list_test() {
+  let opts = BidirOptions(..bidir_options(), plugins: Some([]))
+  let args = build_bidir_args(opts)
+
+  assert_not_contains(args, "--plugin")
+}
+
+/// plugins with single entry produces one --plugin flag
+pub fn bidir_plugins_single_test() {
+  let opts = BidirOptions(..bidir_options(), plugins: Some(["my-plugin"]))
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--plugin")
+  assert_contains(args, "my-plugin")
+
+  // Verify flag and value are adjacent
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "--plugin my-plugin") |> should.be_true
+}
+
+/// plugins with multiple entries produces repeated --plugin flags
+pub fn bidir_plugins_multiple_test() {
+  let opts =
+    BidirOptions(
+      ..bidir_options(),
+      plugins: Some(["plugin-a", "plugin-b", "plugin-c"]),
+    )
+  let args = build_bidir_args(opts)
+
+  // Each plugin should have its own --plugin flag
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "--plugin plugin-a") |> should.be_true
+  string.contains(args_str, "--plugin plugin-b") |> should.be_true
+  string.contains(args_str, "--plugin plugin-c") |> should.be_true
+
+  // Count --plugin occurrences - should be 3
+  let plugin_count = list.filter(args, fn(a) { a == "--plugin" }) |> list.length
+  plugin_count |> should.equal(3)
+}
+
+// =============================================================================
+// Tests for sandbox (merged into --settings JSON)
+// =============================================================================
+
+/// Helper to build bidir args with custom CLI options (for settings tests)
+fn build_bidir_args_with_cli(
+  cli_opts: CliOptions,
+  bidir_opts: BidirOptions,
+) -> List(String) {
+  cli.build_bidir_cli_args_new(cli_opts, bidir_opts)
+  |> result.map(fn(r) { r.args })
+  |> result.unwrap([])
+}
+
+/// sandbox=None produces no sandbox in --settings
+pub fn bidir_sandbox_none_test() {
+  let opts = BidirOptions(..bidir_options(), sandbox: None)
+  let args = build_bidir_args(opts)
+
+  // Should not have --settings flag (since no settings and no sandbox)
+  assert_not_contains(args, "--settings")
+}
+
+/// sandbox with basic type produces --settings with sandbox object
+pub fn bidir_sandbox_basic_test() {
+  let sandbox = sandbox_config("docker")
+  let opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--settings")
+
+  // Find the settings value
+  let args_str = string.join(args, " ")
+  // Should contain sandbox with type
+  string.contains(args_str, "\"sandbox\"") |> should.be_true
+  string.contains(args_str, "\"type\":\"docker\"") |> should.be_true
+}
+
+/// sandbox with additional config options
+pub fn bidir_sandbox_with_config_test() {
+  let sandbox =
+    sandbox_config("container")
+    |> with_sandbox_config("image", to_dynamic("ubuntu:latest"))
+    |> with_sandbox_config("memory", to_dynamic("2g"))
+  let opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--settings")
+
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "\"type\":\"container\"") |> should.be_true
+  string.contains(args_str, "\"image\":\"ubuntu:latest\"") |> should.be_true
+  string.contains(args_str, "\"memory\":\"2g\"") |> should.be_true
+}
+
+/// sandbox merges with existing settings
+pub fn bidir_sandbox_merge_with_settings_test() {
+  // Create CLI options with existing settings
+  let existing_settings =
+    dict.new()
+    |> dict.insert("theme", to_dynamic("dark"))
+    |> dict.insert("fontSize", to_dynamic(14))
+  let cli_opts = CliOptions(..cli_options(), settings: Some(existing_settings))
+
+  // Create bidir options with sandbox
+  let sandbox = sandbox_config("docker")
+  let bidir_opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+
+  let args = build_bidir_args_with_cli(cli_opts, bidir_opts)
+
+  assert_contains(args, "--settings")
+
+  // Settings should contain both original settings and sandbox
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "\"theme\":\"dark\"") |> should.be_true
+  string.contains(args_str, "\"fontSize\":14") |> should.be_true
+  string.contains(args_str, "\"sandbox\"") |> should.be_true
+  string.contains(args_str, "\"type\":\"docker\"") |> should.be_true
+
+  // Should only have ONE --settings flag
+  let settings_count =
+    list.filter(args, fn(a) { a == "--settings" }) |> list.length
+  settings_count |> should.equal(1)
+}
+
+/// sandbox=None with existing settings preserves original settings
+pub fn bidir_sandbox_none_with_settings_test() {
+  // Create CLI options with existing settings
+  let existing_settings =
+    dict.new()
+    |> dict.insert("theme", to_dynamic("light"))
+  let cli_opts = CliOptions(..cli_options(), settings: Some(existing_settings))
+
+  // No sandbox
+  let bidir_opts = BidirOptions(..bidir_options(), sandbox: None)
+
+  let args = build_bidir_args_with_cli(cli_opts, bidir_opts)
+
+  assert_contains(args, "--settings")
+
+  // Settings should contain original settings without sandbox
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "\"theme\":\"light\"") |> should.be_true
+  // sandbox key should not be present
+  string.contains(args_str, "\"sandbox\"") |> should.be_false
+}
+
+// =============================================================================
+// Tests for combined plugins and sandbox
+// =============================================================================
+
+/// Both plugins and sandbox work together
+pub fn bidir_plugins_and_sandbox_combined_test() {
+  let sandbox =
+    sandbox_config("docker")
+    |> with_sandbox_config("privileged", to_dynamic(False))
+  let opts =
+    BidirOptions(
+      ..bidir_options(),
+      plugins: Some(["auth-plugin", "logging-plugin"]),
+      sandbox: Some(sandbox),
+    )
+  let args = build_bidir_args(opts)
+
+  // Plugins should be present
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "--plugin auth-plugin") |> should.be_true
+  string.contains(args_str, "--plugin logging-plugin") |> should.be_true
+
+  // Sandbox should be in settings
+  assert_contains(args, "--settings")
+  string.contains(args_str, "\"sandbox\"") |> should.be_true
+  string.contains(args_str, "\"type\":\"docker\"") |> should.be_true
+  string.contains(args_str, "\"privileged\":false") |> should.be_true
 }

@@ -8,7 +8,8 @@ import claude_agent_sdk/internal/port_io.{
 }
 import claude_agent_sdk/options.{
   type AgentConfig, type BidirOptions, type CliOptions, type PermissionMode,
-  type QueryOptions, AcceptEdits, AgentConfig, BypassPermissions, Plan,
+  type QueryOptions, type SandboxConfig, AcceptEdits, AgentConfig,
+  BypassPermissions, Plan, SandboxConfig,
 }
 import gleam/bit_array
 import gleam/dict
@@ -459,6 +460,23 @@ pub fn build_bidir_cli_args_new(
     None -> args
   }
 
+  // plugins: repeated --plugin flag (one per plugin)
+  let args = case bidir_options.plugins {
+    Some(plugins) ->
+      list.fold(plugins, args, fn(acc, plugin) {
+        list.append(acc, ["--plugin", plugin])
+      })
+    None -> args
+  }
+
+  // sandbox: merge into settings JSON
+  // If sandbox is present, we need to merge it with any existing settings
+  let args = case bidir_options.sandbox {
+    Some(sandbox) ->
+      merge_sandbox_into_args(args, sandbox, cli_options.settings)
+    None -> args
+  }
+
   // agents: None/empty = no flag, ≤3 = inline JSON, >3 = @tempfile
   case serialize_agents_for_cli(bidir_options.agents) {
     Ok(#(agent_args, cleanup_file)) -> {
@@ -611,6 +629,70 @@ fn settings_to_json(settings: dict.Dict(String, Dynamic)) -> String {
 /// Uses Erlang's json:encode with custom encoder for Gleam types.
 @external(erlang, "control_encoder_ffi", "encode_dynamic")
 fn dynamic_to_json(value: Dynamic) -> Json
+
+// ============================================================================
+// Sandbox Serialization
+// ============================================================================
+
+/// Convert SandboxConfig to JSON value.
+fn sandbox_config_to_json(sandbox: SandboxConfig) -> Json {
+  // Build the sandbox object with type and any additional config
+  let base_pairs = [#("type", json.string(sandbox.sandbox_type))]
+  let config_pairs =
+    sandbox.config
+    |> dict.to_list
+    |> list.map(fn(pair) { #(pair.0, dynamic_to_json(pair.1)) })
+  json.object(list.append(base_pairs, config_pairs))
+}
+
+/// Merge sandbox config into CLI args, combining with existing settings if present.
+/// This removes any existing --settings flag and re-adds it with sandbox merged in.
+fn merge_sandbox_into_args(
+  args: List(String),
+  sandbox: SandboxConfig,
+  existing_settings: Option(dict.Dict(String, Dynamic)),
+) -> List(String) {
+  // Build the merged settings object
+  let sandbox_json = sandbox_config_to_json(sandbox)
+
+  // Start with existing settings or empty object
+  let base_pairs = case existing_settings {
+    Some(settings) ->
+      settings
+      |> dict.to_list
+      |> list.map(fn(pair) { #(pair.0, dynamic_to_json(pair.1)) })
+    None -> []
+  }
+
+  // Add sandbox to the settings
+  let merged_pairs = list.append(base_pairs, [#("sandbox", sandbox_json)])
+  let merged_json = json.object(merged_pairs) |> json.to_string
+
+  // Remove any existing --settings flag and its value from args
+  let args_without_settings = remove_flag_with_value(args, "--settings")
+
+  // Add the merged --settings flag
+  list.append(args_without_settings, ["--settings", merged_json])
+}
+
+/// Remove a flag and its value from the args list.
+fn remove_flag_with_value(args: List(String), flag: String) -> List(String) {
+  remove_flag_helper(args, flag, [])
+}
+
+fn remove_flag_helper(
+  args: List(String),
+  flag: String,
+  acc: List(String),
+) -> List(String) {
+  case args {
+    [] -> list.reverse(acc)
+    [arg, value, ..rest] if arg == flag ->
+      // Skip this flag and its value
+      remove_flag_helper(rest, flag, acc)
+    [arg, ..rest] -> remove_flag_helper(rest, flag, [arg, ..acc])
+  }
+}
 
 // ============================================================================
 // Agent Serialization
