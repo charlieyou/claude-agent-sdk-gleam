@@ -118,6 +118,8 @@ pub type CliOptions {
     add_dirs: Option(List(String)),
     env: Option(Dict(String, String)),
     extra_args: Option(List(String)),
+    /// JSON Schema for structured output validation (--json-schema).
+    json_schema: Option(String),
   )
 }
 
@@ -144,6 +146,7 @@ pub fn cli_options() -> CliOptions {
     add_dirs: None,
     env: None,
     extra_args: None,
+    json_schema: None,
   )
 }
 
@@ -388,6 +391,7 @@ pub fn cli_options_from_query(opts: QueryOptions) -> CliOptions {
     add_dirs: None,
     env: None,
     extra_args: None,
+    json_schema: None,
   )
 }
 
@@ -614,6 +618,15 @@ pub fn with_env(options: CliOptions, env: Dict(String, String)) -> CliOptions {
 /// Set extra CLI arguments to append at the end.
 pub fn with_extra_args(options: CliOptions, args: List(String)) -> CliOptions {
   CliOptions(..options, extra_args: Some(args))
+}
+
+/// Set JSON Schema for structured output validation.
+///
+/// Maps to CLI flag: `--json-schema`
+///
+/// Example schema: `{"type":"object","properties":{"name":{"type":"string"}},"required":["name"]}`
+pub fn with_json_schema(options: CliOptions, schema: String) -> CliOptions {
+  CliOptions(..options, json_schema: Some(schema))
 }
 
 // =============================================================================
@@ -1124,6 +1137,8 @@ pub fn merge_cli_options(base: CliOptions, override: CliOptions) -> CliOptions {
       base.disallowed_tools,
       override.disallowed_tools,
     ),
+    // Scalar field - override wins if Some
+    json_schema: merge_option(base.json_schema, override.json_schema),
   )
 }
 

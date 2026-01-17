@@ -603,6 +603,12 @@ fn build_args_with_base_cli(
     None -> args
   }
 
+  // Add optional json_schema for structured output
+  let args = case options.json_schema {
+    Some(schema) -> list.append(args, ["--json-schema", schema])
+    None -> args
+  }
+
   // Add extra_args before prompt separator (so they're treated as flags)
   let args = case options.extra_args {
     Some(extra) -> list.append(args, extra)
