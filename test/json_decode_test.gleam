@@ -1,6 +1,7 @@
 /// Tests for JSON decoding of Claude CLI messages.
 ///
 /// These tests load fixtures from test/fixtures/ and verify decoder behavior.
+import claude_agent_sdk/content
 import claude_agent_sdk/internal/decoder
 import claude_agent_sdk/message
 import gleam/bit_array
@@ -154,6 +155,63 @@ pub fn decode_tool_use_block_missing_id_field_test() {
       }
     }
     Ok(_) -> panic as "Expected error for tool_use block missing id field"
+    Error(_) ->
+      panic as "Expected JsonDecodeError for missing field, got different error type"
+  }
+}
+
+// =============================================================================
+// ThinkingBlock Tests
+// =============================================================================
+
+pub fn decode_thinking_block_with_signature_test() {
+  // ThinkingBlock with signature field
+  let json =
+    "{\"type\": \"thinking\", \"thinking\": \"Let me analyze this problem...\", \"signature\": \"abc123sig\"}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_content_block(dynamic) {
+    Ok(content.ThinkingBlock(thinking:, signature:)) -> {
+      should.equal(thinking, "Let me analyze this problem...")
+      should.equal(signature, Some("abc123sig"))
+    }
+    Ok(_) -> panic as "Expected ThinkingBlock variant"
+    Error(_) -> panic as "Expected successful decode for thinking block"
+  }
+}
+
+pub fn decode_thinking_block_without_signature_test() {
+  // ThinkingBlock without signature field (signature is optional)
+  let json = "{\"type\": \"thinking\", \"thinking\": \"Analyzing...\"}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_content_block(dynamic) {
+    Ok(content.ThinkingBlock(thinking:, signature:)) -> {
+      should.equal(thinking, "Analyzing...")
+      should.equal(signature, None)
+    }
+    Ok(_) -> panic as "Expected ThinkingBlock variant"
+    Error(_) ->
+      panic as "Expected successful decode for thinking block without signature"
+  }
+}
+
+pub fn decode_thinking_block_missing_thinking_field_test() {
+  // ThinkingBlock missing required "thinking" field must error
+  let json = "{\"type\": \"thinking\", \"signature\": \"sig\"}"
+  let dynamic = parse_json_to_dynamic(json)
+  case decoder.decode_content_block(dynamic) {
+    Error(decoder.JsonDecodeError(msg)) -> {
+      let has_thinkingblock = string.contains(msg, "ThinkingBlock")
+      let has_missing = string.contains(msg, "missing")
+      case has_thinkingblock && has_missing {
+        True -> Nil
+        False ->
+          panic as {
+            "Expected error mentioning ThinkingBlock missing field, got: "
+            <> msg
+          }
+      }
+    }
+    Ok(_) -> panic as "Expected error for thinking block missing thinking field"
     Error(_) ->
       panic as "Expected JsonDecodeError for missing field, got different error type"
   }

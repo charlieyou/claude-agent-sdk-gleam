@@ -19,6 +19,7 @@
 /// case block {
 ///   content.TextBlock(text) -> // handle text
 ///   content.ToolUseBlock(id, name, input) -> // handle tool use
+///   content.ThinkingBlock(thinking, signature) -> // handle thinking
 ///   content.UnknownBlock(raw) -> // forward compatibility
 /// }
 /// ```
@@ -37,6 +38,10 @@ pub type ContentBlock {
   /// - `name`: Tool name (e.g., "Bash", "Read", "Write")
   /// - `input`: Tool-specific input parameters as Dynamic JSON
   ToolUseBlock(id: String, name: String, input: Dynamic)
+  /// Thinking block containing Claude's extended thinking.
+  /// - `thinking`: The thinking content
+  /// - `signature`: Optional signature for thinking block verification
+  ThinkingBlock(thinking: String, signature: Option(String))
   /// Unknown block type for forward compatibility.
   /// Preserves raw Dynamic data for block types added in future CLI versions.
   UnknownBlock(raw: Dynamic)

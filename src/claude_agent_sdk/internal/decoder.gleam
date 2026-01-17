@@ -17,8 +17,8 @@
 /// - `decode_text_block` - validates type is "text" and text field exists
 /// - `decode_tool_use_block` - validates type is "tool_use" and id/name/input exist
 import claude_agent_sdk/content.{
-  type ContentBlock, type ToolResultBlock, TextBlock, ToolResultBlock,
-  ToolUseBlock, UnknownBlock,
+  type ContentBlock, type ToolResultBlock, TextBlock, ThinkingBlock,
+  ToolResultBlock, ToolUseBlock, UnknownBlock,
 }
 import claude_agent_sdk/message.{
   type AssistantMessageContent, type McpServerStatus, type Message,
@@ -610,6 +610,7 @@ pub fn decode_content_block(raw: Dynamic) -> Result(ContentBlock, DecodeError) {
       case block_type {
         "text" -> decode_text_block_inner(raw)
         "tool_use" -> decode_tool_use_block_inner(raw)
+        "thinking" -> decode_thinking_block_inner(raw)
         // Unknown types yield UnknownBlock for forward compatibility
         _ -> Ok(UnknownBlock(raw))
       }
@@ -651,6 +652,29 @@ fn decode_tool_use_block_inner(
     Error(errors) ->
       Error(JsonDecodeError(
         "ToolUseBlock missing required field: " <> format_decode_errors(errors),
+      ))
+  }
+}
+
+/// Decode a ThinkingBlock from Dynamic (internal helper).
+/// Returns Error if required "thinking" field is missing.
+fn decode_thinking_block_inner(
+  raw: Dynamic,
+) -> Result(ContentBlock, DecodeError) {
+  let decoder = {
+    use thinking <- decode.field("thinking", decode.string)
+    use signature <- decode.optional_field(
+      "signature",
+      None,
+      decode.optional(decode.string),
+    )
+    decode.success(#(thinking, signature))
+  }
+  case decode.run(raw, decoder) {
+    Ok(#(thinking, signature)) -> Ok(ThinkingBlock(thinking:, signature:))
+    Error(errors) ->
+      Error(JsonDecodeError(
+        "ThinkingBlock missing required field: " <> format_decode_errors(errors),
       ))
   }
 }
