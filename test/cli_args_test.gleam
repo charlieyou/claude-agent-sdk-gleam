@@ -1,8 +1,8 @@
 /// Tests for CLI argument building from QueryOptions.
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/options.{
-  type BidirOptions, AcceptEdits, BidirOptions, BypassPermissions, Plan,
-  bidir_options, cli_options, default_options,
+  type AgentConfig, type BidirOptions, AcceptEdits, AgentConfig, BidirOptions,
+  BypassPermissions, Plan, bidir_options, cli_options, default_options,
   with_allowed_tools_query as with_allowed_tools,
   with_append_system_prompt_query as with_append_system_prompt,
   with_continue_query as with_continue,
@@ -15,9 +15,11 @@ import claude_agent_sdk/options.{
   with_system_prompt_query as with_system_prompt,
 }
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 import gleeunit/should
+import simplifile
 
 // =============================================================================
 // Helper functions
@@ -335,8 +337,18 @@ pub fn combined_options_test() {
 // Tests for build_bidir_cli_args_new with BidirOptions
 // =============================================================================
 
-/// Helper to build bidir args with default CLI options
+/// Helper to build bidir args with default CLI options.
+/// Unwraps the Result and returns just the args.
 fn build_bidir_args(bidir_opts: BidirOptions) -> List(String) {
+  cli.build_bidir_cli_args_new(cli_options(), bidir_opts)
+  |> result.map(fn(r) { r.args })
+  |> result.unwrap([])
+}
+
+/// Helper to build bidir args and return the full result (for cleanup testing).
+fn build_bidir_args_result(
+  bidir_opts: BidirOptions,
+) -> Result(cli.BidirArgsResult, cli.AgentsSerializationError) {
   cli.build_bidir_cli_args_new(cli_options(), bidir_opts)
 }
 
@@ -449,4 +461,130 @@ pub fn bidir_combined_options_test() {
   // Fixed bidir args should still be present
   assert_contains(args, "--input-format")
   assert_contains(args, "--verbose")
+}
+
+// =============================================================================
+// Tests for agents serialization (inline vs temp file)
+// =============================================================================
+
+/// Helper to create a test agent config
+fn test_agent(name: String) -> AgentConfig {
+  AgentConfig(
+    name: name,
+    description: "Test agent " <> name,
+    prompt: "You are " <> name,
+  )
+}
+
+/// agents=None produces no --agents flag
+pub fn bidir_agents_none_test() {
+  let opts = BidirOptions(..bidir_options(), agents: None)
+  let args = build_bidir_args(opts)
+
+  assert_not_contains(args, "--agents")
+}
+
+/// agents=Some([]) produces no --agents flag (not --agents '[]')
+pub fn bidir_agents_empty_list_test() {
+  let opts = BidirOptions(..bidir_options(), agents: Some([]))
+  let args = build_bidir_args(opts)
+
+  assert_not_contains(args, "--agents")
+}
+
+/// agents with 1 entry produces inline JSON
+pub fn bidir_agents_one_inline_test() {
+  let opts =
+    BidirOptions(..bidir_options(), agents: Some([test_agent("alpha")]))
+  let result = build_bidir_args_result(opts)
+
+  // Should succeed with no cleanup file
+  result |> should.be_ok
+  let r = result |> result.unwrap(cli.BidirArgsResult([], None))
+
+  // Should have --agents with inline JSON
+  assert_contains(r.args, "--agents")
+  r.cleanup_file |> should.equal(None)
+
+  // Find the value after --agents
+  let args_str = string.join(r.args, " ")
+  string.contains(args_str, "--agents [") |> should.be_true
+  string.contains(args_str, "\"name\":\"alpha\"") |> should.be_true
+}
+
+/// agents with exactly 3 entries produces inline JSON (boundary case)
+pub fn bidir_agents_three_inline_test() {
+  let agents = [test_agent("alpha"), test_agent("beta"), test_agent("gamma")]
+  let opts = BidirOptions(..bidir_options(), agents: Some(agents))
+  let result = build_bidir_args_result(opts)
+
+  // Should succeed with no cleanup file (3 is threshold)
+  result |> should.be_ok
+  let r = result |> result.unwrap(cli.BidirArgsResult([], None))
+
+  // Should have inline JSON, not file reference
+  assert_contains(r.args, "--agents")
+  r.cleanup_file |> should.equal(None)
+
+  // Verify inline format (not @file)
+  let args_str = string.join(r.args, " ")
+  string.contains(args_str, "--agents [") |> should.be_true
+  string.contains(args_str, "--agents @") |> should.be_false
+}
+
+/// agents with 4 entries produces temp file reference
+pub fn bidir_agents_four_tempfile_test() {
+  let agents = [
+    test_agent("alpha"),
+    test_agent("beta"),
+    test_agent("gamma"),
+    test_agent("delta"),
+  ]
+  let opts = BidirOptions(..bidir_options(), agents: Some(agents))
+  let result = build_bidir_args_result(opts)
+
+  // Should succeed with cleanup file
+  result |> should.be_ok
+  let r = result |> result.unwrap(cli.BidirArgsResult([], None))
+
+  // Should have --agents with @file reference
+  assert_contains(r.args, "--agents")
+  r.cleanup_file |> should.be_some
+
+  // Verify @file format
+  let args_str = string.join(r.args, " ")
+  string.contains(args_str, "--agents @/tmp/agents-") |> should.be_true
+  string.contains(args_str, ".json") |> should.be_true
+
+  // Verify temp file exists and contains valid JSON
+  case r.cleanup_file {
+    Some(path) -> {
+      // File should exist
+      simplifile.is_file(path) |> should.be_ok
+      let is_file = simplifile.is_file(path) |> result.unwrap(False)
+      is_file |> should.be_true
+
+      // File should contain JSON array with 4 agents
+      let content = simplifile.read(path) |> result.unwrap("")
+      string.contains(content, "\"name\":\"alpha\"") |> should.be_true
+      string.contains(content, "\"name\":\"delta\"") |> should.be_true
+
+      // Clean up the temp file
+      cli.cleanup_agents_file(path)
+
+      // File should be deleted
+      simplifile.is_file(path)
+      |> result.unwrap(True)
+      |> should.be_false
+    }
+    None -> should.fail()
+  }
+}
+
+/// cleanup_agents_file is idempotent (no error on missing file)
+pub fn bidir_agents_cleanup_idempotent_test() {
+  // Call cleanup on non-existent file - should not fail
+  cli.cleanup_agents_file("/tmp/nonexistent-agents-file-xyz123.json")
+  // If we get here without exception, the test passes
+  True |> should.be_true
 }

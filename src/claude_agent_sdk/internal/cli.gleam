@@ -7,8 +7,8 @@ import claude_agent_sdk/internal/port_io.{
   type Port, Data, Eof, ExitStatus, Timeout,
 }
 import claude_agent_sdk/options.{
-  type BidirOptions, type CliOptions, type PermissionMode, type QueryOptions,
-  AcceptEdits, BypassPermissions, Plan,
+  type AgentConfig, type BidirOptions, type CliOptions, type PermissionMode,
+  type QueryOptions, AcceptEdits, AgentConfig, BypassPermissions, Plan,
 }
 import gleam/bit_array
 import gleam/dict
@@ -20,6 +20,7 @@ import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/string
+import simplifile
 
 // ============================================================================
 // Version Detection Types
@@ -407,10 +408,14 @@ pub fn build_cli_args_new(options: CliOptions, prompt: String) -> List(String) {
 /// Build CLI arguments for bidirectional mode from CliOptions and BidirOptions.
 /// Includes --input-format stream-json in addition to all standard args.
 /// BidirOptions fields that affect CLI args are also emitted.
+///
+/// Returns a BidirArgsResult containing the args and an optional cleanup file path.
+/// For agents with >3 entries, a temp file is created and must be cleaned up
+/// after CLI spawn using `cleanup_agents_file`.
 pub fn build_bidir_cli_args_new(
   cli_options: CliOptions,
   bidir_options: BidirOptions,
-) -> List(String) {
+) -> Result(BidirArgsResult, AgentsSerializationError) {
   // Start with base args, but output_format may override stream-json
   let output_format = case bidir_options.output_format {
     Some(fmt) -> fmt
@@ -454,7 +459,14 @@ pub fn build_bidir_cli_args_new(
     None -> args
   }
 
-  args
+  // agents: None/empty = no flag, ≤3 = inline JSON, >3 = @tempfile
+  case serialize_agents_for_cli(bidir_options.agents) {
+    Ok(#(agent_args, cleanup_file)) -> {
+      let final_args = list.append(args, agent_args)
+      Ok(BidirArgsResult(args: final_args, cleanup_file: cleanup_file))
+    }
+    Error(err) -> Error(err)
+  }
 }
 
 /// Internal helper to build CLI arguments from CliOptions.
@@ -599,3 +611,91 @@ fn settings_to_json(settings: dict.Dict(String, Dynamic)) -> String {
 /// Uses Erlang's json:encode with custom encoder for Gleam types.
 @external(erlang, "control_encoder_ffi", "encode_dynamic")
 fn dynamic_to_json(value: Dynamic) -> Json
+
+// ============================================================================
+// Agent Serialization
+// ============================================================================
+
+/// Threshold for inline vs file-based agent serialization.
+/// Agents ≤ this count are serialized inline; more are written to a temp file.
+const agents_inline_threshold = 3
+
+/// Generate a unique integer for temp file naming.
+@external(erlang, "claude_agent_sdk_ffi", "unique_integer")
+fn unique_integer() -> Int
+
+/// Convert an AgentConfig to JSON.
+fn agent_config_to_json(agent: AgentConfig) -> Json {
+  json.object([
+    #("name", json.string(agent.name)),
+    #("description", json.string(agent.description)),
+    #("prompt", json.string(agent.prompt)),
+  ])
+}
+
+/// Serialize a list of agents to JSON string.
+fn agents_to_json_string(agents: List(AgentConfig)) -> String {
+  agents
+  |> list.map(agent_config_to_json)
+  |> json.array(fn(x) { x })
+  |> json.to_string
+}
+
+/// Error type for agents serialization failures.
+pub type AgentsSerializationError {
+  /// Failed to write agents to temp file.
+  AgentsFileWriteError(path: String, reason: simplifile.FileError)
+}
+
+/// Result of building bidir CLI args with potential cleanup needed.
+pub type BidirArgsResult {
+  BidirArgsResult(
+    /// CLI arguments to pass to the process.
+    args: List(String),
+    /// Optional temp file path that needs cleanup after CLI spawn.
+    cleanup_file: Option(String),
+  )
+}
+
+/// Serialize agents for CLI args.
+/// Returns (args_to_append, optional_cleanup_path).
+///
+/// Rules:
+/// - None or empty list: no args, no cleanup
+/// - 1-3 agents: inline JSON, no cleanup
+/// - 4+ agents: write to temp file, return cleanup path
+fn serialize_agents_for_cli(
+  agents: Option(List(AgentConfig)),
+) -> Result(#(List(String), Option(String)), AgentsSerializationError) {
+  case agents {
+    None -> Ok(#([], None))
+    Some([]) -> Ok(#([], None))
+    Some(agent_list) -> {
+      let agent_count = list.length(agent_list)
+      case agent_count <= agents_inline_threshold {
+        True -> {
+          // Inline JSON for small lists
+          let json_str = agents_to_json_string(agent_list)
+          Ok(#(["--agents", json_str], None))
+        }
+        False -> {
+          // Write to temp file for large lists
+          let id = unique_integer()
+          let path = "/tmp/agents-" <> int.to_string(id) <> ".json"
+          let json_str = agents_to_json_string(agent_list)
+          case simplifile.write(path, json_str) {
+            Ok(Nil) -> Ok(#(["--agents", "@" <> path], Some(path)))
+            Error(err) -> Error(AgentsFileWriteError(path, err))
+          }
+        }
+      }
+    }
+  }
+}
+
+/// Delete a temp file created for agents serialization.
+/// Idempotent - silently ignores if file doesn't exist.
+pub fn cleanup_agents_file(path: String) -> Nil {
+  let _ = simplifile.delete(path)
+  Nil
+}

@@ -356,6 +356,8 @@ pub type StartError {
   ActorStartFailed(reason: String)
   /// Runner failed to start.
   RunnerStartFailed(reason: String)
+  /// Failed to write agents to temp file for CLI args.
+  AgentsFileWriteFailed(path: String, reason: String)
 }
 
 /// Convert a StartError to a human-readable string.
@@ -367,6 +369,8 @@ pub fn start_error_to_string(error: StartError) -> String {
     SpawnFailed(reason) -> "Failed to spawn CLI process: " <> reason
     ActorStartFailed(reason) -> "Actor failed to start: " <> reason
     RunnerStartFailed(reason) -> "Runner failed to start: " <> reason
+    AgentsFileWriteFailed(path, reason) ->
+      "Failed to write agents to " <> path <> ": " <> reason
   }
 }
 

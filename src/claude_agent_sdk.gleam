@@ -31,6 +31,7 @@ import gleam/dynamic
 import gleam/list
 import gleam/option.{None, Some}
 import gleam/string
+import simplifile
 
 import gleam/erlang/process.{type Subject}
 
@@ -885,20 +886,45 @@ pub fn start_session_new(
 
   // Get or create runner
   let runner_result = case bidir_opts.bidir_runner_factory {
-    Some(factory) -> Ok(factory())
+    Some(factory) -> Ok(#(factory(), None))
     None -> {
-      let args = cli.build_bidir_cli_args_new(cli_opts, bidir_opts)
-      // Use cli_opts.cli_path if provided, otherwise discover via PATH
-      case cli_opts.cli_path {
-        Some(custom_path) -> bidir_runner.start_with_path(custom_path, args)
-        None -> bidir_runner.start(args)
+      // Build CLI args - may create temp file for agents
+      case cli.build_bidir_cli_args_new(cli_opts, bidir_opts) {
+        Error(cli.AgentsFileWriteError(path, file_err)) -> {
+          let reason = case file_err {
+            simplifile.Eacces -> "permission denied"
+            simplifile.Enoent -> "directory not found"
+            simplifile.Enospc -> "no space left on device"
+            _ -> "file write error"
+          }
+          Error(error.AgentsFileWriteFailed(path, reason))
+        }
+        Ok(args_result) -> {
+          // Use cli_opts.cli_path if provided, otherwise discover via PATH
+          let runner_result = case cli_opts.cli_path {
+            Some(custom_path) ->
+              bidir_runner.start_with_path(custom_path, args_result.args)
+            None -> bidir_runner.start(args_result.args)
+          }
+          // Clean up temp file immediately after runner starts
+          // (file is read by CLI on spawn, safe to delete now)
+          case args_result.cleanup_file {
+            Some(path) -> cli.cleanup_agents_file(path)
+            None -> Nil
+          }
+          // Return runner with no cleanup (already cleaned)
+          case runner_result {
+            Ok(runner) -> Ok(#(runner, None))
+            Error(err) -> Error(err)
+          }
+        }
       }
     }
   }
 
   case runner_result {
     Error(err) -> Error(err)
-    Ok(runner) -> {
+    Ok(#(runner, _cleanup)) -> {
       // Build StartConfig from BidirOptions using default_config + record update
       let default_timeout = case bidir_opts.timeout_ms {
         Some(ms) -> ms
