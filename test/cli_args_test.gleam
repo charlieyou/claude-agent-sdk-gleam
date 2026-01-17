@@ -1,7 +1,8 @@
 /// Tests for CLI argument building from QueryOptions.
 import claude_agent_sdk/internal/cli
 import claude_agent_sdk/options.{
-  AcceptEdits, BypassPermissions, Plan, default_options,
+  type BidirOptions, AcceptEdits, BidirOptions, BypassPermissions, Plan,
+  bidir_options, cli_options, default_options,
   with_allowed_tools_query as with_allowed_tools,
   with_append_system_prompt_query as with_append_system_prompt,
   with_continue_query as with_continue,
@@ -14,6 +15,7 @@ import claude_agent_sdk/options.{
   with_system_prompt_query as with_system_prompt,
 }
 import gleam/list
+import gleam/option.{Some}
 import gleam/string
 import gleeunit/should
 
@@ -326,5 +328,125 @@ pub fn combined_options_test() {
   assert_contains(args, "--print")
   assert_contains(args, "--output-format")
   assert_contains(args, "stream-json")
+  assert_contains(args, "--verbose")
+}
+
+// =============================================================================
+// Tests for build_bidir_cli_args_new with BidirOptions
+// =============================================================================
+
+/// Helper to build bidir args with default CLI options
+fn build_bidir_args(bidir_opts: BidirOptions) -> List(String) {
+  cli.build_bidir_cli_args_new(cli_options(), bidir_opts)
+}
+
+/// Default bidir options should not emit extra flags
+pub fn bidir_default_options_test() {
+  let args = build_bidir_args(bidir_options())
+
+  // Fixed bidir args should be present
+  assert_contains(args, "--output-format")
+  assert_contains(args, "stream-json")
+  assert_contains(args, "--input-format")
+  assert_contains(args, "--verbose")
+
+  // No extra BidirOptions flags
+  assert_not_contains(args, "--include-partial-messages")
+  assert_not_contains(args, "--fork-session")
+  assert_not_contains(args, "--setting-sources")
+  assert_not_contains(args, "--max-thinking-tokens")
+}
+
+/// include_partial_messages=true emits --include-partial-messages flag
+pub fn bidir_include_partial_messages_test() {
+  let opts = BidirOptions(..bidir_options(), include_partial_messages: True)
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--include-partial-messages")
+}
+
+/// include_partial_messages=false does not emit flag
+pub fn bidir_include_partial_messages_false_test() {
+  let opts = BidirOptions(..bidir_options(), include_partial_messages: False)
+  let args = build_bidir_args(opts)
+
+  assert_not_contains(args, "--include-partial-messages")
+}
+
+/// fork_session emits --fork-session with session ID
+pub fn bidir_fork_session_test() {
+  let opts = BidirOptions(..bidir_options(), fork_session: Some("abc-123"))
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--fork-session")
+  assert_contains(args, "abc-123")
+
+  // Verify flag and value are adjacent by checking the joined args string
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "--fork-session abc-123") |> should.be_true
+}
+
+/// setting_sources emits --setting-sources with comma-separated list
+pub fn bidir_setting_sources_test() {
+  let opts =
+    BidirOptions(
+      ..bidir_options(),
+      setting_sources: Some(["user", "project", "global"]),
+    )
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--setting-sources")
+  assert_contains(args, "user,project,global")
+}
+
+/// max_thinking_tokens emits --max-thinking-tokens with integer value
+pub fn bidir_max_thinking_tokens_test() {
+  let opts = BidirOptions(..bidir_options(), max_thinking_tokens: Some(16_384))
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--max-thinking-tokens")
+  assert_contains(args, "16384")
+}
+
+/// output_format overrides default stream-json
+pub fn bidir_output_format_override_test() {
+  let opts = BidirOptions(..bidir_options(), output_format: Some("text"))
+  let args = build_bidir_args(opts)
+
+  assert_contains(args, "--output-format")
+  assert_contains(args, "text")
+
+  // Count occurrences of stream-json - should only appear for input-format
+  let stream_json_count =
+    list.filter(args, fn(a) { a == "stream-json" }) |> list.length
+  stream_json_count |> should.equal(1)
+}
+
+/// Combined BidirOptions produces all expected flags
+pub fn bidir_combined_options_test() {
+  let opts =
+    BidirOptions(
+      ..bidir_options(),
+      include_partial_messages: True,
+      fork_session: Some("session-xyz"),
+      setting_sources: Some(["user", "project"]),
+      max_thinking_tokens: Some(8192),
+      output_format: Some("json"),
+    )
+  let args = build_bidir_args(opts)
+
+  // All BidirOptions flags should be present
+  assert_contains(args, "--include-partial-messages")
+  assert_contains(args, "--fork-session")
+  assert_contains(args, "session-xyz")
+  assert_contains(args, "--setting-sources")
+  assert_contains(args, "user,project")
+  assert_contains(args, "--max-thinking-tokens")
+  assert_contains(args, "8192")
+  assert_contains(args, "--output-format")
+  assert_contains(args, "json")
+
+  // Fixed bidir args should still be present
+  assert_contains(args, "--input-format")
   assert_contains(args, "--verbose")
 }

@@ -887,7 +887,7 @@ pub fn start_session_new(
   let runner_result = case bidir_opts.bidir_runner_factory {
     Some(factory) -> Ok(factory())
     None -> {
-      let args = cli.build_bidir_cli_args_new(cli_opts)
+      let args = cli.build_bidir_cli_args_new(cli_opts, bidir_opts)
       // Use cli_opts.cli_path if provided, otherwise discover via PATH
       case cli_opts.cli_path {
         Some(custom_path) -> bidir_runner.start_with_path(custom_path, args)

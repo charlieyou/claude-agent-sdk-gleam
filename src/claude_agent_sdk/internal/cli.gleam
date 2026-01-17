@@ -7,8 +7,8 @@ import claude_agent_sdk/internal/port_io.{
   type Port, Data, Eof, ExitStatus, Timeout,
 }
 import claude_agent_sdk/options.{
-  type CliOptions, type PermissionMode, type QueryOptions, AcceptEdits,
-  BypassPermissions, Plan,
+  type BidirOptions, type CliOptions, type PermissionMode, type QueryOptions,
+  AcceptEdits, BypassPermissions, Plan,
 }
 import gleam/bit_array
 import gleam/dict
@@ -404,17 +404,57 @@ pub fn build_cli_args_new(options: CliOptions, prompt: String) -> List(String) {
   build_args_with_base_cli(base_args, options, Some(prompt))
 }
 
-/// Build CLI arguments for bidirectional mode from CliOptions.
+/// Build CLI arguments for bidirectional mode from CliOptions and BidirOptions.
 /// Includes --input-format stream-json in addition to all standard args.
-pub fn build_bidir_cli_args_new(options: CliOptions) -> List(String) {
+/// BidirOptions fields that affect CLI args are also emitted.
+pub fn build_bidir_cli_args_new(
+  cli_options: CliOptions,
+  bidir_options: BidirOptions,
+) -> List(String) {
+  // Start with base args, but output_format may override stream-json
+  let output_format = case bidir_options.output_format {
+    Some(fmt) -> fmt
+    None -> "stream-json"
+  }
   let base_args = [
     "--output-format",
-    "stream-json",
+    output_format,
     "--input-format",
     "stream-json",
     "--verbose",
   ]
-  build_args_with_base_cli(base_args, options, None)
+
+  // Build args from CliOptions first
+  let args = build_args_with_base_cli(base_args, cli_options, None)
+
+  // Add BidirOptions fields
+  // include_partial_messages: boolean flag (no value)
+  let args = case bidir_options.include_partial_messages {
+    True -> list.append(args, ["--include-partial-messages"])
+    False -> args
+  }
+
+  // fork_session: session ID string
+  let args = case bidir_options.fork_session {
+    Some(session_id) -> list.append(args, ["--fork-session", session_id])
+    None -> args
+  }
+
+  // setting_sources: comma-separated list
+  let args = case bidir_options.setting_sources {
+    Some(sources) ->
+      list.append(args, ["--setting-sources", string.join(sources, ",")])
+    None -> args
+  }
+
+  // max_thinking_tokens: integer value
+  let args = case bidir_options.max_thinking_tokens {
+    Some(tokens) ->
+      list.append(args, ["--max-thinking-tokens", int.to_string(tokens)])
+    None -> args
+  }
+
+  args
 }
 
 /// Internal helper to build CLI arguments from CliOptions.
