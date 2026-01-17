@@ -1,4 +1,4 @@
-/// E2E Tests for Offline Error Handling (SDK-62 to SDK-64).
+/// Integration Tests for Offline Error Handling (SDK-62 to SDK-64).
 ///
 /// These tests exercise error handling using mock runners - no real CLI calls.
 /// They verify graceful handling of network-level failures without API costs.
@@ -11,7 +11,7 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// gleam test -- --only sdk_error_offline
+/// gleam test
 /// ```
 import claude_agent_sdk
 import claude_agent_sdk/error.{

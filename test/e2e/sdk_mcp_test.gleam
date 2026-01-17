@@ -18,6 +18,7 @@ import claude_agent_sdk
 import claude_agent_sdk/error.{error_to_string}
 import e2e/helpers.{skip_if_no_e2e}
 import gleam/io
+import gleam/int
 import gleam/json
 import gleam/string
 import gleeunit/should
@@ -38,12 +39,21 @@ pub fn sdk_50_mcp_config_test_() {
     Ok(Nil) -> {
       let ctx = helpers.new_test_context("sdk_50_mcp_config")
 
+      let helpers.TestContext(test_id: test_id, ..) = ctx
+      let mcp_path =
+        "artifacts/e2e/"
+        <> test_id
+        <> "-"
+        <> int.to_string(helpers.get_monotonic_ms())
+        <> "-mcp.json"
+      let mcp_json =
+        "{\"mcpServers\":{\"echo\":{\"command\":\"sh\",\"args\":[\"-c\",\"exit 0\"]}}}"
+      let _ = helpers.write_text_file(mcp_path, mcp_json)
+
       let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
-        |> claude_agent_sdk.with_mcp_config(
-          "test/fixtures/mcp-echo-server.json",
-        )
+        |> claude_agent_sdk.with_mcp_config(mcp_path)
         |> claude_agent_sdk.with_max_turns(1)
 
       let ctx = helpers.test_step(ctx, "execute_query")
@@ -88,12 +98,21 @@ pub fn sdk_51_mcp_tools_test_() {
     Ok(Nil) -> {
       let ctx = helpers.new_test_context("sdk_51_mcp_tools")
 
+      let helpers.TestContext(test_id: test_id, ..) = ctx
+      let mcp_path =
+        "artifacts/e2e/"
+        <> test_id
+        <> "-"
+        <> int.to_string(helpers.get_monotonic_ms())
+        <> "-mcp.json"
+      let mcp_json =
+        "{\"mcpServers\":{\"echo\":{\"command\":\"sh\",\"args\":[\"-c\",\"exit 0\"]}}}"
+      let _ = helpers.write_text_file(mcp_path, mcp_json)
+
       let ctx = helpers.test_step(ctx, "configure_options")
       let opts =
         claude_agent_sdk.default_options()
-        |> claude_agent_sdk.with_mcp_config(
-          "test/fixtures/mcp-echo-server.json",
-        )
+        |> claude_agent_sdk.with_mcp_config(mcp_path)
         |> claude_agent_sdk.with_max_turns(1)
 
       let ctx = helpers.test_step(ctx, "execute_query")
@@ -140,12 +159,18 @@ pub fn sdk_52_mcp_failure_test_() {
     Ok(Nil) -> {
       let ctx = helpers.new_test_context("sdk_52_mcp_failure")
 
+      let helpers.TestContext(test_id: test_id, ..) = ctx
+      let bad_path =
+        "artifacts/e2e/"
+        <> test_id
+        <> "-"
+        <> int.to_string(helpers.get_monotonic_ms())
+        <> "-missing-mcp.json"
+
       let ctx = helpers.test_step(ctx, "configure_bad_mcp_path")
       let opts =
         claude_agent_sdk.default_options()
-        |> claude_agent_sdk.with_mcp_config(
-          "test/fixtures/nonexistent-mcp.json",
-        )
+        |> claude_agent_sdk.with_mcp_config(bad_path)
         |> claude_agent_sdk.with_max_turns(1)
 
       let ctx = helpers.test_step(ctx, "execute_query_with_bad_config")

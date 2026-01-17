@@ -9,7 +9,7 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// gleam test -- --only sdk_bidir
+/// gleam test
 /// ```
 import gleam/dict
 import gleam/dynamic.{type Dynamic}

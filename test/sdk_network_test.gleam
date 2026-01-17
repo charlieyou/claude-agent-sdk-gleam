@@ -1,4 +1,4 @@
-/// Unit Tests for SDK Error Handling of Authentication/Credential Failures.
+/// Integration Tests for SDK Error Handling of Authentication/Credential Failures.
 ///
 /// SCOPE: These tests validate SDK logic ONLY - how the SDK interprets
 /// process exit codes and maps them to error types. They do NOT test
@@ -22,7 +22,7 @@
 ///
 /// ## Running Tests
 /// ```bash
-/// gleam test -- --e2e
+/// gleam test
 /// ```
 import claude_agent_sdk
 import claude_agent_sdk/error.{ProcessError}

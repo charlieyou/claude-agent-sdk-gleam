@@ -396,6 +396,11 @@ pub fn log_test_complete(ctx: TestContext, success: Bool, notes: String) -> Nil 
   ])
 }
 
+/// Write a single-line text file (creates or appends).
+pub fn write_text_file(path: String, contents: String) -> Result(Nil, String) {
+  append_line(path, contents)
+}
+
 /// Log error summary for failed tests (captures key error details).
 pub fn log_error_summary(
   ctx: TestContext,

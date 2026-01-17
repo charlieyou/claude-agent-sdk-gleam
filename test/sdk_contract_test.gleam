@@ -1,4 +1,4 @@
-/// Contract validation tests for SDK decoders against golden transcripts.
+/// Integration contract validation tests for SDK decoders against golden transcripts.
 ///
 /// These tests verify that SDK decoders can parse actual CLI output format,
 /// detecting any drift in the output structure between CLI versions.

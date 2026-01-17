@@ -141,22 +141,11 @@ Validates MCP server configuration:
 - Server registration
 - Tool discovery via MCP
 
-## Offline Protocol Tests (Mock-Based)
+## Offline Protocol Tests (Integration)
 
-These tests use mock runners for deterministic testing and run without `--e2e`:
-
-### SDK Bidir Tests (`test/e2e/sdk_bidir_test.gleam`)
-
-Tests bidirectional protocol logic with `mock_bidir_runner`:
-- Session creation and state transitions
-- Control message round-trips
-- Error handling for invalid operations
-
-### SDK Error Offline Tests (`test/e2e/sdk_error_offline_test.gleam`)
-
-Tests error handling with `test_runner`:
-- Network error simulation
-- Malformed response handling
+Mock-based protocol tests live under `test/` and are intentionally excluded
+from the real CLI E2E suite. They run with `gleam test` and validate
+deterministic protocol logic without requiring the Claude CLI.
 
 ## How Skipping Works
 

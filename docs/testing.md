@@ -6,10 +6,9 @@ coverage thresholds, and how to run and interpret each test category.
 ## No-Mock Policy
 
 This SDK uses a **strict no-mock policy** for production code paths tested via
-E2E tests with the real Claude CLI. However, some test files in `test/e2e/` use
-mock runners (`test_runner`, `mock_bidir_runner`) to test protocol logic in
-isolation without requiring CLI access. These mock-based tests are categorized
-as "offline tests" rather than true E2E tests.
+E2E tests with the real Claude CLI. Mock runners (`test_runner`,
+`mock_bidir_runner`) are used only in integration-style tests outside the E2E
+suite to validate protocol logic in isolation without requiring CLI access.
 
 ### Disallowed in E2E Tests
 
@@ -51,14 +50,10 @@ Tests that use real port_ffi against deterministic OS commands:
 
 These run by default with `gleam test`.
 
-### Offline Protocol Tests
+### Offline Protocol Tests (Integration)
 
-Tests in `test/e2e/` that use mock runners for deterministic protocol testing:
-
-- `sdk_bidir_test.gleam` - Bidirectional protocol with mock runner
-- `sdk_error_offline_test.gleam` - Error handling with mock runner
-
-These run by default with `gleam test` (no `--e2e` flag required).
+Mock-based protocol tests live in `test/` (not `test/e2e/`) and run as
+integration-style tests for deterministic behavior without real CLI access.
 
 ### Integration Tests
 
