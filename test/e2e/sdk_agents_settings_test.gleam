@@ -28,6 +28,7 @@ import gleam/io
 import gleam/json
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/string
 import gleeunit/should
 import simplifile
 
@@ -104,16 +105,22 @@ fn start_session_with_args(
   }
 }
 
-/// Build bidir CLI args from options, returning args list or error string.
+/// Result of building args, including optional cleanup file for temp agent files.
+type ArgsResult {
+  ArgsResult(args: List(String), cleanup_file: option.Option(String))
+}
+
+/// Build bidir CLI args from options, returning args and cleanup_file or error.
 fn build_args_from_options(
   bidir_opts: options.BidirOptions,
-) -> Result(List(String), String) {
+) -> Result(ArgsResult, String) {
   let cli_opts =
     cli_options()
     |> options.with_max_turns(1)
 
   case cli.build_bidir_cli_args_new(cli_opts, bidir_opts) {
-    Ok(result) -> Ok(result.args)
+    Ok(result) ->
+      Ok(ArgsResult(args: result.args, cleanup_file: result.cleanup_file))
     Error(cli.AgentsFileWriteError(path, reason)) ->
       Error(
         "Failed to write agents to "
@@ -121,6 +128,17 @@ fn build_args_from_options(
         <> ": "
         <> simplifile_error_to_string(reason),
       )
+  }
+}
+
+/// Cleanup temp agent file if one was created.
+fn cleanup_agents_file(cleanup_file: option.Option(String)) -> Nil {
+  case cleanup_file {
+    Some(path) -> {
+      let _ = simplifile.delete(path)
+      Nil
+    }
+    None -> Nil
   }
 }
 
@@ -179,7 +197,7 @@ pub fn sdk_ast_01_single_agent_bidir_e2e_test_() {
               helpers.log_error(ctx, "args_build_failed", err)
               should.fail()
             }
-            Ok(args) -> {
+            Ok(ArgsResult(args, cleanup_file)) -> {
               // Verify --agents flag is present
               list.contains(args, "--agents") |> should.be_true
               helpers.log_info_with(ctx, "args_built", [
@@ -190,6 +208,7 @@ pub fn sdk_ast_01_single_agent_bidir_e2e_test_() {
               helpers.acquire_query_lock()
               case start_session_with_args(args, "Say hello briefly") {
                 Error(err) -> {
+                  cleanup_agents_file(cleanup_file)
                   helpers.release_query_lock()
                   helpers.log_error(ctx, "session_start_failed", err)
                   // CLI may not support --agents yet, treat as skip
@@ -205,6 +224,7 @@ pub fn sdk_ast_01_single_agent_bidir_e2e_test_() {
                     Ok(Nil) -> {
                       helpers.log_info(ctx, "session_running")
                       let _ = actor.stop_session(session)
+                      cleanup_agents_file(cleanup_file)
                       helpers.release_query_lock()
                       helpers.log_test_complete(
                         ctx,
@@ -214,6 +234,7 @@ pub fn sdk_ast_01_single_agent_bidir_e2e_test_() {
                     }
                     Error(state) -> {
                       let _ = actor.stop_session(session)
+                      cleanup_agents_file(cleanup_file)
                       helpers.release_query_lock()
                       helpers.log_error(
                         ctx,
@@ -280,7 +301,7 @@ pub fn sdk_ast_02_setting_sources_bidir_e2e_test_() {
               helpers.log_error(ctx, "args_build_failed", err)
               should.fail()
             }
-            Ok(args) -> {
+            Ok(ArgsResult(args, cleanup_file)) -> {
               // Verify --setting-sources flag is present
               list.contains(args, "--setting-sources") |> should.be_true
               list.contains(args, "user,project") |> should.be_true
@@ -290,6 +311,7 @@ pub fn sdk_ast_02_setting_sources_bidir_e2e_test_() {
               helpers.acquire_query_lock()
               case start_session_with_args(args, "Say hello briefly") {
                 Error(err) -> {
+                  cleanup_agents_file(cleanup_file)
                   helpers.release_query_lock()
                   helpers.log_error(ctx, "session_start_failed", err)
                   helpers.log_test_complete(
@@ -304,6 +326,7 @@ pub fn sdk_ast_02_setting_sources_bidir_e2e_test_() {
                     Ok(Nil) -> {
                       helpers.log_info(ctx, "session_running")
                       let _ = actor.stop_session(session)
+                      cleanup_agents_file(cleanup_file)
                       helpers.release_query_lock()
                       helpers.log_test_complete(
                         ctx,
@@ -313,6 +336,7 @@ pub fn sdk_ast_02_setting_sources_bidir_e2e_test_() {
                     }
                     Error(state) -> {
                       let _ = actor.stop_session(session)
+                      cleanup_agents_file(cleanup_file)
                       helpers.release_query_lock()
                       helpers.log_error(
                         ctx,
@@ -374,7 +398,7 @@ pub fn sdk_ast_03_combined_agents_settings_bidir_e2e_test_() {
               helpers.log_error(ctx, "args_build_failed", err)
               should.fail()
             }
-            Ok(args) -> {
+            Ok(ArgsResult(args, cleanup_file)) -> {
               // Verify both flags present
               list.contains(args, "--agents") |> should.be_true
               list.contains(args, "--setting-sources") |> should.be_true
@@ -384,6 +408,7 @@ pub fn sdk_ast_03_combined_agents_settings_bidir_e2e_test_() {
               helpers.acquire_query_lock()
               case start_session_with_args(args, "Say hello briefly") {
                 Error(err) -> {
+                  cleanup_agents_file(cleanup_file)
                   helpers.release_query_lock()
                   helpers.log_error(ctx, "session_start_failed", err)
                   helpers.log_test_complete(
@@ -398,6 +423,7 @@ pub fn sdk_ast_03_combined_agents_settings_bidir_e2e_test_() {
                     Ok(Nil) -> {
                       helpers.log_info(ctx, "session_running")
                       let _ = actor.stop_session(session)
+                      cleanup_agents_file(cleanup_file)
                       helpers.release_query_lock()
                       helpers.log_test_complete(
                         ctx,
@@ -407,6 +433,7 @@ pub fn sdk_ast_03_combined_agents_settings_bidir_e2e_test_() {
                     }
                     Error(state) -> {
                       let _ = actor.stop_session(session)
+                      cleanup_agents_file(cleanup_file)
                       helpers.release_query_lock()
                       helpers.log_error(
                         ctx,
@@ -457,7 +484,7 @@ pub fn sdk_ast_04_agent_serialization_test_() {
           helpers.log_error(ctx, "serialization_failed", err)
           should.fail()
         }
-        Ok(args) -> {
+        Ok(ArgsResult(args, cleanup_file)) -> {
           // Verify --agents is present
           list.contains(args, "--agents") |> should.be_true
 
@@ -479,6 +506,7 @@ pub fn sdk_ast_04_agent_serialization_test_() {
               should.fail()
             }
           }
+          cleanup_agents_file(cleanup_file)
         }
       }
 
@@ -513,12 +541,10 @@ fn find_value_after_flag_loop(
   }
 }
 
-@external(erlang, "string", "find")
-fn string_find(haystack: String, needle: String) -> String
-
+/// Check if haystack contains needle.
+/// Uses gleam/string.contains which correctly handles the BEAM type system.
 fn has_substring(haystack: String, needle: String) -> Bool {
-  let result = string_find(haystack, needle)
-  result != "nomatch" && result != ""
+  string.contains(haystack, needle)
 }
 
 // ============================================================================
@@ -547,11 +573,12 @@ pub fn sdk_ast_05_setting_sources_serialization_test_() {
           helpers.log_error(ctx, "serialization_failed", err)
           should.fail()
         }
-        Ok(args) -> {
+        Ok(ArgsResult(args, cleanup_file)) -> {
           // Verify --setting-sources is present with comma-separated value
           list.contains(args, "--setting-sources") |> should.be_true
           list.contains(args, "user,project,global") |> should.be_true
           helpers.log_info(ctx, "setting_sources_serialized")
+          cleanup_agents_file(cleanup_file)
         }
       }
 
@@ -699,6 +726,129 @@ pub fn sdk_ast_08_with_agent_appends_test_() {
       }
 
       helpers.log_test_complete(ctx, True, "with_agent appends test passed")
+    }
+  }
+}
+
+// ============================================================================
+// SDK-AST-09: Filesystem-Based Agent Loading (>3 agents)
+// ============================================================================
+
+/// SDK-AST-09: Verify agents >3 are serialized to temp file and cleaned up.
+/// When >3 agents are configured, they are written to a temp file with @path
+/// syntax. This test verifies the file-based serialization path and cleanup.
+pub fn sdk_ast_09_filesystem_agent_loading_test_() {
+  use <- helpers.with_e2e_timeout()
+  case helpers.skip_if_no_e2e() {
+    Error(msg) -> {
+      io.println(msg)
+      Nil
+    }
+    Ok(Nil) -> {
+      let ctx = helpers.new_test_context("sdk_ast_09_filesystem_agent_loading")
+      let ctx = helpers.test_step(ctx, "configure_four_agents")
+
+      // Create 4 agents (above threshold of 3) to trigger file-based serialization
+      let agent1 = agent_config("agent1", "First agent", "You are agent 1.")
+      let agent2 = agent_config("agent2", "Second agent", "You are agent 2.")
+      let agent3 = agent_config("agent3", "Third agent", "You are agent 3.")
+      let agent4 = agent_config("agent4", "Fourth agent", "You are agent 4.")
+
+      let bidir_opts =
+        bidir_options()
+        |> with_agents([agent1, agent2, agent3, agent4])
+
+      let ctx = helpers.test_step(ctx, "build_cli_args")
+      case build_args_from_options(bidir_opts) {
+        Error(err) -> {
+          helpers.log_error(ctx, "serialization_failed", err)
+          should.fail()
+        }
+        Ok(ArgsResult(args, cleanup_file)) -> {
+          // Verify --agents flag is present
+          list.contains(args, "--agents") |> should.be_true
+
+          // Verify file-based serialization was used (cleanup_file should be Some)
+          let ctx = helpers.test_step(ctx, "verify_temp_file")
+          case cleanup_file {
+            Some(path) -> {
+              // Verify value uses @path syntax
+              let args_value = find_value_after_flag(args, "--agents")
+              case args_value {
+                Some(value) -> {
+                  // Value should start with @ for file-based agents
+                  string.starts_with(value, "@") |> should.be_true
+                  // Path in value should match cleanup_file
+                  string.contains(value, path) |> should.be_true
+                  helpers.log_info_with(ctx, "file_path_verified", [
+                    #("path", json.string(path)),
+                  ])
+                }
+                None -> {
+                  helpers.log_error(
+                    ctx,
+                    "no_agents_value",
+                    "Missing --agents value",
+                  )
+                  should.fail()
+                }
+              }
+
+              // Verify temp file exists and contains agent data
+              case simplifile.read(path) {
+                Ok(content) -> {
+                  // Verify file contains all 4 agents
+                  string.contains(content, "agent1") |> should.be_true
+                  string.contains(content, "agent2") |> should.be_true
+                  string.contains(content, "agent3") |> should.be_true
+                  string.contains(content, "agent4") |> should.be_true
+                  helpers.log_info(ctx, "temp_file_content_verified")
+                }
+                Error(_) -> {
+                  helpers.log_error(
+                    ctx,
+                    "temp_file_read_failed",
+                    "Could not read temp file",
+                  )
+                  should.fail()
+                }
+              }
+
+              // Clean up temp file
+              cleanup_agents_file(cleanup_file)
+
+              // Verify cleanup worked
+              case simplifile.is_file(path) {
+                Ok(True) -> {
+                  helpers.log_error(
+                    ctx,
+                    "cleanup_failed",
+                    "Temp file still exists",
+                  )
+                  should.fail()
+                }
+                _ -> {
+                  helpers.log_info(ctx, "cleanup_verified")
+                }
+              }
+            }
+            None -> {
+              helpers.log_error(
+                ctx,
+                "no_cleanup_file",
+                "Expected cleanup_file for >3 agents",
+              )
+              should.fail()
+            }
+          }
+
+          helpers.log_test_complete(
+            ctx,
+            True,
+            "Filesystem agent loading test passed",
+          )
+        }
+      }
     }
   }
 }
