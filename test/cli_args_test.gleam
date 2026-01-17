@@ -816,3 +816,28 @@ pub fn bidir_plugins_and_sandbox_combined_test() {
   string.contains(args_str, "\"type\":\"docker\"") |> should.be_true
   string.contains(args_str, "\"privileged\":false") |> should.be_true
 }
+
+/// Regression test: sandbox with extra_args containing --settings should produce single merged --settings
+pub fn bidir_sandbox_with_extra_args_settings_test() {
+  // Create CLI options with extra_args that includes --settings
+  let cli_opts =
+    CliOptions(..cli_options(), extra_args: Some(["--settings", "{\"foo\":1}"]))
+
+  // Create bidir options with sandbox
+  let sandbox = sandbox_config("docker")
+  let bidir_opts = BidirOptions(..bidir_options(), sandbox: Some(sandbox))
+
+  let args = build_bidir_args_with_cli(cli_opts, bidir_opts)
+
+  // Should only have ONE --settings flag (the merged one with sandbox)
+  let settings_count =
+    list.filter(args, fn(a) { a == "--settings" }) |> list.length
+  settings_count |> should.equal(1)
+
+  // The single --settings should contain both foo and sandbox
+  let args_str = string.join(args, " ")
+  string.contains(args_str, "\"sandbox\"") |> should.be_true
+  string.contains(args_str, "\"type\":\"docker\"") |> should.be_true
+  // Note: foo from extra_args should be merged in
+  string.contains(args_str, "\"foo\":1") |> should.be_true
+}

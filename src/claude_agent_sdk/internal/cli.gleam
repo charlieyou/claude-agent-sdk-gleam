@@ -14,6 +14,7 @@ import claude_agent_sdk/options.{
 import gleam/bit_array
 import gleam/dict
 import gleam/dynamic.{type Dynamic}
+import gleam/dynamic/decode
 import gleam/float
 import gleam/int
 import gleam/json.{type Json}
@@ -470,10 +471,10 @@ pub fn build_bidir_cli_args_new(
   }
 
   // sandbox: merge into settings JSON
-  // If sandbox is present, we need to merge it with any existing settings
+  // If sandbox is present, we need to merge it with ALL existing --settings flags
+  // (including those from cli_options.settings and extra_args)
   let args = case bidir_options.sandbox {
-    Some(sandbox) ->
-      merge_sandbox_into_args(args, sandbox, cli_options.settings)
+    Some(sandbox) -> merge_sandbox_into_args(args, sandbox)
     None -> args
   }
 
@@ -645,34 +646,75 @@ fn sandbox_config_to_json(sandbox: SandboxConfig) -> Json {
   json.object(list.append(base_pairs, config_pairs))
 }
 
-/// Merge sandbox config into CLI args, combining with existing settings if present.
-/// This removes any existing --settings flag and re-adds it with sandbox merged in.
+/// Merge sandbox config into CLI args, combining with ALL existing --settings.
+/// This extracts any --settings JSON from args (including from extra_args),
+/// merges them with sandbox, removes all --settings flags, and adds one merged --settings.
 fn merge_sandbox_into_args(
   args: List(String),
   sandbox: SandboxConfig,
-  existing_settings: Option(dict.Dict(String, Dynamic)),
 ) -> List(String) {
-  // Build the merged settings object
+  // Extract all --settings JSON values from args
+  let existing_settings_jsons = extract_settings_values(args, [])
+
+  // Build the sandbox JSON
   let sandbox_json = sandbox_config_to_json(sandbox)
 
-  // Start with existing settings or empty object
-  let base_pairs = case existing_settings {
-    Some(settings) ->
-      settings
-      |> dict.to_list
-      |> list.map(fn(pair) { #(pair.0, dynamic_to_json(pair.1)) })
-    None -> []
-  }
+  // Parse and merge all existing settings into a single list of key-value pairs
+  let merged_pairs =
+    list.fold(existing_settings_jsons, [], fn(acc, json_str) {
+      // Parse JSON and extract key-value pairs
+      case parse_json_object_keys(json_str) {
+        Ok(pairs) -> list.append(acc, pairs)
+        Error(_) -> acc
+      }
+    })
 
-  // Add sandbox to the settings
-  let merged_pairs = list.append(base_pairs, [#("sandbox", sandbox_json)])
-  let merged_json = json.object(merged_pairs) |> json.to_string
+  // Add sandbox to the merged settings
+  let final_pairs = list.append(merged_pairs, [#("sandbox", sandbox_json)])
+  let merged_json = json.object(final_pairs) |> json.to_string
 
-  // Remove any existing --settings flag and its value from args
+  // Remove all existing --settings flags and their values from args
   let args_without_settings = remove_flag_with_value(args, "--settings")
 
   // Add the merged --settings flag
   list.append(args_without_settings, ["--settings", merged_json])
+}
+
+/// Extract all values that follow --settings flags in the args list.
+fn extract_settings_values(
+  args: List(String),
+  acc: List(String),
+) -> List(String) {
+  case args {
+    [] -> list.reverse(acc)
+    ["--settings", value, ..rest] ->
+      extract_settings_values(rest, [value, ..acc])
+    [_, ..rest] -> extract_settings_values(rest, acc)
+  }
+}
+
+/// Parse a JSON object string and return key-value pairs as (String, Json).
+/// This is a simple parser for {"key": value, ...} format.
+fn parse_json_object_keys(
+  json_str: String,
+) -> Result(List(#(String, Json)), Nil) {
+  // Use gleam_json decoder to parse as dynamic, then extract dict
+  case json.parse(json_str, decode.dynamic) {
+    Ok(parsed_dyn) -> {
+      // Try to decode as a dict
+      case decode.run(parsed_dyn, decode.dict(decode.string, decode.dynamic)) {
+        Ok(parsed_dict) -> {
+          let pairs =
+            parsed_dict
+            |> dict.to_list
+            |> list.map(fn(pair) { #(pair.0, dynamic_to_json(pair.1)) })
+          Ok(pairs)
+        }
+        Error(_) -> Error(Nil)
+      }
+    }
+    Error(_) -> Error(Nil)
+  }
 }
 
 /// Remove a flag and its value from the args list.
